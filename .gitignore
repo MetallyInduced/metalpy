@@ -5,5 +5,10 @@ stdpts/*
 .idea/*
 */__pycache__/*
 
+*/models/*
+*/modeling/*
+*/output/*
+
 *.png
 *.vtr
+*.log
