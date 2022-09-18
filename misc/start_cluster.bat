@@ -1,0 +1,2 @@
+start cmd /k "D:\Apps\ProgramData\Miniconda3\Scripts\activate.bat mlsmi & dask-scheduler"
+start cmd /k "D:\Apps\ProgramData\Miniconda3\Scripts\activate.bat mlsmi & dask-worker tcp://yy.clind.tech:8786 --nthreads 1 --nworkers 4 --name pipi"
