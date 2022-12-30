@@ -1,5 +1,8 @@
-METAL Essential Tools and Libraries (Python)
-===========================
+<h1 align="center">
+<img src="./branding/logo/metalpylogo.png" width="300" alt="METALpy">
+</h1>
+
+-------------
 
 **METAL Essential Tools and Libraries (Python)**，简称**metalpy**，
 是用于SimPEG以及相关工作流的通用Python工具集，目前包含：
