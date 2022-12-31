@@ -3,6 +3,7 @@
 </h1>
 
 -------------
+![PyPI](https://img.shields.io/pypi/v/metalpy)
 
 **METAL Essential Tools and Libraries (Python)**，简称**metalpy**，
 是用于SimPEG以及相关工作流的通用Python工具集，目前包含：
