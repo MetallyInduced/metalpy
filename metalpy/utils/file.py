@@ -1,8 +1,9 @@
 import os
+import warnings
 from pathlib import Path
 from typing import Union
 
-from .type import ensure_as_iterable
+from .type import ensure_as_iterable, undefined
 
 PathLike = Union[str, os.PathLike]
 
@@ -129,18 +130,53 @@ def git_ignore_directory(path):
 
 
 def make_cache_file(name):
+    return os.fspath(make_cache_file_path(name))
+
+
+def make_cache_directory(name):
+    return os.fspath(make_cache_directory_path(name))
+
+
+def make_cache_file_path(name):
     cache_dir = Path('./.cache')
     ret = cache_dir / name
     ret = ret.absolute()
     ensure_filepath(ret)
     git_ignore_directory(cache_dir)
-    return os.fspath(ret)
+    return ret
 
 
-def make_cache_directory(name):
+def make_cache_directory_path(name):
     cache_dir = Path('./.cache')
     ret = cache_dir / name
     ret = ret.absolute()
     ensure_dir(ret)
     git_ignore_directory(cache_dir)
-    return os.fspath(ret)
+    return ret
+
+
+def put_cache(key, content):
+    import cloudpickle
+    from metalpy.utils.dhash import dhash
+
+    file = make_cache_directory_path('cached') / dhash(key).hexdigest(32)
+    ensure_filepath(file)
+    with file.open('wb') as f:
+        cloudpickle.dump((key, content), f)
+
+
+def get_cache(key, default=undefined):
+    import cloudpickle
+    from metalpy.utils.dhash import dhash
+
+    file = make_cache_directory_path('cached') / dhash(key).hexdigest(32)
+    if file.exists():
+        with file.open('rb') as f:
+            try:
+                cache_key, content = cloudpickle.load(f)
+                if cache_key == key:
+                    return content
+            except Exception:
+                warnings.warn('Exception occurred when loading cache. Ignoring cached file.')
+
+    return default
