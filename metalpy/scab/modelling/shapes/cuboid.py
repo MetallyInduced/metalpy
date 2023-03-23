@@ -143,3 +143,11 @@ class Cuboid(Shape3D):
         import pyvista as pv
 
         return pv.Cube(bounds=np.asarray(self.local_bounds))
+
+    @property
+    def volume(self):
+        return np.prod(self.lengths)
+
+    @property
+    def area(self):
+        return 2 * (self.lengths * np.roll(self.lengths, 1)).sum()

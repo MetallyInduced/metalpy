@@ -326,6 +326,18 @@ class Shape3D(ABC):
         """
         return self.rotate(y, a, b, degrees=degrees, seq=seq, inplace=inplace)
 
+    @property
+    def volume(self):
+        """获取该几何体的体积
+        """
+        raise NotImplementedError()
+
+    @property
+    def area(self):
+        """获取该几何体的外表面积
+        """
+        raise NotImplementedError()
+
 
 def bounding_box_of(shapes: Iterable[Shape3D]):
     bounds = None

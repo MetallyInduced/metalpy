@@ -77,6 +77,10 @@ class Prism(Shape3D):
         self.z1 = max(z0, z1)
         self.verbose = verbose
 
+    @property
+    def h(self):
+        return self.z1 - self.z0
+
     def do_place(self, mesh_cell_centers, worker_id):
         # 优化: 只判断在xyz三轴边界框内的点
         p0 = np.asarray((*np.min(self.pts, axis=0), self.z0))
@@ -153,3 +157,25 @@ class Prism(Shape3D):
 
         shape = pv.PolyData(vertices.astype(np.float64), faces=faces)
         return shape
+
+    @property
+    def bottom_area(self):
+        s = 0
+        for vi in self.triangulated_vertices():
+            v = self.pts[vi]
+            si = np.abs(np.cross(v[1] - v[0], v[2] - v[0])) / 2
+            s += si
+
+        return s
+
+    @property
+    def volume(self):
+        return self.bottom_area * self.h
+
+    @property
+    def area(self):
+        ba = self.bottom_area
+        rolled_pts = np.roll(self.pts, 1, axis=0)
+        perimeter = np.linalg.norm(self.pts - rolled_pts, axis=1).sum()
+
+        return 2 * ba + perimeter * self.h

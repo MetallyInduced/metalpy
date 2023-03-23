@@ -93,3 +93,11 @@ class Ellipsoid(Shape3D):
         import pyvista as pv
 
         return pv.ParametricEllipsoid(*self.radii)
+
+    @property
+    def volume(self):
+        return np.pi * 4 / 3 * np.prod(self.radii)
+
+    @property
+    def area(self):
+        return np.pi * 4 / 3 * (self.radii * np.roll(self.radii, 1)).sum()

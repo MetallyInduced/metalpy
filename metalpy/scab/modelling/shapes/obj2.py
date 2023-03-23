@@ -199,3 +199,11 @@ class Obj2(Shape3D):
 
     def to_local_polydata(self):
         return pv.merge(self.models, merge_points=False).copy(deep=True)
+
+    @property
+    def volume(self):
+        return sum([m.volume for m in self.models])
+
+    @property
+    def area(self):
+        return sum([m.area for m in self.models])

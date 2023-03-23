@@ -12,13 +12,20 @@ def is_abs_distance_in(arr, x0, r):
 class Tunnel(Shape3D):
     def __init__(self, p0, r0, r1, L):
         """定义一个起始点在x0，内外圆半径r0和r1，向x方向延申长度为L的空心圆柱环
-        :param p0: 起始点，隧道的左中位置
-        :param r0: 内圆半径
-        :param r1: 外圆半径
-        :param L: 隧道长度
+
+        Parameters
+        ----------
+        p0
+            起始点，隧道的左中位置
+        r0
+            内圆半径
+        r1
+            外圆半径
+        L
+            隧道长度
         """
         super().__init__()
-        self.p0 = p0 = np.asarray(p0)
+        self.p0 = np.asarray(p0)
         self.r0 = r0
         self.r1 = r1
         self.L = L
@@ -90,3 +97,19 @@ class Tunnel(Shape3D):
         faces = np.c_[bottom_faces, top_faces, outer_side_faces, inner_side_faces].ravel()
 
         return pv.PolyData(np.c_[xs, ys, zs], faces=faces)
+
+    @property
+    def bottom_area(self):
+        return np.pi * (self.r1 ** 2 - self.r0 ** 2)
+
+    @property
+    def volume(self):
+        return self.bottom_area * self.L
+
+    @property
+    def area(self):
+        ba = self.bottom_area
+        p0 = 2 * np.pi * self.r0
+        p1 = 2 * np.pi * self.r1
+
+        return 2 * ba + (p0 + p1) * self.L
