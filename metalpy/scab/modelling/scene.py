@@ -1,6 +1,6 @@
 import copy
 import os.path
-from typing import Any, Union, Iterable
+from typing import Any, Union, Iterable, cast
 
 import numpy as np
 import tqdm
@@ -283,6 +283,26 @@ class Scene:
 
     @staticmethod
     def mesh_to_polydata(mesh, models: Union[np.ndarray, dict[str, np.ndarray]]):
+        """将给定网格转换为对应的PyVista网格实例，并绑定模型值
+
+        Parameters
+        ----------
+        mesh
+            待绑定的网格
+        models
+            待绑定的模型
+
+        Returns
+        -------
+        ret
+            绑定给定网格和模型的pyvista网格对象
+
+        Notes
+        -----
+        虽然名字为mesh_to_polydata，但他的返回值并不是pv.PolyData而是pv.RectilinearGrid
+        """
+        import pyvista as pv
+
         if not isinstance(models, dict):
             models = {'active': models}
         else:
@@ -292,7 +312,11 @@ class Scene:
             if models[key].dtype == bool:
                 models[key] = models[key].astype(np.int8)
 
-        grids = mesh.to_vtk(models=models)
+        # TensorMesh会转换为pv.RectilinearGrid
+        grids: pv.RectilinearGrid = cast(
+            pv.RectilinearGrid,
+            mesh.to_vtk(models=models)
+        )
 
         for key in models:
             # 将第一个model设为active

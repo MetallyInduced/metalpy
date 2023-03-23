@@ -144,17 +144,22 @@ class ModelledMesh:
         Parameters
         ----------
         scalars
-            需要导出的model名称，None代表全部导出
+            需要导出的模型名称，None代表全部导出
         extra_models
-            额外需要绑定的model
+            额外需要绑定的模型
         kwargs
-            额外需要绑定的model，但是以kwargs风格传入
+            额外需要绑定的模型，但是以kwargs风格传入
 
         Returns
         -------
         ret
-            包含指定的需要导出的model和额外model的pv.PolyData实例
+            包含指定的需要导出的模型和额外模型的pv.PolyData实例
+
+        Notes
+        -----
+        虽然名字为to_polydata，但他的返回值并不是pv.PolyData而是pv.RectilinearGrid
         """
+        import pyvista as pv
         from metalpy.scab.modelling import Scene
 
         if extra_models is not None:
@@ -183,7 +188,7 @@ class ModelledMesh:
 
         models[active_key] = self._ind_active
 
-        ret = Scene.mesh_to_polydata(self.base_mesh, models)
+        ret: pv.RectilinearGrid = Scene.mesh_to_polydata(self.base_mesh, models)
         ret.set_active_scalars(active_key)
 
         return ret
