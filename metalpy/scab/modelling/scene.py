@@ -24,7 +24,7 @@ class Scene:
     default_cache_dir = make_cache_directory('models')
     INACTIVE_BOOL = False
     INACTIVE_INT = 0
-    INACTIVE_FLOAT = np.nan
+    INACTIVE_FLOAT = 0
 
     def __init__(self):
         self.objects_layer = Layer()
@@ -131,7 +131,7 @@ class Scene:
             futures = []
             for i, worker in enumerate(executor.get_workers()):
                 futures.append(
-                    executor.submit(self._build_mesh_worker, self.layers, input_mesh.assign(worker),
+                    executor.submit(self._build_mesh_worker, tuple(self.layers), input_mesh.assign(worker),
                                     worker_id=i,
                                     show_modeling_progress=i == 0 if progress else False,
                                     worker=worker, )
@@ -401,6 +401,7 @@ class Scene:
         models = {}
 
         if show_modeling_progress:
+            layers = list(layers)
             progress = tqdm.tqdm(total=sum((len(layer) for layer in layers)),
                                  position=0, leave=False, ncols=80)
         else:

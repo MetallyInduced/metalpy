@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import warnings
+from typing import Iterable
 
 import numpy as np
 from discretize import TensorMesh
@@ -9,33 +10,36 @@ from metalpy.scab.modelling.object import Object
 
 
 class ModelledMesh:
-    def __init__(self, mesh: TensorMesh, models: dict[str, np.ndarray] | None = None, ind_active: np.ndarray = None):
+    def __init__(self,
+                 mesh: TensorMesh,
+                 models: dict[str, np.ndarray] | None = None,
+                 ind_active: np.ndarray = None,
+                 **kwargs: np.ndarray):
         from metalpy.scab.modelling import Scene
 
         self.base_mesh = mesh
 
-        if models is not None:
-            self._models = models.copy()
-        else:
-            self._models = {}
+        kwargs.update(models)
+        self._models = kwargs
 
         if ind_active is not None:
-            assert np.issubdtype(ind_active.dtype, np.integer), \
-                f'`ind_active` must be array of `bool` or `integer`. Got `{ind_active.dtype}`.'
             if ind_active.dtype == bool:
                 assert ind_active.shape[0] == self.n_cells, \
                     f'`ind_active` defines activeness for all mesh cells,' \
                     f' which must have same size with mesh cells.' \
                     f' Got {ind_active.shape[0]}, expected {self.n_cells}.'
+            else:
+                assert np.issubdtype(ind_active.dtype, np.integer), \
+                    f'`ind_active` must be array of `bool` or `integer`. Got `{ind_active.dtype}`.'
         else:
-            for key, model in models.items():
+            for key, model in kwargs.items():
                 assert model.shape[0] == self.n_cells, \
                     f'`ModelledMesh`\'s constructor expects models to contain all mesh cells\'s values' \
                     f' in order to build `active_index`.' \
                     f' Avoid this by either specifying `active_index` manually or' \
                     f' converting models["{key}"] to match all the mesh cells.' \
                     f' Got {model.shape[0]}, expected {self.n_cells}.'
-            ind_active = Scene.compute_active(models.values())
+            ind_active = Scene.compute_active(kwargs.values())
 
         if ind_active is None:
             ind_active = np.ones(mesh.n_cells, dtype=bool)
@@ -131,18 +135,46 @@ class ModelledMesh:
     def __contains__(self, item):
         return item in self._models
     
-    def to_polydata(self, extra_models: np.ndarray | dict[str, np.ndarray] | None = None):
+    def to_polydata(self,
+                    scalars: str | Iterable[str] | None = None,
+                    extra_models: np.ndarray | dict[str, np.ndarray] | None = None,
+                    **kwargs: np.ndarray):
+        """导出模型网格为PyVista模型
+
+        Parameters
+        ----------
+        scalars
+            需要导出的model名称，None代表全部导出
+        extra_models
+            额外需要绑定的model
+        kwargs
+            额外需要绑定的model，但是以kwargs风格传入
+
+        Returns
+        -------
+        ret
+            包含指定的需要导出的model和额外model的pv.PolyData实例
+        """
         from metalpy.scab.modelling import Scene
 
         if extra_models is not None:
             if not isinstance(extra_models, dict):
-                models = {'model': extra_models.copy()}
+                models = {'model': extra_models}
             else:
                 models = extra_models.copy()
         else:
             models = {}
 
-        models.update(self._models)
+        if scalars is None:
+            scalars = self._models.keys()
+        elif isinstance(scalars, str):
+            scalars = (scalars,)
+
+        for scalar in scalars:
+            models[scalar] = self._models[scalar]
+
+        for key in models:
+            models[key] = self.map_to_complete(models[key])
 
         active_key = 'ACTIVE'
         while active_key in models:
