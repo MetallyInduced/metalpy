@@ -1,6 +1,7 @@
 SimPEG >= 0.18.0
 Cython
 discretize
+pyproj
 
 # Distributed computing
 distributed

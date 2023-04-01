@@ -42,6 +42,7 @@ scab = [
     "pyvista",
     "taichi >= 1.3.0",
     "pympler",
+    "pyproj",
 ]
 complete = [
     "metalpy[scab, tests, docs]",
