@@ -253,6 +253,11 @@ class Scene(OSMFormat):
         for obj in self.objects:
             yield obj.shape
 
+    def filter(self, model):
+        for obj in self:
+            if model in obj.models:
+                yield obj
+
     def __len__(self):
         return sum((len(layer) for layer in self.layers))
 

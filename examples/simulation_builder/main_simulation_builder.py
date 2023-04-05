@@ -39,8 +39,7 @@ def main():
 
     # model and forward
     susceptibility = 3
-    model = np.ones(model_mesh.n_active_cells) * susceptibility
-    pred = simulation.dpred(model)
+    pred = simulation.dpred(model_mesh.model * susceptibility)
 
     # format output
     pred = format_pandas(pred, components, receiver_locations=obs)

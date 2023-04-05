@@ -10,6 +10,18 @@ from metalpy.scab.modelling.object import Object
 
 
 class ModelledMesh:
+    """
+    用于封装包含模型的网格。
+    mesh是基础网格，active_cells是有效网格的选择器。
+    其中总网格数为n_cells，active_cells选中的有效网格数为n_active_cells。
+
+    model根据映射关系，区分为active_model和complete_model。
+    其中:
+    active_model长度为n_active_cells，每个元素直接对应一个有效网格的模型值。
+    complete_model长度为n_cells，每个元素直接对应一个基础网格的模型值，其中无效网格的模型值为Scene.INACTIVE_{type}，
+    type为模型的数据类型。
+    """
+
     def __init__(self,
                  mesh: TensorMesh,
                  models: dict[str, np.ndarray] | None = None,
@@ -46,6 +58,12 @@ class ModelledMesh:
 
         self._ind_active = ind_active
         self._default_key = None
+
+    @property
+    def model(self):
+        """获取默认model（active形式）
+        """
+        return self.get_active_model()
 
     @property
     def active_cells(self):
@@ -180,6 +198,8 @@ class ModelledMesh:
 
         for key in models:
             models[key] = self.map_to_complete(models[key])
+
+        models.update(kwargs)
 
         active_key = 'ACTIVE'
         while active_key in models:

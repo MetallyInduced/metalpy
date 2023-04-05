@@ -52,6 +52,14 @@ class Object:
     def models(self, val: dict[str, Any]):
         self._models = val
 
+    @property
+    def model(self) -> Any:
+        return self.models[Object.DEFAULT_KEY]
+
+    @model.setter
+    def model(self, val: Any):
+        self.models[Object.DEFAULT_KEY] = val
+
     def items(self):
         for k, v in self.models.items():
             yield k, v
