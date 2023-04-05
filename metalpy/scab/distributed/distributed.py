@@ -28,6 +28,8 @@ class Distributed(Patch):
             import SimPEG.potential_fields.magnetics
             self.hijack_cls_and_relative(SimPEG.potential_fields.magnetics.simulation.Simulation3DIntegral,
                                          self._parallel_wrapper, executor=self.executor)
+            self.hijack_cls_and_relative(SimPEG.potential_fields.magnetics.sources.UniformBackgroundField,
+                                         self._lazy_wrapper)
             self.hijack_cls_and_relative(SimPEG.potential_fields.magnetics.sources.SourceField,
                                          self._lazy_wrapper)
             # Survey被人工重定向到了magnetics下，需要特殊处理

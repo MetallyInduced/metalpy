@@ -18,6 +18,7 @@ Notes
     实现方式为使用`_assembles`注解，将函数名注册到基类的_all_assemblers字典中，
     __new__时根据注册的类型名和函数名，获取实例的成员函数构建实例的_assemblers字典。
 """
+import functools
 import inspect
 import warnings
 from functools import lru_cache
@@ -62,17 +63,17 @@ class SimulationBuilder:
         self._patches.extend(patches)
 
     def build(self):
-        for name, assembler in self.get_assemblers():
-            key = self.args.find_arg_key(name)
-            if key is None:
-                continue
-
-            try:
-                self.args.get_bound_arg(key)
-            except KeyError:
-                self.args.bind_arg(key, assembler())
-
         with simpeg_patched(*self._patches):
+            for name, assembler in self.get_assemblers():
+                key = self.args.find_arg_key(name)
+                if key is None:
+                    continue
+
+                try:
+                    self.args.get_bound_arg(key)
+                except KeyError:
+                    self.args.bind_arg(key, assembler())
+
             try:
                 ret = self.args.call(reget_object(self.sim_cls))
                 return ret
@@ -122,12 +123,33 @@ class SimulationBuilder:
         return decorator
 
     @staticmethod
-    def _supplies(*keysets):
+    def _supplies(*keysets, allow_vars=False):
+        """指示该函数为对应参数的提供器。用户调用该函数时会为对应形参提供实参。
+        所修饰的函数会通过返回值为给定参数名提供参数，并会被包装为返回self的链式调用
+
+        Parameters
+        ----------
+        keysets
+            给定关键则，长度与返回值数匹配，每个元素可以是单个或者若干个参数名。
+            指示将对应位置的返回值绑定到对应的所有参数名下。
+        allow_vars
+            指示是否允许在目标函数固定参数中找不到对应参数时，将其绑定到目标的varkw上，默认为False
+
+        Returns
+        -------
+        wrapper
+            返回的组装器函数包装器，负责将修饰的函数注册为对应参数的提供者
+
+        Notes
+        -----
+        如果找不到给定的参数名，且allow_vars为False或目标不接受varkw，则抛出错误
+        """
         keysets = tuple((keyset,) if isinstance(keyset, str) else keyset for keyset in keysets)
 
         def decorator(func):
             SimulationBuilder._implies(*keysets)(func)
 
+            @functools.wraps(func)
             def wrapper(self, *args, **kwargs):
                 for keyset in keysets:
                     for key in keyset:
@@ -150,6 +172,7 @@ class SimulationBuilder:
                         if undefined == val:
                             continue
                         for key in keyset:
+                            key = self.args.find_arg_key(key, allow_vars=allow_vars)
                             self.args.bind_arg(key, val)
                     except KeyError:
                         pass
@@ -162,6 +185,19 @@ class SimulationBuilder:
 
     @staticmethod
     def _assembles(*keysets):
+        """指示该函数为对应参数的组装器，在指定形参缺失时由Builder系统调用该方法构造实参。
+
+        Parameters
+        ----------
+        keysets
+            给定关键则，长度与返回值数匹配，每个元素可以是单个或者若干个参数名。
+            指示将对应位置的返回值绑定到对应的所有参数名下。
+
+        Returns
+        -------
+        wrapper
+            返回的组装器函数包装器，负责将修饰的函数注册为对应参数的组装器
+        """
         keysets = tuple((keyset,) if isinstance(keyset, str) else keyset for keyset in keysets)
 
         def decorator(func):

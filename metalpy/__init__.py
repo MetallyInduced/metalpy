@@ -1,3 +1,6 @@
 from .version import __version__
 
-del version
+try:
+    del version
+except NameError:
+    pass

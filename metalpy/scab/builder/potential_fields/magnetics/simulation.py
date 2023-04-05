@@ -32,8 +32,11 @@ class Simulation3DIntegralBuilder(BasePFSimulationBuilder):
 
     @SimulationBuilder._assembles('survey')
     def _survey(self):
-        field = magnetics.sources.SourceField(
-            receiver_list=self._receiver_list, parameters=self._source_field
+        field = magnetics.sources.UniformBackgroundField(
+            receiver_list=self._receiver_list,
+            amplitude=self._source_field.strength,
+            inclination=self._source_field.inclination,
+            declination=self._source_field.declination,
         )
         survey = magnetics.survey.Survey(field)
 

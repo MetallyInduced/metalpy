@@ -23,7 +23,7 @@ def create_replacement(func, orig, executor, qualname=None, module_name=None):
         if module_name is not None:
             reassign_object_module(ret, module_name)
     else:
-        functools.wraps(orig)(ret)
+        functools.wraps(orig, updated=())(ret)
 
     return ret
 

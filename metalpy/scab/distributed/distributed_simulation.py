@@ -22,9 +22,10 @@ class DistributedSimulation(LazyClassFactory, BaseSimulation):
     def __init__(self,
                  patch,
                  simulation_class: BaseSimulation,
+                 *args,
                  survey: LazyClassFactory,
                  executor: Executor = None,
-                 *args, **kwargs):
+                 **kwargs):
         """
         Parameters
         ----------
@@ -62,7 +63,8 @@ class DistributedSimulation(LazyClassFactory, BaseSimulation):
 
         # 针对magnetics.simulation.Simulation3DIntegral实现
         # TODO: 引入来支持其它Simulation，TaskDividePolicy?
-        receiver_list = source_field.find_param(lambda k, v: k.startswith('receiver_'), remove=True)
+        receiver_list = source_field.find_param(lambda k, v: isinstance(k, str) and k.startswith('receiver_'),
+                                                remove=True)
 
         # 和外部共用receiver_list，防止被后文修改
         self.simulation = self.build_simulation(survey, source_field, receiver_list)
@@ -85,12 +87,12 @@ class DistributedSimulation(LazyClassFactory, BaseSimulation):
         self.parallelized_patch = patch
 
         # 在构造完本地代理类后劫持分派类的store_sensitivities参数，如果为disk，则改为ram，防止在远程端产生不必要的cache和路径冲突
-        self.store_sensitivities = get_or_default(self.kwargs, 'store_sensitivities', 'ram')
+        self.store_sensitivities = self.get('store_sensitivities', default='ram')
         if self.store_sensitivities == 'disk':
-            self.kwargs['store_sensitivities'] = 'ram'
+            self['store_sensitivities'] = 'ram'
         else:
-            self.kwargs['store_sensitivities'] = self.store_sensitivities
-        self.sensitivity_path = pop_or_default(self.kwargs, 'sensitivity_path', "./sensitivity/")
+            self['store_sensitivities'] = self.store_sensitivities
+        self.sensitivity_path = self.pop('sensitivity_path', default="./sensitivity/")
 
     @staticmethod
     def auto_decompress_simulation(sim, ind_future, mesh_future):
@@ -132,8 +134,7 @@ class DistributedSimulation(LazyClassFactory, BaseSimulation):
             compressed_act_ind = self.executor.scatter(compressed_act_ind)
             sim_delegate['ind_active'] = 0
 
-            mesh = sim_delegate['mesh']
-            del sim_delegate['mesh']
+            mesh = sim_delegate.find_param_by_name('mesh', remove=True)
             if isinstance(mesh, TensorMesh):
                 if asizeof(mesh.h) > 1024 * 1024:
                     compressed_mesh_h = [blosc2.pack_array2(h) for h in mesh.h]

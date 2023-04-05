@@ -14,7 +14,7 @@ class MissingArgException(ValueError):
         arg_sources = [f'`{s}`' for s in self.arg_sources]
         ni = max(len(arg_sources) - 1, 1)
         suppliers = " or ".join([", ".join(arg_sources[:ni]), *arg_sources[ni:]])
-        return f'Missing required arg `{self.arg_name}`' \
+        return f'Missing required arg `{self.arg_name}`,' \
                f' specify it with {suppliers}'
 
 

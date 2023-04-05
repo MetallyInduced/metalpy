@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import copy
 import inspect
 import warnings
-from typing import Callable, Any
+from typing import Callable, Any, Union
 
 from metalpy.utils.type import undefined
 
@@ -29,6 +30,9 @@ class Arg:
 class ArgSpecKey:
     def __init__(self, key):
         self.key = key
+
+
+IndexType = Union[str, int, Arg, ArgSpecKey]
 
 
 class ArgSpecs:
@@ -233,6 +237,9 @@ class ArgSpecs:
     def push_args(self, *args):
         self._mark_immutable()
 
+        if len(args) == 0:
+            return
+
         if not self.is_posargs_contiguous:
             raise RuntimeError('Pushing args to noncontiguous posargs is not allowed.')
 
@@ -243,7 +250,7 @@ class ArgSpecs:
             raise ValueError(f'Pushing too many values to fixed-length posargs[{self.n_posargs}]'
                              f' (`accepts_varargs` == False).')
 
-        n_non_varargs = max(n_seq_args + n_new_args - self.n_posargs, 0)
+        n_non_varargs = min(n_new_args, self.n_posargs - n_seq_args)
         for i, arg in zip(
             range(n_seq_args, n_seq_args + n_non_varargs),
             args[:n_non_varargs]
@@ -261,19 +268,28 @@ class ArgSpecs:
         for k, v in kwargs.items():
             self.bind_arg(k, v)
 
-    def bind_arg(self, name_or_index: str | int | ArgSpecKey, value):
+    def bind_arg(self, name_or_index: IndexType, value):
         self._mark_immutable()
 
-        name_or_index = self.find_arg_key(name_or_index, raises=True)
+        name_or_index = self.find_arg_key(name_or_index, raises=True, allow_vars=True)
         self._bind_or_get_value_unsafe(name_or_index, value)
 
-    def get_bound_arg(self, name_or_index: str | int | ArgSpecKey, default=undefined):
-        name_or_index = self.find_arg_key(
-            name_or_index,
-            raises=default == undefined,
-            default=default
-        )
-        return self._bind_or_get_value_unsafe(name_or_index)
+    def get_bound_arg(self, name_or_index: IndexType, default=undefined, pop=False):
+        name_or_index = self.find_arg_key(name_or_index, default=None, raises=default == undefined)
+        if name_or_index is None:
+            return default
+        else:
+            ret = self._bind_or_get_value_unsafe(name_or_index)
+            if pop:
+                self._remove_value_unsafe(name_or_index)
+            return ret
+
+    def pop_bound_arg(self, name_or_index: IndexType, default=undefined):
+        return self.get_bound_arg(name_or_index=name_or_index, default=default, pop=True)
+
+    def remove(self, name_or_index: IndexType):
+        name_or_index = self.find_arg_key(name_or_index, raises=True)
+        self._remove_value_unsafe(name_or_index)
 
     def call(self, func):
         posargs, kwargs = self.build_all_args()
@@ -319,13 +335,20 @@ class ArgSpecs:
 
         return posargs, kwargs
 
-    def find_arg_key(self, name_or_index, default=None, raises=False):
+    def find_arg_key(self, name_or_index: IndexType, default=None, raises=False, allow_vars=False):
+        if isinstance(name_or_index, Arg):
+            name_or_index = name_or_index.name
+
         if isinstance(name_or_index, ArgSpecKey):
             return name_or_index
         elif isinstance(name_or_index, int):
-            if not self.accepts_varargs and self.n_posargs < name_or_index:
-                raise KeyError(f'Index `{name_or_index}` out of range of fixed-length posargs[{self.n_posargs}]'
-                               f' (`accepts_varargs` == False).')
+            if self.n_posargs < name_or_index:
+                if not self.accepts_varargs:
+                    raise KeyError(f'Index `{name_or_index}` out of range of fixed-length posargs[{self.n_posargs}]'
+                                   f' (`accepts_varargs` == False).')
+                elif not allow_vars:
+                    raise KeyError(f'Index `{name_or_index}` out of range of'
+                                   f' bound posargs[{self.contiguous_posargs_count}]')
             return ArgSpecKey(name_or_index)
         elif isinstance(name_or_index, str):
             arg = Arg(name_or_index)
@@ -337,6 +360,10 @@ class ArgSpecs:
                     return ArgSpecKey(index)
                 except ValueError:
                     pass
+
+            if self.accepts_varkw:
+                if arg in self.bound_varkw or allow_vars:
+                    return ArgSpecKey(name_or_index)
 
         if raises:
             raise KeyError(f'`{name_or_index}` does not match any of arg specs.')
@@ -361,15 +388,33 @@ class ArgSpecs:
         ret.n_required_posargs = self.n_required_posargs
         ret.required_kwargs = self.required_kwargs
 
+        ret.accepts_varargs = self.accepts_varargs
+        ret.accepts_varkw = self.accepts_varkw
+
+        return ret
+
+    def clone(self):
+        """复制参数定义和绑定值
+
+        Returns
+        -------
+        ret
+            新的实例
+        """
+        ret = self.clone_specs()
+
+        ret.bound_posargs = copy.copy(self.bound_posargs)
+        ret.bound_kwargs = copy.copy(self.bound_kwargs)
+        ret.bound_varargs = copy.copy(self.bound_varargs)
+        ret.bound_varkw = copy.copy(self.bound_varkw)
         ret.contiguous_posargs_count = self.contiguous_posargs_count
-        ret.bound_posargs = self.bound_posargs
-        ret.bound_kwargs = self.bound_kwargs
-        ret.bound_varargs = self.bound_varargs
-        ret.bound_varkw = self.bound_varkw
 
         return ret
 
     def _check_contiguous(self):
+        while (self.contiguous_posargs_count > 0 and
+               self.contiguous_posargs_count not in self.bound_posargs):
+            self.contiguous_posargs_count -= 1
         while self.contiguous_posargs_count in self.bound_posargs:
             self.contiguous_posargs_count += 1
 
@@ -413,13 +458,22 @@ class ArgSpecs:
                 return self._bind_kwarg_by_name_unsafe(key)
             else:
                 self._bind_kwarg_by_name_unsafe(key, value)
-
-        if isinstance(key, int):
+        elif isinstance(key, int):
             if undefined == value:
                 return self._bind_arg_by_index_unsafe(key)
             else:
                 self._bind_arg_by_index_unsafe(key, value)
                 self._check_contiguous()
+
+    def _remove_value_unsafe(self, key):
+        if isinstance(key, ArgSpecKey):
+            key = key.key
+
+        if isinstance(key, str):
+            del self.bound_kwargs[Arg(key)]
+        elif isinstance(key, int):
+            del self.bound_posargs[key]
+            self._check_contiguous()
 
     def _mark_immutable(self, b=True):
         """指示该ArgSpecs实例已经开始绑定值，不再允许修改参数定义
