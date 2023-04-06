@@ -7,6 +7,7 @@ import numpy as np
 
 from metalpy.scab.modelling.shapes import Prism
 from metalpy.scab.utils.proj import query_utm_transform_from_bounds
+from metalpy.utils.file import PathLike
 from metalpy.utils.type import not_none_or_default
 
 
@@ -47,7 +48,7 @@ class OSMHandler(sax.ContentHandler):
             self.current_way = None
 
 
-def load_osm(path: str | Path,
+def load_osm(path: PathLike,
              level=0,
              default_height=10,
              height_map: dict[int, float] = None):
@@ -66,8 +67,8 @@ def load_osm(path: str | Path,
 
     Returns
     -------
-    scene
-        给定OSM文件定义的场景
+    (scene, handler)
+        给定OSM文件定义的建筑物列表和OSM文件相关信息
 
     Notes
     -----
@@ -91,23 +92,27 @@ def load_osm(path: str | Path,
         for k, b in handler.buildings.items()
     ]
 
-    from metalpy.scab.modelling import Scene
-    return Scene.of(*buildings), handler
+    return buildings, handler
 
 
 class OSMFormat:
     @staticmethod
     def from_osm(
-        path: str | Path,
+        path: PathLike,
         level=0,
         default_height=10,
         height_map: dict[int, float] = None,
         extras=False
     ):
-        scene, extra = load_osm(path=path,
-                                level=level,
-                                default_height=default_height,
-                                height_map=height_map)
+        buildings, extra = load_osm(
+            path=path,
+            level=level,
+            default_height=default_height,
+            height_map=height_map
+        )
+
+        from metalpy.scab.modelling import Scene
+        scene = Scene.of(*buildings)
 
         if extras:
             return scene, extra

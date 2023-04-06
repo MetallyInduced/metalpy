@@ -180,3 +180,7 @@ def get_cache(key, default=undefined):
                 warnings.warn('Exception occurred when loading cache. Ignoring cached file.')
 
     return default
+
+
+def openable(path):
+    return isinstance(path, (str, Path))

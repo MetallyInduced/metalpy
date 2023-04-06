@@ -11,6 +11,7 @@ from metalpy.utils.file import ensure_dir, make_cache_directory
 from metalpy.utils.dhash import dhash
 from metalpy.scab.utils.hash import dhash_discretize_mesh
 from .formats.osm import OSMFormat
+from .formats.ptopo import PTopoFormat
 from .layer import Layer
 from .mix_modes import MixMode
 from .object import Object
@@ -21,7 +22,7 @@ from .shapes.full_space import FullSpace
 from .shapes.shape3d import bounding_box_of
 
 
-class Scene(OSMFormat):
+class Scene(OSMFormat, PTopoFormat):
     default_cache_dir = make_cache_directory('models')
     INACTIVE_BOOL = False
     INACTIVE_INT = 0
