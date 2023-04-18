@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import os.path
-from typing import Union
+from typing import Union, Iterable
 
 import numpy as np
 import pyvista as pv
@@ -53,30 +55,48 @@ class Obj2(Shape3D):
     def __init__(self, model: Union[str, pv.DataSet],
                  xsize=None, ysize=None, zsize=None, size=None,
                  xscale=None, yscale=None, zscale=None, scale=None,
-                 surface_thickness=None, surface_range=None,
-                 subdivide: Union[str, bool, None] = SUBDIVIDE_NONE,
+                 surface_thickness=None, surface_range: float | list[float] | None = None,
+                 subdivide: str | bool | None = SUBDIVIDE_NONE,
+                 ignore_surface_check=False,
                  verbose=True):
-        """
-        :param model: 模型路径或PyVista模型对象 (当为None时不主动构造，用于内部的拷贝代码，非必要请勿使用)
-        二选一
-        :param xsize, ysize, zsize, size: 模型缩放后的新尺寸
-        :param xscale, yscale, zscale, scale: 模型缩放比例
+        """定义一个基于通用格式的模型
 
-        仅保留表面，参数二选一
-        :param surface_thickness: 表面厚度（向内），即surface_range=[-surface_range, 0]
-        :param surface_range: [(float|None), (float|None)] 表面范围（小于0表示模型内，大于0表示模型外，None表示不作判断）
-        :param subdivide: 是否模型细分（情况受限）
-            SUBDIVIDE_IN_MEMORY 载入后根据点连接性来模型细分
-            SUBDIVIDE_FILE 对模型文件进行组分割（仅限obj文件）再载入
-
-        :param verbose: 是否输出相关信息
+        Parameters
+        ----------
+        model
+            模型路径或PyVista模型对象 (当为None时不主动构造，用于内部的拷贝代码，非必要请勿使用)
+        xsize, ysize, zsize, size
+            模型尺寸，构造时自动将模型缩放到该尺寸下
+        xscale, yscale, zscale, scale
+            模型缩放比例，构造时自动根据该比例缩放模型
+        surface_thickness
+            表面厚度（向内），即surface_range=[-surface_range, 0]
+        surface_range : array(2) or number
+            表面距离范围，用于选定到表面有向距离在该范围内的网格，
+            小于0表示模型内，大于0表示模型外，None表示不作判断，
+            如果为单个数r，则自动设置为[0, r]或[r, 0]。
+        subdivide
+            是否模型细分（非通用）。
+            SUBDIVIDE_IN_MEMORY 载入后根据点连接性来模型细分。
+            SUBDIVIDE_FILE 对模型文件进行组分割（仅限obj文件）再载入。
+        ignore_surface_check
+            代表使用内置体素化算法时不检测模型封闭性
+        verbose
+            控制是否输出相关信息
         """
         super().__init__()
 
+        self.ignore_surface_check = ignore_surface_check
         if surface_thickness is not None or surface_range is not None:
             self.surface_only = True
             if surface_range is not None:
-                self.surface_range = surface_range
+                if isinstance(surface_range, Iterable):
+                    self.surface_range = tuple(surface_range)
+                else:
+                    if surface_range >= 0:
+                        self.surface_range = (0, surface_range)  # 0 ~ r
+                    else:
+                        self.surface_range = (surface_range, 0)  # r ~ 0
             else:
                 if surface_thickness is not None:
                     self.surface_range = [-surface_thickness, 0]
@@ -155,7 +175,7 @@ class Obj2(Shape3D):
             if smin is not None:
                 indices = indices >= smin
         else:
-            selection = mesh.select_enclosed_points(surface, tolerance=0.0, check_surface=True)
+            selection = mesh.select_enclosed_points(surface, tolerance=0.0, check_surface=not self.ignore_surface_check)
             indices = selection['SelectedPoints'].view(np.bool_)
 
         return indices
