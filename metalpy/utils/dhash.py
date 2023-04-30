@@ -1,3 +1,4 @@
+import cloudpickle
 import numpy as np
 
 from metalpy.utils.type import get_or_default
@@ -26,8 +27,16 @@ def register_dhasher(hashed_type):
     return wrapper
 
 
+def register_lazy_dhasher(hashed_type: str):
+    def wrapper(func):
+        DHash.hasher_creators[hashed_type] = func
+        return func
+    return wrapper
+
+
 class DHash:
     hashers = {}
+    hasher_creators = {}
 
     def __init__(self, *objs, convert=True):
         """确定性哈希，通过将Python原生hash中非确定性的部分替换来实现，例如str，并通过扩展方法支持更多对象
@@ -46,7 +55,14 @@ class DHash:
             self.objs = tuple(DHash.convert_to_dhashable(obj) for obj in objs)
         else:
             self.objs = objs
-        self.result = None
+
+        self._result = None
+
+    @property
+    def result(self):
+        if self._result is None:
+            self._result = hash(self.objs)
+        return self._result
 
     def __iter__(self):
         for obj in self.objs:
@@ -57,8 +73,6 @@ class DHash:
                 yield obj
 
     def digest(self):
-        if self.result is None:
-            self.result = hash(self.objs)
         return self.result
 
     def hexdigest(self, digits=32):
@@ -83,15 +97,32 @@ class DHash:
     def __hash__(self):
         return self.digest()
 
+    def __eq__(self, other):
+        return isinstance(other, DHash) and self.result == other.result
+
     @staticmethod
     def convert_to_dhashable(obj):
         t = type(obj)
         hasher = get_or_default(DHash.hashers, t, None)
 
         if hasher is None:
+            hasher = DHash._find_lazy_hasher(t)
+
+        if hasher is None:
             hasher = getattr(t, '__dhash__', lambda x: DHash(x, convert=False))
 
         return hasher(obj)
+
+    @staticmethod
+    def _find_lazy_hasher(t):
+        from metalpy.utils.object_path import ObjectPath
+        type_name = str(ObjectPath.of(t))
+        hasher = get_or_default(DHash.hasher_creators, type_name, None)
+
+        if hasher is not None:
+            hasher = DHash.hashers[t] = hasher
+
+        return hasher
 
 
 @register_dhasher(list)
@@ -129,6 +160,11 @@ def _hash_dict(obj: dict):
     return dhash(*sorted(obj.items(), key=lambda x: x[0]))
 
 
+@register_dhasher(type(_hash_dict))
+def _hash_function(obj):
+    return dhash(cloudpickle.dumps(obj))
+
+
 @register_dhasher(np.ndarray)
 def _hash_array(arr: np.ndarray, n_samples=10, sparse=False):
     if not sparse:
@@ -145,3 +181,8 @@ def _hash_array(arr: np.ndarray, n_samples=10, sparse=False):
         packed = blosc2.pack_array2(arr)
 
         return dhash(packed)
+
+
+@register_lazy_dhasher('pandas.core.series:Series')
+def _hash_series(arr):
+    return _hash_array(arr)

@@ -1,3 +1,4 @@
+import warnings
 from typing import Union, Iterable
 
 import numpy as np
@@ -5,11 +6,16 @@ from SimPEG.utils import mat_utils
 
 
 class Field:
-    def __init__(self, strength, inclination, declination):
-        self.definition = (strength, inclination, declination)
+    def __init__(self, intensity, inclination, declination):
+        self.definition = (intensity, inclination, declination)
 
     @property
     def strength(self):
+        warnings.warn("strength is deprecated and will be removed, please use intensity instead.", DeprecationWarning)
+        return self.definition[0]
+
+    @property
+    def intensity(self):
         return self.definition[0]
 
     @property
@@ -38,7 +44,11 @@ class Field:
         return 3
 
     def with_strength(self, strength):
+        warnings.warn("strength is deprecated and will be removed, please use intensity instead.", DeprecationWarning)
         return Field(strength, self.inclination, self.declination)
+
+    def with_intensity(self, intensity):
+        return Field(intensity, self.inclination, self.declination)
 
 
 def define_inducing_field(strength, inclination, declination) -> Field:

@@ -1,4 +1,5 @@
 import os
+import traceback
 import warnings
 from pathlib import Path
 from typing import Union
@@ -177,9 +178,37 @@ def get_cache(key, default=undefined):
                 if cache_key == key:
                     return content
             except Exception:
-                warnings.warn('Exception occurred when loading cache. Ignoring cached file.')
+                warnings.warn(traceback.format_exc() +
+                              '\nException occurred when loading cache. Ignoring cached file.')
 
     return default
+
+
+def clear_cache(key):
+    from metalpy.utils.dhash import dhash
+
+    file = make_cache_directory_path('cached') / dhash(key).hexdigest(32)
+    file.unlink(missing_ok=True)
+
+
+def file_cached(func=None):
+    import functools
+    if func is None:
+        return functools.partial(file_cached)
+    else:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            from metalpy.utils.dhash import dhash
+            hashkey = dhash(func, *args, kwargs).digest()
+            val = get_cache(hashkey)
+            if val is not undefined:
+                return val
+            else:
+                val = func(*args, **kwargs)
+                put_cache(hashkey, val)
+                return val
+
+        return wrapper
 
 
 def openable(path):

@@ -10,6 +10,8 @@ from dask.utils import tmpfile
 from distributed import WorkerPlugin, NannyPlugin
 from distributed.utils import logger
 
+from metalpy.utils.type import ensure_as_iterable
+
 
 def configure_dask_client(client, extra_paths=None, excludes=None):
     class UploadModules(NannyPlugin):
@@ -102,13 +104,10 @@ def configure_dask_client(client, extra_paths=None, excludes=None):
 
             sys.path.remove(path_to_scripts)
 
-    if extra_paths is None:
-        paths = []
-    else:
-        paths = [os.path.abspath(p) for p in extra_paths]
+    extra_paths = ensure_as_iterable(extra_paths, excludes=str)
+    excludes = ensure_as_iterable(excludes, excludes=str)
 
-    if excludes is None:
-        excludes = []
+    paths = [os.path.abspath(p) for p in extra_paths]
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     current_module_location = __name__.split('.')
