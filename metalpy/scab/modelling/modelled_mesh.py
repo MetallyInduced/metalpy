@@ -7,6 +7,7 @@ import numpy as np
 from discretize import TensorMesh
 
 from metalpy.scab.modelling.object import Object
+from metalpy.utils.type import is_numeric_array
 
 
 class ModelledMesh:
@@ -31,7 +32,9 @@ class ModelledMesh:
 
         self.base_mesh = mesh
 
-        kwargs.update(models)
+        if models is not None:
+            kwargs.update(models)
+
         self._models = kwargs
 
         if ind_active is not None:
@@ -64,6 +67,10 @@ class ModelledMesh:
         """获取默认model（active形式）
         """
         return self.get_active_model()
+
+    @property
+    def mesh(self):
+        return self.base_mesh
 
     @property
     def active_cells(self):
@@ -105,6 +112,12 @@ class ModelledMesh:
 
         return self.map_to_active(self._models[key])
 
+    def is_active_model(self, model):
+        return model.shape[0] == self.n_active_cells
+
+    def is_complete_model(self, model):
+        return model.shape[0] == self.n_cells
+
     def get_complete_model(self, key=None):
         if key is None:
             if self.has_default_model:
@@ -114,25 +127,74 @@ class ModelledMesh:
 
         return self.map_to_complete(self._models[key])
 
+    def _unsupported_model_exception(self, model):
+        return ValueError(f'Unsupported model size {model.shape},'
+                          f' which is neither complete model ({self.n_cells},)'
+                          f' nor active model ({self.n_active_cells},)')
+
     def map_to_complete(self, model: np.ndarray):
         from metalpy.scab.modelling import Scene
 
-        if model.shape[0] == self.n_cells:
-            return model
-        else:
+        if self.is_complete_model(model):
+            ret = model
+        elif self.is_active_model(model):
             inactive_val = Scene.get_inactive_value_for_type(model.dtype)
-            ret = np.repeat(np.array(inactive_val, dtype=model.dtype), self.n_cells)
+            ret = np.full(self.n_cells, inactive_val, dtype=model.dtype)
             ret[self.active_cells] = model
-            return ret
+        else:
+            raise self._unsupported_model_exception(model)
+
+        return ret
 
     def map_to_active(self, model: np.ndarray):
-        if model.shape[0] == self.n_active_cells:
-            return model
+        if self.is_active_model(model):
+            ret = model
+        elif self.is_complete_model(model):
+            ret = model[self.active_cells]
         else:
-            return model[self.active_cells]
+            raise self._unsupported_model_exception(model)
+
+        return ret
+
+    def map_mask_to_complete(self, mask: np.ndarray):
+        from metalpy.scab.modelling import Scene
+
+        if mask.dtype == bool:
+            ret = self.map_to_complete(mask)
+        else:
+            # assumed to be fancy indexing
+            inactive_val = Scene.get_inactive_value_for_type(bool)
+            ret = np.full(self.n_cells, inactive_val, dtype=bool)
+            ret[mask] = True
+
+        return ret
+
+    def map_mask_to_active(self, mask: np.ndarray):
+        from metalpy.scab.modelling import Scene
+
+        if mask.dtype == bool:
+            ret = self.map_to_active(mask)
+        else:
+            # assumed to be fancy indexing
+            inactive_val = Scene.get_inactive_value_for_type(bool)
+            ret = np.full(self.n_active_cells, inactive_val, dtype=bool)
+            ret[mask] = True
+
+        return ret
 
     def get(self, key, default=None):
         return self._models.get(key, default)
+
+    def active_models(self):
+        for key in self:
+            yield key, self.get_active_model(key)
+
+    def complete_models(self):
+        for key in self:
+            yield key, self.get_complete_model(key)
+
+    def __iter__(self):
+        yield from self._models
 
     def __len__(self):
         return len(self._models)
@@ -154,8 +216,8 @@ class ModelledMesh:
         return item in self._models
     
     def to_polydata(self,
-                    scalars: str | Iterable[str] | None = None,
-                    extra_models: np.ndarray | dict[str, np.ndarray] | None = None,
+                    scalars: str | Iterable[str] | np.ndarray | None = None,
+                    extra_models: dict[str, np.ndarray] | None = None,
                     **kwargs: np.ndarray):
         """导出模型网格为PyVista模型
 
@@ -180,35 +242,114 @@ class ModelledMesh:
         import pyvista as pv
         from metalpy.scab.modelling import Scene
 
+        models = {}
+        if not is_numeric_array(scalars):
+            if scalars is None:
+                scalars = self._models.keys()
+            elif isinstance(scalars, str):
+                scalars = (scalars,)
+
+            for scalar in scalars:
+                warnings.warn(f'Unknown model key {scalar}.')
+                models[scalar] = self._models[scalar]
+
         if extra_models is not None:
-            if not isinstance(extra_models, dict):
-                models = {'model': extra_models}
-            else:
-                models = extra_models.copy()
-        else:
-            models = {}
-
-        if scalars is None:
-            scalars = self._models.keys()
-        elif isinstance(scalars, str):
-            scalars = (scalars,)
-
-        for scalar in scalars:
-            models[scalar] = self._models[scalar]
-
-        for key in models:
-            models[key] = self.map_to_complete(models[key])
-
+            models.update(extra_models)
         models.update(kwargs)
 
-        active_key = 'ACTIVE'
-        while active_key in models:
-            warnings.warn(f'Keys of `models` conflicts with default key {active_key}, renaming it.')
-            active_key = f'_{active_key}_'
+        key_active_cells = 'ACTIVE'
+        active_scalars = key_active_cells
 
-        models[active_key] = self._ind_active
+        if isinstance(scalars, np.ndarray):
+            # assumed to be model array
+            key_active_model = 'model'
+
+            while key_active_model in models:
+                warnings.warn(f'Keys of `models` conflicts with default scalars key {key_active_model}, renaming it.')
+                key_active_cells = f'_{key_active_model}_'
+            models = {key_active_model: scalars}
+            active_scalars = key_active_model
+
+        while key_active_cells in models:
+            warnings.warn(f'Keys of `models` conflicts with default key {key_active_cells}, renaming it.')
+            key_active_cells = f'_{key_active_cells}_'
+
+        models[key_active_cells] = self._ind_active  # ensured as complete model
+
+        for key in models:
+            model = models[key]
+            model = self.map_to_complete(model)
+            models[key] = model
 
         ret: pv.RectilinearGrid = Scene.mesh_to_polydata(self.base_mesh, models)
-        ret.set_active_scalars(active_key)
+        ret.set_active_scalars(active_scalars)
+
+        return ret
+
+    def extract(self, indices, mesh_only=False, shallow=False) -> 'ModelledMesh':
+        """基于有效网格坐标系下的网格下标，提取局部模型网格
+
+        Parameters
+        ----------
+        indices
+            有效网格坐标系下的新有效网格掩码，用于提取网格
+        mesh_only
+            指示是否只提取网格，不提取模型
+        shallow
+            指示是否浅拷贝模型，否则在可能的时候会使用原模型的视图，某些情况可能导致意外的修改
+
+        Returns
+        -------
+        ret
+            包含新的有效网格掩码的模型网格
+        """
+        new_active_cells = self.map_mask_to_complete(indices)
+
+        models = {}
+
+        if not mesh_only:
+            for model_key in self:
+                model = self.get_active_model(model_key)[indices]
+                if not shallow:
+                    model = model.copy()
+                models[model_key] = model
+
+        return ModelledMesh(self.mesh, models=models, ind_active=new_active_cells)
+
+    def reactivate(self, indices, mesh_only=False, shallow=False) -> 'ModelledMesh':
+        """给定新的有效网格掩码，重新定义模型网格
+
+        Parameters
+        ----------
+        indices
+            全局坐标系下的新有效网格掩码，用于重新生成网格
+        mesh_only
+            指示是否只提取网格，不提取模型
+        shallow
+            指示是否浅拷贝模型，否则在可能的时候会使用原模型的视图，某些情况可能导致意外的修改
+
+        Returns
+        -------
+        ret
+            包含新的有效网格掩码的模型网格
+
+        Notes
+        -----
+            由于目前无效网格值会被定义为0，所以新的mask和旧有mask交集之外的值会是0。
+            如果shallow为真，则不保证新旧mask交集之外的值，因此在多级reactivate调用下，shallow模式可能会导致大量不可预测的结果
+        """
+        new_active_cells = self.map_mask_to_complete(indices)
+        ret = ModelledMesh(self.mesh, ind_active=new_active_cells)
+
+        if not mesh_only:
+            for model_key in self:
+                model = self.get_complete_model(model_key)
+                if not model.flags.owndata:
+                    warnings.warn('Reactivation of shallow ModelledMesh is likely to produce unexpected result,'
+                                  ' please specify `shallow=False` in last `reactivate` or `extract` call.')
+                if shallow:
+                    ret[model_key] = model
+                else:
+                    ret[model_key] = model[new_active_cells].copy()
 
         return ret

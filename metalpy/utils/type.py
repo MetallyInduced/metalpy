@@ -154,3 +154,23 @@ def get_params_dict(**kwargs):
 
 def get_params(*args, **kwargs):
     return list(args), dict(kwargs)
+
+
+def is_numeric_array(obj):
+    dtype = getattr(obj, 'dtype', None)
+    if dtype is None:
+        return False
+
+    # 用于进一步判断numpy和pandas的元素类型
+    # torch数组只支持数值类型，因此不需要继续判断，用空字符串跳过后续分支
+    dtype_name = getattr(dtype, 'name', '')
+
+    non_numeric_keywords = [
+        'str',  # numpy - 'str', pandas - 'string'
+        'object'  # numpy, pandas - 'object'
+    ]
+    for k in non_numeric_keywords:
+        if k in dtype_name:
+            return False
+
+    return True
