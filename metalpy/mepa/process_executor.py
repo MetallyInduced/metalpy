@@ -1,3 +1,4 @@
+import queue
 from concurrent.futures import Future
 from functools import partial
 
@@ -5,8 +6,8 @@ from loky import get_reusable_executor
 
 import psutil
 
-from .executor import Executor, traverse_args
-from .utils import exception_caught
+from .executor import Executor, WorkerContext
+from .utils import exception_caught, traverse_args
 from .worker import Worker
 
 
@@ -23,6 +24,18 @@ class ProcessExecutor(Executor):
         self.pool = get_reusable_executor(max_workers=n_units, kill_workers=True)
         self.workers = [Worker(f'proc-{i}', 1) for i in range(n_units)]
         self.n_units = n_units
+
+        self._queue = None
+
+    @property
+    def queue(self):
+        if self._queue is None:
+            self._queue = self.pool._context.Manager().Queue()
+        return self._queue
+
+    @property
+    def has_queue(self):
+        return self._queue is not None
 
     def do_submit(self, func, *args, workers=None, **kwargs):
         """
@@ -47,5 +60,28 @@ class ProcessExecutor(Executor):
     def is_local(self):
         return True
 
-    def gather_single(self, future):
+    def _gather_single(self, future):
         return future.result()
+
+    def get_worker_context(self):
+        return ProcessWorkerContext(self.queue)
+
+    def receive_events(self, timeout):
+        while True:
+            try:
+                event, msg = self.queue.get(True, timeout)
+                yield event, msg
+            except queue.Empty:
+                yield None, None
+
+    def check_if_events_thread_are_required(self):
+        return (self.has_queue
+                and super().check_if_events_thread_are_required())
+
+
+class ProcessWorkerContext(WorkerContext):
+    def __init__(self, queue):
+        self.queue = queue
+
+    def fire(self, event, msg):
+        self.queue.put((event, msg))

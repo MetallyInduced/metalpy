@@ -1,7 +1,8 @@
 import psutil
 
-from .executor import Executor, traverse_args
+from .executor import Executor, WorkerContext
 from .lazy_evaluator import LazyEvaluator
+from .utils import traverse_args
 from .worker import Worker
 
 
@@ -33,5 +34,22 @@ class LinearExecutor(Executor):
     def is_local(self):
         return True
 
-    def gather_single(self, future):
+    def _gather_single(self, future):
         return future.result()
+
+    def get_worker_context(self):
+        return LinearWorkerContext(self)
+
+    def receive_events(self, timeout):
+        pass
+
+    def check_if_events_thread_are_required(self):
+        return False
+
+
+class LinearWorkerContext(WorkerContext):
+    def __init__(self, liner_client: LinearExecutor):
+        self.liner_client = liner_client
+
+    def fire(self, event, msg):
+        self.liner_client.dispatch_event(event, msg)

@@ -1,6 +1,9 @@
+import uuid
+
+import distributed
 from distributed import Client
 
-from .executor import Executor
+from .executor import Executor, WorkerContext
 from .dask_helper import configure_dask_client
 from .worker import Worker
 
@@ -21,7 +24,8 @@ class DaskExecutor(Executor):
             host = worker['host']
             if host not in worker_groups:
                 worker_groups[host] = []
-            worker_groups[host].append(worker['name'])
+            # LocalCluster的名字有可能是数字，因此需要转换成字符串
+            worker_groups[host].append(str(worker['name']))
 
         self.workers = []
         n_actual_working_units = 0
@@ -46,6 +50,16 @@ class DaskExecutor(Executor):
         else:
             self.n_units = n_units
 
+        self.client_id = str(uuid.uuid4())
+        self._sub = None
+
+    @property
+    def sub(self):
+        if self._sub is None:
+            self._sub = distributed.Sub(self.client_id)
+
+        return self._sub
+
     def do_submit(self, func, *args, workers=None, **kwargs):
         if isinstance(workers, Worker):
             workers = [workers]
@@ -66,8 +80,37 @@ class DaskExecutor(Executor):
     def is_local(self):
         return False
 
-    def gather_single(self, future):
+    def _gather_single(self, future):
         return self.client.gather(future)
 
     def scatter(self, data):
         return self.client.scatter(data)
+
+    def get_worker_context(self):
+        return DaskWorkerContext(self.client_id)
+
+    def receive_events(self, timeout):
+        import asyncio
+
+        while True:
+            try:
+                event, msg = self.sub.get(timeout)
+                yield event, msg
+            except asyncio.exceptions.TimeoutError:
+                yield None, None
+
+
+class DaskWorkerContext(WorkerContext):
+    def __init__(self, client_id):
+        self.client_id = client_id
+        self._pub = None
+
+    @property
+    def pub(self):
+        if self._pub is None:
+            self._pub = distributed.Pub(self.client_id)
+
+        return self._pub
+
+    def fire(self, event, msg):
+        self.pub.put((event, msg))

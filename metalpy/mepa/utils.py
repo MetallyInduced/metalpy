@@ -1,6 +1,19 @@
 import traceback
 
 
+def traverse_args(args, kwargs, func):
+    # 对所有的参数进行处理
+    _args = []
+    for arg in args:
+        _args.append(func(arg))
+
+    _kwargs = {}
+    for k, v in kwargs.items():
+        _kwargs[k] = func(v)
+
+    return _args, _kwargs
+
+
 def structured_traverse(struct, func):
     if isinstance(struct, dict):
         ret = {key: structured_traverse(element, func) for key, element in struct.items()}
