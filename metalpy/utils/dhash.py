@@ -1,7 +1,10 @@
+import os
+import warnings
+
 import cloudpickle
 import numpy as np
 
-from metalpy.utils.type import get_or_default
+from metalpy.utils.type import get_or_default, undefined
 
 
 def dhash(*objs):
@@ -105,11 +108,18 @@ class DHash:
         t = type(obj)
         hasher = get_or_default(DHash.hashers, t, None)
 
-        if hasher is None:
-            hasher = DHash._find_lazy_hasher(t)
+        if hasher == undefined:
+            hasher = None  # 已确认不存在lazy hasher
+        else:
+            if hasher is None:
+                hasher = DHash._find_lazy_hasher(t)
 
         if hasher is None:
-            hasher = getattr(t, '__dhash__', lambda x: DHash(x, convert=False))
+            def fallback(x): DHash(x, convert=False)
+            hasher = getattr(t, '__dhash__', fallback)
+            if hasher == fallback:
+                warnings.warn(f'Cannot find dhasher for type `{t.__name__}`,'
+                              f' falling back to built-in `hash`.')
 
         return hasher(obj)
 
@@ -121,6 +131,8 @@ class DHash:
 
         if hasher is not None:
             hasher = DHash.hashers[t] = hasher
+        else:
+            DHash.hashers[t] = undefined
 
         return hasher
 
@@ -181,6 +193,12 @@ def _hash_array(arr: np.ndarray, n_samples=10, sparse=False):
         packed = blosc2.pack_array2(arr)
 
         return dhash(packed)
+
+
+@register_lazy_dhasher('pathlib:WindowsPath')
+@register_lazy_dhasher('pathlib:PosixPath')
+def _hash_path(path):
+    return _hash_str(os.fspath(path))
 
 
 @register_lazy_dhasher('pandas.core.series:Series')
