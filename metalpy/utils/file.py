@@ -7,6 +7,7 @@ from typing import Union
 from .type import ensure_as_iterable, undefined
 
 PathLike = Union[str, os.PathLike]
+cache_dir = Path('./.cache')
 
 
 def ensure_dir(path: PathLike):
@@ -130,27 +131,23 @@ def git_ignore_directory(path):
         ignore_file.write_text('# Created by metalpy automatically.\n*')
 
 
-def make_cache_file(name):
-    return os.fspath(make_cache_file_path(name))
+def make_cache_file(name, *args):
+    return os.fspath(make_cache_file_path(name, *args))
 
 
-def make_cache_directory(name):
-    return os.fspath(make_cache_directory_path(name))
+def make_cache_directory(name, *args):
+    return os.fspath(make_cache_directory_path(name, *args))
 
 
-def make_cache_file_path(name):
-    cache_dir = Path('./.cache')
-    ret = cache_dir / name
-    ret = ret.absolute()
+def make_cache_file_path(name, *args):
+    ret = Path(cache_dir, name, *args).absolute()
     ensure_filepath(ret)
     git_ignore_directory(cache_dir)
     return ret
 
 
-def make_cache_directory_path(name):
-    cache_dir = Path('./.cache')
-    ret = cache_dir / name
-    ret = ret.absolute()
+def make_cache_directory_path(name, *args):
+    ret = Path(cache_dir, name, *args).absolute()
     ensure_dir(ret)
     git_ignore_directory(cache_dir)
     return ret

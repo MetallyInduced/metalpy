@@ -1,4 +1,4 @@
-SimPEG >= 0.18.0
+SimPEG
 Cython
 discretize
 pyproj
@@ -24,13 +24,15 @@ matplotlib
 psutil
 pympler
 loky
-blosc2 >= 0.4.0
+blosc2
 cloudpickle
 
 # Testing
 pytest
 
 # Dev
+nox
+isort
 versioningit
 tomli
 build
@@ -42,3 +44,13 @@ colour
 # optional
 # bokeh  # 用于distributed的网页控制台
 # pywin32  # 用于grapher  # 在低版本pip时可能需要手动进行post install，参见pywin32的pypi主页
+
+click
+dask
+torch
+setuptools
+imageio
+pillow
+pykrige
+numba
+opencv-python

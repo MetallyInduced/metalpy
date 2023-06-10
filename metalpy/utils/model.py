@@ -178,3 +178,17 @@ def split_models_in_memory_pointwisely(model, verbose=True):
         models.append(sub_model.extract_surface())
 
     return models
+
+
+class ModelTranslation:
+    def __init__(self, offset, inplace=False):
+        self.offset = offset
+        self.inplace = inplace
+
+    def __call__(self, mesh):
+        if isinstance(mesh, pv.MultiBlock):
+            return pv.MultiBlock(
+                {k: self(mesh[k]) for k in mesh.keys()}
+            )
+        else:
+            return mesh.translate(self.offset, inplace=self.inplace)

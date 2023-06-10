@@ -513,3 +513,14 @@ class ArgSpecs:
             args.append("**kwargs")
 
         return f'ArgSpecs({", ".join(args)})'
+
+    def get_func_repr(self, func):
+        posargs, kwargs = self.build_all_args()
+
+        args = []
+        for arg in posargs:
+            args.append(repr(arg))
+        for key, arg in kwargs.items():
+            args.append(f'{key}={repr(arg)}')
+
+        return f'{func.__name__}({", ".join(args)})'

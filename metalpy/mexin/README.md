@@ -1,7 +1,7 @@
 Metal Mixin
 ===========================
 
-Mexin enables non-invasive decoration and replacement of methods and classes,
+**Mexin** enables non-invasive decoration and replacement of methods and classes,
 which is originally developed as patch system of SCAB. 
 
 Installation

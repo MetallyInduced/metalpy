@@ -1,3 +1,4 @@
+import itertools
 import os
 import warnings
 
@@ -23,9 +24,10 @@ def dhash(*objs):
     return DHash(*objs)
 
 
-def register_dhasher(hashed_type):
+def register_dhasher(*hashed_types):
     def wrapper(func):
-        DHash.hashers[hashed_type] = func
+        for t in hashed_types:
+            DHash.hashers[t] = func
         return func
     return wrapper
 
@@ -135,6 +137,12 @@ class DHash:
             DHash.hashers[t] = undefined
 
         return hasher
+
+
+@register_dhasher(*itertools.chain(*[np.sctypes[k] for k in np.sctypes if k != 'others']))
+@register_dhasher(float, int, bool)
+def _hash_basic_type(obj):
+    return DHash(obj, convert=False)
 
 
 @register_dhasher(list)
