@@ -8,7 +8,7 @@ from .simple_tile_locator import SimpleTileLocator
 
 
 class SimpleTileMapSource(TileMapSource):
-    def __init__(self, pattern: str | Iterable[str], google_map_style=True, regex=False):
+    def __init__(self, pattern: str | Iterable[str], bottom_left_as_origin=False, regex=False):
         """简单Tile服务器地图源
 
         Parameters
@@ -17,8 +17,8 @@ class SimpleTileMapSource(TileMapSource):
             地图源，一般为一个格式化URL，
             例如`https://domain.com/<path>/{z}{x}{y}.png`
             或者`https://domain.com/<path>/{level}/{col}/{row}.png`。
-        google_map_style
-            指示是否为Google Tile服务器索引结构，即以左上方为原点（标准WMTS约定左下方为原点）
+        bottom_left_as_origin
+            指示是否以左下方为原点（标准WMTS约定左上方为原点）
         regex
             指示pattern串是否为有穷正则表达式，若为True，会使用RegexPattern将其展开为各个子域名
 
@@ -33,7 +33,7 @@ class SimpleTileMapSource(TileMapSource):
         super().__init__()
         self.pattern = pattern
         self.regex = regex
-        self.google_map_style = google_map_style
+        self.bottom_left_as_origin = bottom_left_as_origin
 
     def __iter__(self) -> Iterable[SimpleTileLocator]:
         if isinstance(self.pattern, str):
@@ -45,4 +45,4 @@ class SimpleTileMapSource(TileMapSource):
             patterns = self.pattern
 
         for pat in patterns:
-            yield SimpleTileLocator(pat, google_map_style=self.google_map_style)
+            yield SimpleTileLocator(pat, bottom_left_as_origin=self.bottom_left_as_origin)

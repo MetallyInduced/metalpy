@@ -1,13 +1,14 @@
-import os
-import subprocess
-from pathlib import Path
+from __future__ import annotations
 
 import numpy as np
 from PIL.Image import Image
+import PIL.Image
 
 from metalpy.utils.bounds import Bounds
-from metalpy.utils.file import make_cache_file_path
-from .gdal_helper import check_gdal
+from metalpy.carto.coords import Coordinates
+from metalpy.carto.utils.crs import CRSLike
+from metalpy.carto.coords.coordinates import CRSQuery
+
 from .geo_image_ref_system import GeoImageRefSystem
 
 
@@ -25,9 +26,7 @@ class GeoImage:
         offset
             图像原点到坐标系原点的单元距离，图像原点定义在上或在下与`ref_system.flip_y`有关
         ref_system
-
-        Notes
-        -----
+            参考坐标系
 
         Notes
         -----
@@ -63,27 +62,33 @@ class GeoImage:
 
     @property
     def unit_size(self):
+        return self.ref_system.unit_size
+
+    @property
+    def size(self):
         return self.image.size
 
     @property
-    def unit_width(self):
-        return self.unit_size[0]
+    def width(self):
+        return self.size[0]
 
     @property
-    def unit_height(self):
-        return self.unit_size[1]
+    def height(self):
+        return self.size[1]
 
     @property
-    def unit_bounds(self):
+    def bounds(self):
         return np.c_[
             self.offset,
-            self.offset + self.image.size
+            self.offset + self.size
         ].ravel().view(Bounds)
 
     @property
     def geo_bounds(self):
+        """边界像素的中心点的坐标
+        """
         return self.ref_system.to_geo_bounds(
-            self.unit_bounds
+            self.bounds
             + (0.5, -0.5, 0.5, -0.5)
         )
 
@@ -106,11 +111,11 @@ class GeoImage:
 
         corners = bounds.as_corners()
         offset = corners.origin
-        rel_corners = corners - self.unit_bounds.as_corners().origin
+        rel_corners = corners - self.bounds.as_corners().origin
         if self.flip_y:
             rel_corners.origin[1], rel_corners.end[1] = (
-                self.unit_height - rel_corners.end[1],
-                self.unit_height - rel_corners.origin[1]
+                self.height - rel_corners.end[1],
+                self.height - rel_corners.origin[1]
             )
 
         return GeoImage(
@@ -129,39 +134,83 @@ class GeoImage:
         """
         if self.ref_system.flip_y:
             offset = (
-                img.unit_bounds[0] - self.unit_bounds[0],
-                self.unit_bounds[3] - img.unit_bounds[3]
+                img.bounds[0] - self.bounds[0],
+                self.bounds[3] - img.bounds[3]
             )
         else:
-            offset = self.unit_bounds[[0, 2]] - img.unit_bounds[[0, 2]]
+            offset = self.bounds[[0, 2]] - img.bounds[[0, 2]]
 
         self.image.paste(img.image, offset)
 
     def save(self, fp, format=None, **params):
         self.image.save(fp, format=format, **params)
 
-    def apply_geo_info(self,
-                       input_file,
-                       output_file,
-                       bounds_transform: callable = None):
-        gdal_translate = check_gdal('gdal_translate')
+    def save_geo_tiff(self, path):
+        import rasterio
+        from rasterio.transform import Affine
+
+        transform = Affine.translation(*self.geo_bounds.origin) * Affine.scale(*self.unit_size)
+        image_arr = np.asarray(self.image)
+
+        if image_arr.ndim < 3:
+            channels = 1
+        else:
+            channels = image_arr.shape[2]
+
+        with rasterio.open(
+            path,
+            'w',
+            driver='GTiff',
+            width=self.width,
+            height=self.height,
+            count=channels,
+            dtype=image_arr.dtype,
+            crs=self.crs,
+            transform=transform,
+        ) as dataset:
+            if image_arr.ndim < 3:
+                dataset.write(image_arr, 1)
+            else:
+                for dim in range(channels):
+                    dataset.write(image_arr[:, :, dim], dim + 1)
+
+    def to_polydata(self, dest_crs: CRSLike | None = None, query_dest_crs: CRSQuery | None = None):
+        import pyvista as pv
 
         bounds = self.geo_bounds
-        if bounds_transform is not None:
-            bounds = bounds_transform(bounds)
-        bounds = Bounds(bounds).as_corners().ravel().astype(str)
+        xs = np.linspace(bounds.xmin, bounds.xmax, self.width)
+        ys = np.linspace(bounds.ymin, bounds.ymax, self.height)
+        mesh = np.meshgrid(xs, ys, 0)
+        points = np.stack([axis.ravel() for axis in mesh], axis=1)
+        geo_points: Coordinates = points.view(Coordinates).with_crs(self.crs)
 
-        subprocess.check_call([
-            gdal_translate,
-            f'-of', 'GTiff',
-            f'-a_srs', self.crs.to_string(),
-            f'-a_ullr', *bounds,
-            os.fspath(input_file),
-            os.fspath(output_file)
-        ])
+        if dest_crs is not None or query_dest_crs is not None:
+            geo_points.warp(query=Coordinates.SearchUTM, inplace=True)
 
-    def save_geo_tiff(self, path):
-        path = Path(path)
-        cache_img = make_cache_file_path('geoimage', path.with_suffix(f'.temp{path.suffix}'))
-        self.save(cache_img)
-        self.apply_geo_info(input_file=cache_img, output_file=path)
+        grid = pv.PolyData(geo_points)
+
+        img = np.asarray(self.image)
+        n_channels = img.shape[2] if img.ndim > 2 else 1
+        grid['ImageData'] = img.reshape(-1, n_channels)
+
+        return grid
+
+    @staticmethod
+    def read(path):
+        import rasterio
+        from rasterio.plot import reshape_as_image
+        from affine import Affine
+
+        with rasterio.open(path) as dataset:
+            transform = dataset.transform
+            assert transform.identity() == Affine(1.0, 0.0, 0.0, 0.0, 1.0, 0.0), \
+                'GeoImage supports only translation and scaling as transform.'
+
+            ref = GeoImageRefSystem(
+                origin=(transform.xoff, transform.yoff),
+                unit_size=(transform[0], transform[4]),
+                crs=dataset.crs
+            )
+            raster = reshape_as_image(dataset.read())
+
+            return ref.map_image(PIL.Image.fromarray(raster))

@@ -25,29 +25,8 @@ class WebMercator:
         WebMercator坐标系通过偏移保证坐标为正
         """
         x, y = WebMercator.WGS84_WebMercator.transform(long, lat)
-        # x += WebMercator.Perimeter / 2
-        # y += WebMercator.Perimeter / 2
 
         return x, y
-    #
-    # @staticmethod
-    # def web_mercator_to_pseudo_mercator(x, y):
-    #     """从WebMercator转换为标准EPSG:3857坐标系
-    #     """
-    #     x = np.asarray(x) - WebMercator.Perimeter / 2
-    #     y = np.asarray(y) - WebMercator.Perimeter / 2
-    #
-    #     return x, y
-    #
-    # @staticmethod
-    # def web_mercator_bounds_to_pseudo_mercator(bounds):
-    #     """从WebMercator转换为标准EPSG:3857坐标系
-    #     """
-    #     corners = Bounds(bounds).as_corners()
-    #     corners = np.concatenate(WebMercator.web_mercator_to_pseudo_mercator(
-    #         corners[:, 0], corners[:, 1]
-    #     ))
-    #     return corners.view(Bounds)
 
     @staticmethod
     @lru_cache
@@ -115,21 +94,24 @@ class WebMercator:
                 yield x, y
 
     @staticmethod
-    def as_google_style_coord(x, y, z):
-        """谷歌地图规定北纬85.05°为零点，而WMTS标准规定南纬85.05°为零点，
+    def warp_tile_coord(x, y, z, bottom_left_as_origin=False):
+        """WMTS规定北纬85.05°为零点，而carto中约定南纬85.05°为零点，
         因此Y方向tile坐标会有区别
 
         Parameters
         ----------
         x,y
-            WMTS标准下x、y方向tile坐标
+            左下原点标准下x、y方向tile坐标
         z
             tile等级
+        bottom_left_as_origin
+            是否采用左下角作为tile原点
 
         Returns
         -------
-        tile_coord_in_google_style
-            谷歌地图约定下的tile坐标
+        tile_coord_in_top_left_as_origin
+            给定约定下的tile坐标
         """
-        y = WebMercator.tiles_in_axis(1, z) - y - 1
-        return x, y, z
+        if not bottom_left_as_origin:
+            y = WebMercator.tiles_in_axis(1, z) - y - 1
+        return x, y

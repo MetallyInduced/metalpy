@@ -1,7 +1,6 @@
 SimPEG
 Cython
 discretize
-pyproj
 
 # Distributed computing
 distributed
@@ -20,12 +19,18 @@ pyvista
 vtk
 matplotlib
 
+# Cartography
+pyproj
+rasterio
+affine
+
 # Basic utils
 psutil
 pympler
 loky
 blosc2
 cloudpickle
+requests
 
 # Testing
 pytest

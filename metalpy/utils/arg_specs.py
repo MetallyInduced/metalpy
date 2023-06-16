@@ -515,6 +515,21 @@ class ArgSpecs:
         return f'ArgSpecs({", ".join(args)})'
 
     def get_func_repr(self, func):
+        """将参数绑定到函数，获取函数调用的repr表示
+
+        Parameters
+        ----------
+        func
+            函数或函数名
+
+        Returns
+        -------
+        repr
+            给定函数绑定参数后的repr表示
+        """
+        if not isinstance(func, str):
+            func = func.__name__
+
         posargs, kwargs = self.build_all_args()
 
         args = []
@@ -523,4 +538,4 @@ class ArgSpecs:
         for key, arg in kwargs.items():
             args.append(f'{key}={repr(arg)}')
 
-        return f'{func.__name__}({", ".join(args)})'
+        return f'{func}({", ".join(args)})'

@@ -38,8 +38,10 @@ mepa = [
 carto = [
     "numpy",
     "pillow",
+    "requests",
     "pyproj",
-    "pyvista",
+    "rasterio",
+    "affine",
 ]
 scab = [
     "metalpy[mepa, mexin, utils]",

@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import contextlib
-import itertools
 import os
-import subprocess
 import warnings
 from io import BytesIO
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from shutil import which
 from threading import Lock
 from typing import Iterable
 
@@ -18,14 +15,15 @@ import tqdm
 from PIL import Image
 
 from metalpy.utils.file import make_cache_directory_path, ensure_filepath, PathLike
+from metalpy.utils.bounds import Bounds
+from metalpy.utils.dhash import dhash
+from metalpy.utils.path import pathencode
 
 from .constants import WebMercator
+from .geo_image import GeoImage
 from .geo_image_ref_system import GeoImageRefSystem
 from .sources.tile_map_source import TileMapSource
 from .sources.tile_locator import TileLocator
-from ...utils.bounds import Bounds
-from ...utils.dhash import dhash
-from ...utils.path import pathencode
 
 
 class MapDownloader:
@@ -51,9 +49,9 @@ class MapDownloader:
     def download(self, west_lon=None, east_lon=None, south_lat=None, north_lat=None,
                  bounds=None, levels=(18,),
                  combine: bool | PathLike | None = None,
-                 crop: bool | PathLike | None = None,
+                 crop: bool | PathLike | None = True,
                  geotiff: PathLike | None = None,
-                 cache: bool | PathLike | None = None):
+                 cache: bool | PathLike | None = None) -> GeoImage:
         """
 
         Parameters
@@ -146,10 +144,11 @@ class MapDownloader:
                         geotiff, level, levels, 'geotiff'
                     )
 
-                    if saved_path is None:
-                        ret.save_geo_tiff(geotiff_save_path)
-                    else:
-                        ret.apply_geo_info(saved_path, geotiff_save_path)
+                    ret.save_geo_tiff(geotiff_save_path)
+                    # if saved_path is None:
+                    #     ret.save_geo_tiff(geotiff_save_path)
+                    # else:
+                    #     ret.apply_geo_info(saved_path, geotiff_save_path)
 
         return ret
 

@@ -2,9 +2,13 @@ import os
 import traceback
 import warnings
 from pathlib import Path
-from typing import Union
+from typing import Union, TYPE_CHECKING
 
 from .type import ensure_as_iterable, undefined
+
+if TYPE_CHECKING:
+    from datetime import timedelta, datetime
+
 
 PathLike = Union[str, os.PathLike]
 cache_dir = Path('./.cache')
@@ -153,22 +157,79 @@ def make_cache_directory_path(name, *args):
     return ret
 
 
+class FileCache:
+    def __init__(self, func, ttl: 'timedelta' = None):
+        self.func = func
+        self.ttl = ttl
+
+    def __call__(self, *args, **kwargs):
+        return self.prepare()(*args, **kwargs)
+
+    def force_update(self):
+        return self.prepare(update=True)
+
+    def prepare(self, update=False):
+        return FileCachedCall(self, update=update)
+
+
+class FileCachedCall:
+    def __init__(self, cache_obj: FileCache, update=False):
+        self.cache = cache_obj
+        self.update = update
+
+    @property
+    def func(self):
+        return self.cache.func
+
+    @property
+    def ttl(self):
+        return self.cache.ttl
+
+    def __call__(self, *args, **kwargs):
+        from metalpy.utils.dhash import dhash
+        hashkey = dhash(self.func, *args, kwargs)
+
+        val = undefined
+        if not self.update:
+            val = get_cache(hashkey, ttl=self.ttl)
+
+        if val is not undefined:
+            return val
+        else:
+            val = self.func(*args, **kwargs)
+            put_cache(hashkey, val)
+            return val
+
+
+def get_cache_key(key):
+    from metalpy.utils.dhash import dhash
+    return dhash(key).hexdigest(32)
+
+
+def get_cache_path(key):
+    return make_cache_directory_path('cached') / get_cache_key(key)
+
+
 def put_cache(key, content):
     import cloudpickle
-    from metalpy.utils.dhash import dhash
 
-    file = make_cache_directory_path('cached') / dhash(key).hexdigest(32)
+    file = get_cache_path(key)
     ensure_filepath(file)
     with file.open('wb') as f:
         cloudpickle.dump((key, content), f)
 
 
-def get_cache(key, default=undefined):
+def get_cache(key, default=undefined, ttl: 'timedelta' = None):
+    from datetime import datetime
     import cloudpickle
-    from metalpy.utils.dhash import dhash
 
-    file = make_cache_directory_path('cached') / dhash(key).hexdigest(32)
+    file = get_cache_path(key)
+
     if file.exists():
+        if ttl is not None:
+            if datetime.now() - datetime.fromtimestamp(os.path.getmtime(file)) > ttl:
+                return undefined
+
         with file.open('rb') as f:
             try:
                 cache_key, content = cloudpickle.load(f)
@@ -182,30 +243,16 @@ def get_cache(key, default=undefined):
 
 
 def clear_cache(key):
-    from metalpy.utils.dhash import dhash
-
-    file = make_cache_directory_path('cached') / dhash(key).hexdigest(32)
+    file = get_cache_path(key)
     file.unlink(missing_ok=True)
 
 
-def file_cached(func=None):
+def file_cached(func=None, ttl: 'timedelta' = None):
     import functools
     if func is None:
-        return functools.partial(file_cached)
+        return functools.partial(file_cached, ttl=ttl)
     else:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            from metalpy.utils.dhash import dhash
-            hashkey = dhash(func, *args, kwargs).digest()
-            val = get_cache(hashkey)
-            if val is not undefined:
-                return val
-            else:
-                val = func(*args, **kwargs)
-                put_cache(hashkey, val)
-                return val
-
-        return wrapper
+        return functools.wraps(func)(FileCache(func, ttl=ttl))
 
 
 def openable(path):

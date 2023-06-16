@@ -2,7 +2,7 @@ import numpy as np
 
 
 class Bounds(np.ndarray):
-    def __new__(cls, input_arr):
+    def __new__(cls, input_arr) -> 'Bounds':
         return np.asarray(input_arr).view(cls)
 
     def __array_finalize__(self, _, **__):
@@ -17,7 +17,27 @@ class Bounds(np.ndarray):
             角落点形式表示的
         """
         return self.reshape(2, -1).T.view(Corners)
-    
+
+    def expand(self, proportion=None, increment=None, inplace=False):
+        number = (int, float)
+        deltas = np.tile(np.asarray((-1, 1)), self.n_axes)
+        if increment is None:
+            assert proportion is not None, 'Either `proportion` or `increment` must be provided.'
+            if isinstance(proportion, number):
+                proportion = deltas * proportion
+            increment = self.extent * proportion
+
+        if isinstance(proportion, number):
+            increment = increment * deltas
+
+        if inplace:
+            target = self
+        else:
+            target = self.copy()
+
+        target += increment
+        return target
+
     @property
     def extent(self):
         return self.end - self.origin
@@ -55,6 +75,9 @@ class Bounds(np.ndarray):
 
     @property
     def zmax(self): return self[5]
+
+    @property
+    def n_axes(self): return self.shape[0] // 2
 
 
 class Corners(np.ndarray):
@@ -111,3 +134,6 @@ class Corners(np.ndarray):
 
     @property
     def zmax(self): return self[1, 2]
+
+    @property
+    def n_axes(self): return self.origin.shape[0]

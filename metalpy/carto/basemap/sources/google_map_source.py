@@ -89,6 +89,5 @@ class GoogleMapSource(SimpleTileMapSource):
 
         super().__init__(
             '&'.join(components),
-            google_map_style=True,
             regex=True
         )
