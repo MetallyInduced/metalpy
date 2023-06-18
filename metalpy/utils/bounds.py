@@ -25,7 +25,7 @@ class Bounds(np.ndarray):
             assert proportion is not None, 'Either `proportion` or `increment` must be provided.'
             if isinstance(proportion, number):
                 proportion = deltas * proportion
-            increment = self.extent * proportion
+            increment = self.extent.repeat(2) * proportion
 
         if isinstance(proportion, number):
             increment = increment * deltas

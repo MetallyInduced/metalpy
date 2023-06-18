@@ -180,18 +180,22 @@ class GeoImage:
         bounds = self.geo_bounds
         xs = np.linspace(bounds.xmin, bounds.xmax, self.width)
         ys = np.linspace(bounds.ymin, bounds.ymax, self.height)
-        mesh = np.meshgrid(xs, ys, 0)
-        points = np.stack([axis.ravel() for axis in mesh], axis=1)
-        geo_points: Coordinates = points.view(Coordinates).with_crs(self.crs)
 
-        if dest_crs is not None or query_dest_crs is not None:
-            geo_points.warp(query=Coordinates.SearchUTM, inplace=True)
+        if self.flip_y:
+            ys = ys[::-1]
 
-        grid = pv.PolyData(geo_points)
+        grid = pv.RectilinearGrid(xs, ys, 0)
 
         img = np.asarray(self.image)
         n_channels = img.shape[2] if img.ndim > 2 else 1
         grid['ImageData'] = img.reshape(-1, n_channels)
+
+        grid = grid.cast_to_unstructured_grid()
+        geo_points: Coordinates = grid.points.view(Coordinates).with_crs(self.crs)
+
+        if dest_crs is not None or query_dest_crs is not None:
+            geo_points.warp(crs=dest_crs, query=query_dest_crs, inplace=True)
+            grid.points = geo_points
 
         return grid
 
