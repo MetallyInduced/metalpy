@@ -12,16 +12,10 @@ Installation
 pip install metalpy[carto]
 ```
 
-一些额外功能如创建**geotiff**图像需要安装GDAL，从conda进行安装或者参考
-[GDAL](https://gdal.org/download.html)。
-```console
-conda install libgdal
-```
-
 Features
 --------
 1. 从公开瓦片地图数据源下载底图，支持包括谷歌底图、Wayback历史影像在内的多个数据源。
-支持转换为**geotiff**格式以适用于**GeoServer**等应用（需要GDAL）。
+支持转换为**geotiff**格式以适用于**GeoServer**等应用。
 ```python
 from metalpy.carto.basemap import MapDownloader
 from metalpy.carto.basemap.sources import GoogleMapSource
@@ -36,6 +30,7 @@ if __name__ == '__main__':
         geotiff='./geotiff.tif'  # convert to geotiff format
     )
 ```
+
 2. 从自定义数据源进行地图下载（如ArcGIS Online），支持的占位符包括：
 
 |   类型   |      占位符      |
@@ -44,14 +39,14 @@ if __name__ == '__main__':
 | 东西方向索引 |  {col} / {x}  |
 | 南北方向索引 |  {row} / {y}  |
 
-例如下载[World Imagery (Wayback 2023-05-03)](https://esri.maps.arcgis.com/home/item.html?id=f95ee415e16145e4b70bf10e7a4dd6f5)，
+例如下载[`World Imagery (Wayback 2023-05-03)`](https://esri.maps.arcgis.com/home/item.html?id=f95ee415e16145e4b70bf10e7a4dd6f5)，
 数据源链接可以在网页右下角找到（截至2023/6/11有效）。
 ```python
 from metalpy.carto.basemap import MapDownloader
 from metalpy.carto.basemap.sources import SimpleTileMapSource
 
 if __name__ == '__main__':
-    # 网页原始链接可能将'{'和'}'编码为了'%7B'和'%7D'，转换回来即可
+    # 网页原始链接可能将'{'和'}'编码为了'%7B'和'%7D'，需要手动转换
     source = SimpleTileMapSource('https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/46399/{level}/{row}/{col}')
     map_downloader = MapDownloader(source)
     map_downloader.download(
@@ -64,6 +59,4 @@ if __name__ == '__main__':
 
 TODOs
 -----
-- [ ] Implement coordinate transformation.
-- [ ] Import basemap as 3D objects.
-- [ ] Implement Wayback source.
+- [ ] 支持标准WMTS地图源
