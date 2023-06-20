@@ -13,20 +13,27 @@ class WebMercator:
     """
     DirectionAll = 'all'
     WGS84 = CRS.from_string('WGS 84')
-    WebMercator = CRS.from_string('WGS 84 / Pseudo-Mercator')
+    PseudoMercator = CRS.from_string('WGS 84 / Pseudo-Mercator')
 
-    Perimeter = 2 * np.pi * WebMercator.ellipsoid.semi_major_metre
-    WGS84_WebMercator = Transformer.from_crs(WGS84, WebMercator, always_xy=True)
+    Perimeter = 2 * np.pi * PseudoMercator.ellipsoid.semi_major_metre
+    WGS84_PseudoMercator = Transformer.from_crs(WGS84, PseudoMercator, always_xy=True)
+    PseudoMercator_WGS84 = Transformer.from_crs(PseudoMercator, WGS84, always_xy=True)
 
     @staticmethod
     def wgs84_to_pseudo_mercator(long, lat):
-        """从WGS84转换为WebMercator坐标系，
-        相比于EPSG:3857的Pseudo-Mercator，
-        WebMercator坐标系通过偏移保证坐标为正
+        """从WGS84转换为Pseudo-Mercator坐标系
         """
-        x, y = WebMercator.WGS84_WebMercator.transform(long, lat)
+        x, y = WebMercator.WGS84_PseudoMercator.transform(long, lat)
 
         return x, y
+
+    @staticmethod
+    def pseudo_mercator_to_wgs84(x, y):
+        """从Pseudo-Mercator转换为WGS84坐标系
+        """
+        long, lat = WebMercator.PseudoMercator_WGS84.transform(x, y)
+
+        return long, lat
 
     @staticmethod
     @lru_cache

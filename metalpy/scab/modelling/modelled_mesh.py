@@ -250,7 +250,6 @@ class ModelledMesh:
                 scalars = (scalars,)
 
             for scalar in scalars:
-                warnings.warn(f'Unknown model key {scalar}.')
                 models[scalar] = self._models[scalar]
 
         if extra_models is not None:

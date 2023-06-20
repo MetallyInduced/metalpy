@@ -188,7 +188,7 @@ class GeoImage:
 
         img = np.asarray(self.image)
         n_channels = img.shape[2] if img.ndim > 2 else 1
-        grid['ImageData'] = img.reshape(-1, n_channels)
+        grid['Image'] = img.reshape(-1, n_channels)
 
         grid = grid.cast_to_unstructured_grid()
         geo_points: Coordinates = grid.points.view(Coordinates).with_crs(self.crs)

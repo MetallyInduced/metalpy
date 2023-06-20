@@ -47,7 +47,9 @@ class MapDownloader:
         self.progress = None
 
     def download(self, west_lon=None, east_lon=None, south_lat=None, north_lat=None,
-                 bounds=None, levels=(18,),
+                 bounds=None,
+                 mercator_bounds=None,
+                 levels=(18,),
                  combine: bool | PathLike | None = None,
                  crop: bool | PathLike | None = True,
                  geotiff: PathLike | None = None,
@@ -60,6 +62,8 @@ class MapDownloader:
             下载地图的西、东、南、北边界WGS 84坐标
         bounds
             下载地图的边界WGS 84坐标，以[lon_min, lon_max, lat_min, lat_max]顺序提供
+        mercator_bounds
+            下载地图的边界Pseudo-Mercator坐标，以[xmin, xmax, ymin, ymax]顺序提供
         levels
             需要下载的地图等级
         combine
@@ -81,21 +85,25 @@ class MapDownloader:
         y方向有多次坐标转换，原因为WMTS标准的原点在左下，而图像的原点在左上，拼接以及裁剪时需要将y方向坐标镜像翻转
         """
         ret = None
-        saved_path = None
 
         if bounds is not None:
             bounds = Bounds(bounds)
+        elif mercator_bounds is not None:
+            # 因为地图源的坐标转换是以经纬度为单位的
+            mercator_bounds = Bounds(mercator_bounds)
+            bounds = WebMercator.pseudo_mercator_to_wgs84(mercator_bounds[0:2], mercator_bounds[2:4])
+            bounds = np.concatenate(bounds).view(Bounds)
         else:
             bounds = Bounds([west_lon, east_lon, south_lat, north_lat])
 
         bounds.origin = self.map_source.warp_coordinates(bounds.origin)
         bounds.end = self.map_source.warp_coordinates(bounds.end)
 
+        mercator_bounds = WebMercator.wgs84_to_pseudo_mercator(bounds[0:2], bounds[2:4])
+        mercator_bounds = np.concatenate(mercator_bounds).view(Bounds)
+
         if not isinstance(levels, Iterable):
             levels = (levels,)
-
-        mercator_bounds = WebMercator.wgs84_to_pseudo_mercator(bounds[0:2], bounds[2:4])
-        mercator_bounds = np.concatenate(mercator_bounds)
 
         with self.activate_pool():
             for level in levels:
@@ -145,10 +153,6 @@ class MapDownloader:
                     )
 
                     ret.save_geo_tiff(geotiff_save_path)
-                    # if saved_path is None:
-                    #     ret.save_geo_tiff(geotiff_save_path)
-                    # else:
-                    #     ret.apply_geo_info(saved_path, geotiff_save_path)
 
         return ret
 
@@ -185,7 +189,7 @@ class MapDownloader:
                 ref_system = GeoImageRefSystem.of_unit_edge_bounds(
                     tiles_mercator_bounds.origin,
                     tile_extent / combined_image_size,
-                    crs=WebMercator.WebMercator
+                    crs=WebMercator.PseudoMercator
                 )
 
             geotile = ref_system.map_image(tile, offset=(
