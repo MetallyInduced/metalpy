@@ -39,8 +39,6 @@ class WaybackSource(SimpleTileMapSource):
     MAX_ZOOM = 23
     MIN_ZOOM = 10
 
-    BottomLeftAsOrigin = False
-
     def __init__(self, title, date, rev: Revision, rnum=None, tile_url=None, metadata_url=None):
         """Wayback (esri) 地图数据源
 
@@ -63,8 +61,7 @@ class WaybackSource(SimpleTileMapSource):
         self.metadata_url = metadata_url
 
         super().__init__(
-            tile_url,
-            bottom_left_as_origin=WaybackSource.BottomLeftAsOrigin
+            tile_url
         )
 
     @property
@@ -167,7 +164,6 @@ class WaybackSource(SimpleTileMapSource):
                 tiles = [tiles[i] for i in sample_indices]
 
         for col, row in tiles:
-            col, row = WebMercator.warp_tile_coord(col, row, level, WaybackSource.BottomLeftAsOrigin)
             last_release_num = latest_rnum
 
             while last_release_num is not None:

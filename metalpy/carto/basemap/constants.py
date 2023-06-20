@@ -59,37 +59,62 @@ class WebMercator:
         return WebMercator.Perimeter / WebMercator.tiles_in_axis(direction, level)
 
     @staticmethod
-    def pseudo_mercator_to_tile(coord, level):
-        tile_width = WebMercator.tile_width(WebMercator.DirectionAll, level)
-        return np.floor((coord + WebMercator.Perimeter / 2) / tile_width).astype(np.int32)
-
-    @staticmethod
     def pseudo_mercator_bounds_to_tile(bounds, level):
-        tile_width = WebMercator.tile_width(WebMercator.DirectionAll, level)
-        return np.floor(Bounds(bounds + WebMercator.Perimeter / 2) / tile_width).astype(np.int32)
-
-    @staticmethod
-    def tile_bounds_to_pseudo_mercator(bounds, level):
-        """将tile坐标边界转换为WebMercator坐标边界
+        """将Pseudo-Mercator坐标边界转换为Tile序号边界。
 
         Parameters
         ----------
         bounds
-            tile坐标边界
+            Pseudo-Mercator坐标边界
         level
             地图等级
 
         Returns
         -------
-        web_mercator_bounds
-            WebMercator坐标边界
+        tile_bounds
+            Tile序号边界
+
+        Notes
+        -----
+        由于原点方向不一致，转换后y方向上下边界会交换，例如TileYMax对应MercatorYMin。
+        """
+        tile_width = WebMercator.tile_width(WebMercator.DirectionAll, level)
+        y_tiles = WebMercator.tiles_in_axis(WebMercator.DirectionAll, level)
+
+        ret = np.floor(Bounds(bounds + WebMercator.Perimeter / 2) / tile_width).astype(np.int32)
+        ret.ymin, ret.ymax = y_tiles - ret.ymax - 1, y_tiles - ret.ymin - 1
+
+        return ret
+
+    @staticmethod
+    def tile_bounds_to_pseudo_mercator(bounds, level):
+        """将Tile序号边界转换为Pseudo-Mercator坐标边界
+
+        Parameters
+        ----------
+        bounds
+            Tile序号边界
+        level
+            地图等级
+
+        Returns
+        -------
+        pseudo_mercator_bounds
+            Pseudo-Mercator坐标边界
 
         Notes
         -----
         由于tile坐标指向的为一个瓦片而非点，因此边界转换时会取最小位置瓦片的下边界和最大位置瓦片的上边界
+
+        由于原点方向不一致，转换后y方向上下边界会交换，例如MercatorYMin对应TileYMax。
         """
         tile_width = WebMercator.tile_width(WebMercator.DirectionAll, level)
-        return (Bounds(bounds) + [0, 1, 0, 1]) * tile_width - WebMercator.Perimeter / 2
+        y_tiles = WebMercator.tiles_in_axis(WebMercator.DirectionAll, level)
+
+        bounds = Bounds(bounds).copy()
+        bounds.ymin, bounds.ymax = y_tiles - bounds.ymax - 1, y_tiles - bounds.ymin - 1
+
+        return (bounds + [0, 1, 0, 1]) * tile_width - WebMercator.Perimeter / 2
 
     @staticmethod
     def iter_tiles(mercator_bounds, level):
@@ -102,8 +127,7 @@ class WebMercator:
 
     @staticmethod
     def warp_tile_coord(x, y, z, bottom_left_as_origin=False):
-        """WMTS规定北纬85.05°为零点，而carto中约定南纬85.05°为零点，
-        因此Y方向tile坐标会有区别
+        """WMTS规定北纬85.05°为零点，该函数用于根据给定参数，转换为对应的南纬85.05°为零点或不转换
 
         Parameters
         ----------
@@ -119,6 +143,6 @@ class WebMercator:
         tile_coord_in_top_left_as_origin
             给定约定下的tile坐标
         """
-        if not bottom_left_as_origin:
+        if bottom_left_as_origin:
             y = WebMercator.tiles_in_axis(1, z) - y - 1
         return x, y

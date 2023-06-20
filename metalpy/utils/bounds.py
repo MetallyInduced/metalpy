@@ -61,20 +61,38 @@ class Bounds(np.ndarray):
     @property
     def xmin(self): return self[0]
 
+    @xmin.setter
+    def xmin(self, v): self[0] = v
+
     @property
     def xmax(self): return self[1]
+
+    @xmax.setter
+    def xmax(self, v): self[1] = v
 
     @property
     def ymin(self): return self[2]
 
+    @ymin.setter
+    def ymin(self, v): self[2] = v
+
     @property
     def ymax(self): return self[3]
+
+    @ymax.setter
+    def ymax(self, v): self[3] = v
 
     @property
     def zmin(self): return self[4]
 
+    @zmin.setter
+    def zmin(self, v): self[4] = v
+
     @property
     def zmax(self): return self[5]
+
+    @zmax.setter
+    def zmax(self, v): self[5] = v
 
     @property
     def n_axes(self): return self.shape[0] // 2
@@ -120,20 +138,38 @@ class Corners(np.ndarray):
     @property
     def xmin(self): return self[0, 0]
 
+    @xmin.setter
+    def xmin(self, v): self[0, 0] = v
+
     @property
     def xmax(self): return self[1, 0]
+
+    @xmax.setter
+    def xmax(self, v): self[1, 0] = v
 
     @property
     def ymin(self): return self[0, 1]
 
+    @ymin.setter
+    def ymin(self, v): self[0, 1] = v
+
     @property
     def ymax(self): return self[1, 1]
+
+    @ymax.setter
+    def ymax(self, v): self[1, 1] = v
 
     @property
     def zmin(self): return self[0, 2]
 
+    @zmin.setter
+    def zmin(self, v): self[0, 2] = v
+
     @property
     def zmax(self): return self[1, 2]
+
+    @zmax.setter
+    def zmax(self, v): self[1, 2] = v
 
     @property
     def n_axes(self): return self.origin.shape[0]

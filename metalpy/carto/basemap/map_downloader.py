@@ -173,7 +173,7 @@ class MapDownloader:
 
         tile_extent = tiles_mercator_bounds.extent
         tile_count = tile_bounds.extent + 1
-        col0, row0 = tile_bounds.xmin, tile_bounds.ymin
+        col0, row1 = tile_bounds.xmin, tile_bounds.ymax
 
         tile_size = None
 
@@ -194,7 +194,7 @@ class MapDownloader:
 
             geotile = ref_system.map_image(tile, offset=(
                 (col - col0) * tile_size[0],
-                (row - row0) * tile_size[1]
+                (row1 - row) * tile_size[1]
             ))
 
             yield geotile
@@ -232,6 +232,7 @@ class MapDownloader:
 
         for (col, row), future in zip(tiles, futures):
             tile = future.get()
+            progress.update(1)
             yield col, row, tile
 
         progress.close()
