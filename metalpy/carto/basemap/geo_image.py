@@ -32,29 +32,29 @@ class GeoImage:
         -----
         当`flip_y=True`，地理坐标系和图像坐标系的y轴方向相反，如图所示
         此时offset为从坐标系原点到图像左下角的距离
-        ↑ unit_y
-        │  ┌────────────────────────→ img_x
+        ↑ unit_y (m)
+        │  ┌────────────────────────→ img_x (px)
         │  │┌────────────────────┐
         │  ││                    │
         │  ││          ┌─────┐   │
         │  ││          │     │   │
         │  ││          └─────┘   │
         │  │└────────────────────┘
-        │  ↓ img_y
-        └───────────────────────────────────→ unit_x
+        │  ↓ img_y (px)
+        └───────────────────────────────────→ unit_x (m)
 
         当`flip_y=False`，地理坐标系和图像坐标系的y轴方向相同，如图所示
         此时offset为从坐标系原点到图像左上角的距离
-        ┌──────────────────────────────────→ unit_x
-        │  ┌────────────────────────→ img_x
+        ↑ unit_y (m)
+        │  ↑ img_y (px)
         │  │┌────────────────────┐
         │  ││                    │
         │  ││          ┌─────┐   │
         │  ││          │     │   │
         │  ││          └─────┘   │
         │  │└────────────────────┘
-        │  ↓ img_y
-        ↓ unit_y
+        │  └────────────────────────→ img_x (px)
+        └───────────────────────────────────→ unit_x (m)
         """
         self.image = image
         self.offset = np.array(offset)
@@ -142,38 +142,6 @@ class GeoImage:
 
         self.image.paste(img.image, offset)
 
-    def save(self, fp, format=None, **params):
-        self.image.save(fp, format=format, **params)
-
-    def save_geo_tiff(self, path):
-        import rasterio
-        from rasterio.transform import Affine
-
-        transform = Affine.translation(*self.geo_bounds.origin) * Affine.scale(*self.unit_size)
-        image_arr = np.asarray(self.image)
-
-        if image_arr.ndim < 3:
-            channels = 1
-        else:
-            channels = image_arr.shape[2]
-
-        with rasterio.open(
-            path,
-            'w',
-            driver='GTiff',
-            width=self.width,
-            height=self.height,
-            count=channels,
-            dtype=image_arr.dtype,
-            crs=self.crs,
-            transform=transform,
-        ) as dataset:
-            if image_arr.ndim < 3:
-                dataset.write(image_arr, 1)
-            else:
-                for dim in range(channels):
-                    dataset.write(image_arr[:, :, dim], dim + 1)
-
     def to_polydata(self, dest_crs: CRSLike | None = None, query_dest_crs: CRSQuery | None = None):
         import pyvista as pv
 
@@ -199,6 +167,42 @@ class GeoImage:
 
         return grid
 
+    def save(self, fp, format=None, **params):
+        self.image.save(fp, format=format, **params)
+
+    def save_geo_tiff(self, path):
+        import rasterio
+        from rasterio.transform import Affine
+
+        # 需要注意图像矩阵存储向下为正，而数据向上（北）为正。
+        # offset为左上角像素中心点位置，左上角实际为(xmin, ymax)，
+        # 且y_scale < 0，即图像行索引增加方向为坐标值减少方向（南方向）
+        bounds = self.geo_bounds
+        transform = Affine.translation(bounds.xmin, bounds.ymax) * Affine.scale(self.unit_size[0], -self.unit_size[1])
+        image_arr = np.asarray(self.image)
+
+        if image_arr.ndim < 3:
+            channels = 1
+        else:
+            channels = image_arr.shape[2]
+
+        with rasterio.open(
+            path,
+            'w',
+            driver='GTiff',
+            width=self.width,
+            height=self.height,
+            count=channels,
+            dtype=image_arr.dtype,
+            crs=self.crs,
+            transform=transform,
+        ) as dataset:
+            if image_arr.ndim < 3:
+                dataset.write(image_arr, 1)
+            else:
+                for dim in range(channels):
+                    dataset.write(image_arr[:, :, dim], dim + 1)
+
     @staticmethod
     def read(path):
         import rasterio
@@ -210,11 +214,19 @@ class GeoImage:
             assert transform.identity() == Affine(1.0, 0.0, 0.0, 0.0, 1.0, 0.0), \
                 'GeoImage supports only translation and scaling as transform.'
 
-            ref = GeoImageRefSystem(
-                origin=(transform.xoff, transform.yoff),
-                unit_size=(transform[0], transform[4]),
+            origin = (transform.xoff, transform.yoff)
+            unit_size = (transform[0], transform[4])
+            ref = GeoImageRefSystem.of_unit_center_bounds(
+                center_origin=origin,
+                unit_size=unit_size,
                 crs=dataset.crs
             )
             raster = reshape_as_image(dataset.read())
+            image = PIL.Image.fromarray(raster)
 
-            return ref.map_image(PIL.Image.fromarray(raster))
+            if not ref.flip_y:
+                offset = (0, 0)
+            else:
+                offset = (0, -image.height)
+
+            return ref.map_image(image, offset=offset)

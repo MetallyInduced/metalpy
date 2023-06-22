@@ -6,13 +6,13 @@ from metalpy.utils.bounds import Bounds
 
 
 class GeoImageRefSystem:
-    def __init__(self, origin, unit_size, crs=None, flip_y=True):
+    def __init__(self, origin, unit_size, crs=None, flip_y=None):
         """用于表示地理图像的各个像素中心点和地理坐标的映射关系
 
         Parameters
         ----------
         origin
-            地理图像参考系的原点
+            地理图像参考系的原点，以像素边缘为边界
         unit_size
             地理图像参考系每个单元（像素）对应的地理距离
         crs
@@ -24,8 +24,15 @@ class GeoImageRefSystem:
         -----
         地理坐标系保证与单位网格坐标系方向相同，图像坐标系只在涉及图像处理时才会引入，此时才会考虑`flip_y`等问题
         """
-        self.origin = np.array(origin)
-        self.unit_size = np.array(unit_size)
+        unit_size = np.array(unit_size)
+        origin = np.array(origin)
+
+        assert unit_size[0] > 0, 'Flipping of X axis is not allowed.'
+        if flip_y is None:
+            flip_y = unit_size[1] < 0
+
+        self.origin = origin
+        self.unit_size = np.abs(unit_size)
         self.flip_y = flip_y
 
         if crs is not None:
@@ -57,7 +64,7 @@ class GeoImageRefSystem:
 
         return GeoImage(Image.new('RGBA', tuple(image_size)), offset, self)
 
-    def map_image(self, image, offset=(0, 0), geo_offset=None):
+    def map_image(self, image: Image.Image, offset=(0, 0), geo_offset=None):
         from metalpy.carto.basemap.geo_image import GeoImage
 
         if geo_offset is not None:
@@ -76,11 +83,11 @@ class GeoImageRefSystem:
         return corners.as_bounds()
 
     @staticmethod
-    def of_unit_edge_bounds(edge_bounds, unit_size, crs=None, flip_y=True):
+    def of_unit_edge_bounds(edge_origin, unit_size, crs=None, flip_y=None) -> 'GeoImageRefSystem':
         """
         Notes
         -----
-                                 ↓ bounds[right top]
+                                 ↓ end[right top]
             ┌────┬────┬─────┬────┐ ←
             │    │    │ ... │    │
             ├────┼────┼─────┼────┤
@@ -88,16 +95,16 @@ class GeoImageRefSystem:
             ├────┼────┼─────┼────┤
             │    │    │ ... │    │
           → └────┴────┴─────┴────┘
-            ↑ bounds[left bottom]
+            ↑ origin[left bottom]
         """
-        return GeoImageRefSystem(edge_bounds, unit_size, crs=crs, flip_y=flip_y)
+        return GeoImageRefSystem(edge_origin, unit_size, crs=crs, flip_y=flip_y)
 
     @staticmethod
-    def of_unit_center_bounds(center_bounds, unit_size, crs=None, flip_y=True):
+    def of_unit_center_bounds(center_origin, unit_size, crs=None, flip_y=None) -> 'GeoImageRefSystem':
         """
         Notes
         -----
-                              ↓ bounds[right top]
+                              ↓ end[right top]
             ┌────┬────┬─────┬────┐
             │    │    │ ... │    │ ←
             ├────┼────┼─────┼────┤
@@ -105,10 +112,10 @@ class GeoImageRefSystem:
             ├────┼────┼─────┼────┤
           → │    │    │ ... │    │
             └────┴────┴─────┴────┘
-              ↑ bounds[left bottom]
+              ↑ origin[left bottom]
         """
         return GeoImageRefSystem(
-            center_bounds - np.asarray(unit_size) / 2,
+            center_origin - np.asarray(unit_size) / 2,
             unit_size,
             crs=crs,
             flip_y=flip_y

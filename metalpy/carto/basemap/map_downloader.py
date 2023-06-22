@@ -7,7 +7,7 @@ from io import BytesIO
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from threading import Lock
-from typing import Iterable
+from typing import Iterable, Generator
 
 import numpy as np
 import requests
@@ -89,37 +89,47 @@ class MapDownloader:
         if bounds is not None:
             bounds = Bounds(bounds)
         elif mercator_bounds is not None:
-            # 因为地图源的坐标转换是以经纬度为单位的
+            # 因为地图源的坐标转换以经纬度为单位，因此仍然需要一份WGS 84边界坐标
             mercator_bounds = Bounds(mercator_bounds)
             bounds = WebMercator.pseudo_mercator_to_wgs84(mercator_bounds[0:2], mercator_bounds[2:4])
             bounds = np.concatenate(bounds).view(Bounds)
         else:
             bounds = Bounds([west_lon, east_lon, south_lat, north_lat])
 
+        if mercator_bounds is None:
+            tmb_xy = WebMercator.wgs84_to_pseudo_mercator(bounds[0:2], bounds[2:4])
+            true_mercator_bounds = np.concatenate(tmb_xy)
+        else:
+            true_mercator_bounds = np.asarray(mercator_bounds)
+
         bounds.origin = self.map_source.warp_coordinates(bounds.origin)
         bounds.end = self.map_source.warp_coordinates(bounds.end)
 
-        mercator_bounds = WebMercator.wgs84_to_pseudo_mercator(bounds[0:2], bounds[2:4])
-        mercator_bounds = np.concatenate(mercator_bounds).view(Bounds)
+        mb_xy = WebMercator.wgs84_to_pseudo_mercator(bounds[0:2], bounds[2:4])
+        mercator_bounds = np.concatenate(mb_xy).view(Bounds)
 
         if not isinstance(levels, Iterable):
             levels = (levels,)
 
         with self.activate_pool():
             for level in levels:
-                tile_bounds = WebMercator.pseudo_mercator_bounds_to_tile(mercator_bounds, level)
-                tiles_mercator_bounds = WebMercator.tile_bounds_to_pseudo_mercator(tile_bounds, level)
-                ref_system = None
-                for tile in self.download_geo_tiles(mercator_bounds, level, cache):
+                true_tiles_mercator_bounds = WebMercator.to_bounding_tiles_mercator_bounds(true_mercator_bounds, level)
+                ref_system: GeoImageRefSystem | None = None
+                tiles = self.download_geo_tiles(
+                    mercator_bounds, level,
+                    cache=cache,
+                    true_tiles_mercator_bounds=true_tiles_mercator_bounds
+                )
+                for tile in tiles:
                     if ref_system is None:
                         ref_system = tile.ref_system
                         if combine or (geotiff and not crop):
                             canvas = ref_system.create_image(
-                                geo_bounds=tiles_mercator_bounds
+                                geo_bounds=true_tiles_mercator_bounds
                             )
                         elif crop:
                             canvas = ref_system.create_image(
-                                geo_bounds=mercator_bounds
+                                geo_bounds=true_mercator_bounds
                             )
                     canvas.paste(tile)
 
@@ -135,7 +145,7 @@ class MapDownloader:
 
                 if crop:
                     if combine:
-                        cropped = combined.crop(geo_bounds=mercator_bounds)
+                        cropped = combined.crop(geo_bounds=true_mercator_bounds)
                     else:
                         cropped = canvas
 
@@ -160,7 +170,36 @@ class MapDownloader:
                            mercator_bounds,
                            level,
                            cache: bool | PathLike | None = None,
-                           ref_system=None):
+                           true_tiles_mercator_bounds=None,
+                           ref_system=None) -> Generator[GeoImage]:
+        """下载Tile地图并转换为GeoTIFF形式
+
+        Parameters
+        ----------
+        mercator_bounds
+            Pseudo-Mercator边界
+        level
+            缩放等级
+        cache
+            缓存/缓存路径
+        true_tiles_mercator_bounds
+            边界坐标变换前的Pseudo-Mercator边界
+        ref_system
+            参考系（原点需为裁剪前瓦片地图区域左下角）
+
+        Returns
+        -------
+        iterable[geo_tile]
+            带坐标位置信息的Tile序列
+
+        See Also
+        --------
+        MapDownloader.download : 地图下载主函数
+
+        Notes
+        -----
+        某些地图源由于坐标系不一致，包含边界坐标变换步骤，需要调用者手动执行（参考MapDownloader.download方法）
+        """
         tiles = list(WebMercator.iter_tiles(mercator_bounds, level))
         force_cache, cache_path = self.get_cache_path(cache)
 
@@ -171,7 +210,12 @@ class MapDownloader:
         tile_bounds = WebMercator.pseudo_mercator_bounds_to_tile(mercator_bounds, level)
         tiles_mercator_bounds = WebMercator.tile_bounds_to_pseudo_mercator(tile_bounds, level)
 
-        tile_extent = tiles_mercator_bounds.extent
+        if true_tiles_mercator_bounds is None:
+            true_tiles_mercator_bounds = tiles_mercator_bounds
+        else:
+            true_tiles_mercator_bounds = Bounds(true_tiles_mercator_bounds)
+
+        tile_extent = true_tiles_mercator_bounds.extent
         tile_count = tile_bounds.extent + 1
         col0, row1 = tile_bounds.xmin, tile_bounds.ymax
 
@@ -187,9 +231,10 @@ class MapDownloader:
                     tile_size[1] * tile_count[1]
                 )
                 ref_system = GeoImageRefSystem.of_unit_edge_bounds(
-                    tiles_mercator_bounds.origin,
+                    true_tiles_mercator_bounds.origin,
                     tile_extent / combined_image_size,
-                    crs=WebMercator.PseudoMercator
+                    crs=WebMercator.PseudoMercator,
+                    flip_y=True
                 )
 
             geotile = ref_system.map_image(tile, offset=(

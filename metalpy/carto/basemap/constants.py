@@ -67,7 +67,7 @@ class WebMercator:
         bounds
             Pseudo-Mercator坐标边界
         level
-            地图等级
+            缩放等级
 
         Returns
         -------
@@ -95,7 +95,7 @@ class WebMercator:
         bounds
             Tile序号边界
         level
-            地图等级
+            缩放等级
 
         Returns
         -------
@@ -115,6 +115,27 @@ class WebMercator:
         bounds.ymin, bounds.ymax = y_tiles - bounds.ymax - 1, y_tiles - bounds.ymin - 1
 
         return (bounds + [0, 1, 0, 1]) * tile_width - WebMercator.Perimeter / 2
+
+    @staticmethod
+    def to_bounding_tiles_mercator_bounds(mercator_bounds, level):
+        """将Pseudo-Mercator边界坐标扩大为所涉及的Tile的Pseudo-Mercator边界
+        
+        Parameters
+        ----------
+        mercator_bounds
+            需要的地图边界
+        level
+            缩放等级
+
+        Returns
+        -------
+        tiles_mercator_bounds
+            所涉及Tile的Pseudo-Mercator边界
+        """
+        tile_bounds = WebMercator.pseudo_mercator_bounds_to_tile(mercator_bounds, level)
+        tiles_mercator_bounds = WebMercator.tile_bounds_to_pseudo_mercator(tile_bounds, level)
+
+        return tiles_mercator_bounds
 
     @staticmethod
     def iter_tiles(mercator_bounds, level):
