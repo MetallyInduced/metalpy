@@ -85,11 +85,19 @@ class GeoImage:
 
     @property
     def geo_bounds(self):
-        """边界像素的中心点的坐标
+        """边界像素的中心点所形成的边界框
         """
         return self.ref_system.to_geo_bounds(
             self.bounds
             + (0.5, -0.5, 0.5, -0.5)
+        )
+
+    @property
+    def edge_geo_bounds(self):
+        """边界像素的外边界框
+        """
+        return self.ref_system.to_geo_bounds(
+            self.bounds
         )
 
     @property
@@ -145,9 +153,9 @@ class GeoImage:
     def to_polydata(self, dest_crs: CRSLike | None = None, query_dest_crs: CRSQuery | None = None):
         import pyvista as pv
 
-        bounds = self.geo_bounds
-        xs = np.linspace(bounds.xmin, bounds.xmax, self.width)
-        ys = np.linspace(bounds.ymin, bounds.ymax, self.height)
+        bounds = self.edge_geo_bounds
+        xs = np.linspace(bounds.xmin, bounds.xmax, self.width + 1)
+        ys = np.linspace(bounds.ymin, bounds.ymax, self.height + 1)
 
         if self.flip_y:
             ys = ys[::-1]
