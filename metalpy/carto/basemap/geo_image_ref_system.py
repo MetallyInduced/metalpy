@@ -74,13 +74,16 @@ class GeoImageRefSystem:
 
     def to_unit_bounds(self, bounds):
         corners = (Bounds(bounds).as_corners() - self.origin) / self.unit_size
-        corners[0] = np.floor(corners[0])
-        corners[1] = np.ceil(corners[1])
+        corners.origin = np.floor(corners.origin)
+        corners.end = np.ceil(corners.end)
         return corners.as_bounds()
 
     def to_geo_bounds(self, bounds):
         corners = Bounds(bounds).as_corners() * self.unit_size + self.origin
         return corners.as_bounds()
+
+    def to_edge_geo_bounds(self, geo_bounds):
+        return self.to_geo_bounds(self.to_unit_bounds(geo_bounds))
 
     @staticmethod
     def of_unit_edge_bounds(edge_origin, unit_size, crs=None, flip_y=None) -> 'GeoImageRefSystem':

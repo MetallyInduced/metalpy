@@ -54,7 +54,7 @@ class MapDownloader:
                  crop: bool | PathLike | None = True,
                  geotiff: PathLike | None = None,
                  cache: bool | PathLike | None = None) -> GeoImage:
-        """
+        """下载区域内地图瓦片，并进行组合、裁剪得到参数指定区域的地图数据
 
         Parameters
         ----------
@@ -82,9 +82,13 @@ class MapDownloader:
 
         Notes
         -----
-        y方向有多次坐标转换，原因为WMTS标准的原点在左下，而图像的原点在左上，拼接以及裁剪时需要将y方向坐标镜像翻转
+        cache缓存路径具体为'{cache_path}/{map_source_name}'
         """
         ret = None
+
+        if not combine and not crop:
+            assert geotiff, 'At least one of `combine`, `crop` or `geotiff` must be specified.'
+            combine = True
 
         if bounds is not None:
             bounds = Bounds(bounds)
@@ -101,6 +105,7 @@ class MapDownloader:
             true_mercator_bounds = np.concatenate(tmb_xy)
         else:
             true_mercator_bounds = np.asarray(mercator_bounds)
+        true_mercator_bounds = Bounds(true_mercator_bounds)
 
         bounds.origin = self.map_source.warp_coordinates(bounds.origin)
         bounds.end = self.map_source.warp_coordinates(bounds.end)
@@ -108,28 +113,29 @@ class MapDownloader:
         mb_xy = WebMercator.wgs84_to_pseudo_mercator(bounds[0:2], bounds[2:4])
         mercator_bounds = np.concatenate(mb_xy).view(Bounds)
 
+        warped = not np.allclose(mercator_bounds, true_mercator_bounds)
+
         if not isinstance(levels, Iterable):
             levels = (levels,)
 
         with self.activate_pool():
             for level in levels:
-                true_tiles_mercator_bounds = WebMercator.to_bounding_tiles_mercator_bounds(true_mercator_bounds, level)
+                tiles_mercator_bounds = WebMercator.to_bounding_tiles_mercator_bounds(mercator_bounds, level)
                 ref_system: GeoImageRefSystem | None = None
                 tiles = self.download_geo_tiles(
                     mercator_bounds, level,
-                    cache=cache,
-                    true_tiles_mercator_bounds=true_tiles_mercator_bounds
+                    cache=cache
                 )
                 for tile in tiles:
                     if ref_system is None:
                         ref_system = tile.ref_system
-                        if combine or (geotiff and not crop):
+                        if combine:
                             canvas = ref_system.create_image(
-                                geo_bounds=true_tiles_mercator_bounds
+                                geo_bounds=tiles_mercator_bounds
                             )
-                        elif crop:
+                        else:  # 上文保证crop和combine至少有一个为True，因此此处crop=True
                             canvas = ref_system.create_image(
-                                geo_bounds=true_mercator_bounds
+                                geo_bounds=mercator_bounds
                             )
                     canvas.paste(tile)
 
@@ -145,7 +151,7 @@ class MapDownloader:
 
                 if crop:
                     if combine:
-                        cropped = combined.crop(geo_bounds=true_mercator_bounds)
+                        cropped = combined.crop(geo_bounds=mercator_bounds)
                     else:
                         cropped = canvas
 
@@ -156,6 +162,40 @@ class MapDownloader:
                             crop, level, levels, 'cropped'
                         )
                         cropped.save(saved_path)
+
+                # combine和crop输出png图像，与地理坐标系无关，因此坐标纠正可以在之后进行
+                if warped:
+                    # true_mercator_bounds为标准WGS 84坐标系下的地图边界
+                    # mercator_bounds为地图源转换后坐标系下的地图边界
+                    # 此处假设坐标转换前后区域尺度整体为线性变换，因此直接平移缩放转换到WGS 84下的地图边界
+                    checks = []
+
+                    # 尝试转换原点
+                    ref_system.origin -= mercator_bounds.origin - true_mercator_bounds.origin
+
+                    # 检查边界对齐情况
+                    if crop:
+                        edge_true_mercator_bounds = ref_system.to_edge_geo_bounds(true_mercator_bounds)
+                        delta_bounds = np.abs(canvas.edge_geo_bounds - edge_true_mercator_bounds)
+                        pixel_biases = delta_bounds.as_corners() / canvas.unit_size
+                        if np.any(pixel_biases > 1):
+                            checks.append(f'misaligned boundary ({pixel_biases.max():.2}px)')
+
+                    # 计算源和目标区域缩放因子
+                    scale_factor = true_mercator_bounds.extent / mercator_bounds.extent
+
+                    # 检查区域尺度差异
+                    relative_extent_diff = np.abs(scale_factor - 1)
+                    if np.any(relative_extent_diff > 0.01):
+                        checks.append(f'large scale difference ({relative_extent_diff.max():.2%})')
+
+                    # 尝试转换坐标轴尺度
+                    ref_system.unit_size *= scale_factor
+
+                    if len(checks) > 0:
+                        warnings.warn(f'{" and ".join(checks).capitalize()} detected.'
+                                      f' due to coordinates transformation by `{self.map_source}`.'
+                                      f' Consider using other map sources instead.')
 
                 if geotiff:
                     geotiff_save_path = MapDownloader.encode_filename_with_level(
