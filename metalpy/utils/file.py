@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 import os
 import traceback
 import warnings
+from functools import cache
 from pathlib import Path
 from typing import Union, TYPE_CHECKING
 
+from .object_path import ObjectPath, objpath
 from .type import ensure_as_iterable, undefined
 
 if TYPE_CHECKING:
@@ -185,45 +189,54 @@ class FileCachedCall:
     def ttl(self):
         return self.cache.ttl
 
+    @cache
+    def get_func_namespace(self):
+        return objpath(ObjectPath.of(self.func).nested_path)
+
     def __call__(self, *args, **kwargs):
         from metalpy.utils.dhash import dhash
+        name = self.get_func_namespace()
         hashkey = dhash(self.func, *args, kwargs)
 
         val = undefined
         if not self.update:
-            val = get_cache(hashkey, ttl=self.ttl)
+            val = get_cache(hashkey, ttl=self.ttl, name=name)
 
         if val is not undefined:
             return val
         else:
             val = self.func(*args, **kwargs)
-            put_cache(hashkey, val)
+            put_cache(hashkey, val, name=name)
             return val
 
 
-def get_cache_key(key):
+def get_cache_key(key, name: str | None = None):
     from metalpy.utils.dhash import dhash
-    return dhash(key).hexdigest(32)
+    code = dhash(key).hexdigest(32)
+    if name is not None:
+        return f'{name}[{code}]'
+    else:
+        return code
 
 
-def get_cache_path(key):
-    return make_cache_directory_path('cached') / get_cache_key(key)
+def get_cache_path(key, name: str | None = None):
+    return make_cache_directory_path('cached') / get_cache_key(key, name=name)
 
 
-def put_cache(key, content):
+def put_cache(key, content, name: str | None = None):
     import cloudpickle
 
-    file = get_cache_path(key)
+    file = get_cache_path(key, name=name)
     ensure_filepath(file)
     with file.open('wb') as f:
         cloudpickle.dump((key, content), f)
 
 
-def get_cache(key, default=undefined, ttl: 'timedelta' = None):
+def get_cache(key, default=undefined, ttl: 'timedelta' = None, name: str | None = None):
     from datetime import datetime
     import cloudpickle
 
-    file = get_cache_path(key)
+    file = get_cache_path(key, name=name)
 
     if file.exists():
         if ttl is not None:
@@ -242,8 +255,8 @@ def get_cache(key, default=undefined, ttl: 'timedelta' = None):
     return default
 
 
-def clear_cache(key):
-    file = get_cache_path(key)
+def clear_cache(key, name: str | None = None):
+    file = get_cache_path(key, name=name)
     file.unlink(missing_ok=True)
 
 

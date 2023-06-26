@@ -78,7 +78,8 @@ class DHash:
                 yield obj
 
     def digest(self):
-        return self.result
+        # TODO: 使用更合理的哈希函数，Python自带的哈希函数会导致结果存在负数
+        return abs(self.result)
 
     def hexdigest(self, digits=32):
         hash_value = self.digest()
