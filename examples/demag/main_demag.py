@@ -22,7 +22,7 @@ from metalpy.utils.time import Timer
 
 def main(grid_size, gpu=False):
     if gpu:
-        ti_prepare(arch=ti.gpu)
+        ti_prepare(arch=ti.gpu, device_memory_fraction=0.8)
 
     a, c = 10, 40
     timer = Timer()

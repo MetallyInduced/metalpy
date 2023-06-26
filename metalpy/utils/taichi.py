@@ -5,9 +5,7 @@ import warnings
 from typing import Sized
 
 import taichi as ti
-from taichi import TaichiSyntaxError, TaichiCompilationError, TaichiRuntimeError
-from taichi.lang.enums import AutodiffMode
-from taichi.lang.kernel_impl import _inside_class, Kernel
+from taichi.lang.kernel_impl import _kernel_impl
 from taichi.lang.util import to_taichi_type
 
 from .file import make_cache_directory, make_cache_file
@@ -91,54 +89,14 @@ def ti_real_func(fn):
 
 
 def ti_kernel(fn):
-    # TODO: 由于ti.kernel使用了一个hack来判断是否定义在class内，
-    #  因此这里改造了一份ti.lang.kernel_impl._kernel_impl来实现自动初始化
-    # Can decorators determine if a function is being defined inside a class?
-    # https://stackoverflow.com/a/8793684/12003165
-    is_classkernel = _inside_class(2 + 1)
+    ti_wrapped = _kernel_impl(fn, level_of_class_stackframe=3)
 
-    primal = Kernel(fn,
-                    autodiff_mode=AutodiffMode.NONE,
-                    _classkernel=is_classkernel)
-    adjoint = Kernel(fn,
-                     autodiff_mode=AutodiffMode.REVERSE,
-                     _classkernel=is_classkernel)
-    # Having |primal| contains |grad| makes the tape work.
-    primal.grad = adjoint
+    @functools.wraps(ti_wrapped)
+    def auto_init_wrapped(*args, **kwargs):
+        ti_init_once()  # 完成初始化
+        return ti_wrapped(*args, **kwargs)
 
-    if is_classkernel:
-        # For class kernels, their primal/adjoint callables are constructed
-        # when the kernel is accessed via the instance inside
-        # _BoundedDifferentiableMethod.
-        # This is because we need to bind the kernel or |grad| to the instance
-        # owning the kernel, which is not known until the kernel is accessed.
-        #
-        # See also: _BoundedDifferentiableMethod, data_oriented.
-        @functools.wraps(fn)
-        def wrapped(*args, **kwargs):
-            # If we reach here (we should never), it means the class is not decorated
-            # with @ti.data_oriented, otherwise getattr would have intercepted the call.
-            clsobj = type(args[0])
-            assert not hasattr(clsobj, '_data_oriented')
-            raise TaichiSyntaxError(
-                f'Please decorate class {clsobj.__name__} with @ti.data_oriented'
-            )
-    else:
-        @functools.wraps(fn)
-        def wrapped(*args, **kwargs):
-            try:
-                ti_init_once()  # 完成初始化
-                return primal(*args, **kwargs)
-            except (TaichiCompilationError, TaichiRuntimeError) as e:
-                raise type(e)('\n' + str(e)) from None
-
-        wrapped.grad = adjoint
-
-    wrapped._is_wrapped_kernel = True
-    wrapped._is_classkernel = is_classkernel
-    wrapped._primal = primal
-    wrapped._adjoint = adjoint
-    return wrapped
+    return auto_init_wrapped
 
 
 def ti_data_oriented(cls):
@@ -242,7 +200,7 @@ def ti_test_snode_support() -> bool:
             builder.finalize()
             _ = dummy.to_numpy()
             ret = True
-    except RuntimeError:
+    except RuntimeError as e:
         ret = False
 
     with open(snode_support_indicator_cache, 'w') as f:
