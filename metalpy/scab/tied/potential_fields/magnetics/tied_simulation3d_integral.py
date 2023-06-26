@@ -134,8 +134,11 @@ class TaichiSimulation3DIntegral:
 
         n_rows = sum(receiver.n_rows for receiver in self.receivers)
         if is_cpu:
-            ret = np.empty((n_rows, n_cols), dtype=np.float64)
+            ret = np.zeros((n_rows, n_cols), dtype=np.float64)
         else:
+            # According to https://docs.taichi-lang.org/docs/ndarray, or
+            # https://github.com/taichi-dev/taichi/blob/8fdf7a7d/docs/lang/articles/basic/ndarray.md?plain=1#L23C35-L23C35
+            # ti.ndarray-s are initialized to 0 by default.
             ret = ti_ndarray(dtype=ti.f64, shape=(n_rows, n_cols))
 
         # TODO: 由于Taichi目前采用i32作为索引类型，数组元素总数不能超过int32的上限，否则行为未定义
@@ -266,10 +269,6 @@ class TaichiSimulation3DIntegral:
         -----
             非forward_only模式下，model参数不会参与计算
         """
-        # initialize with zeros
-        n_rows = receiver_locations.shape[0] * n_components
-        for i, j in ti.ndrange(n_rows, ret.shape[1]):
-            ret[i + start_row, j] = 0
 
         tol1 = 1e-10  # Tolerance 1 for numerical stability over nodes and edges
         tol2 = 1e-4  # Tolerance 2 for numerical stability over nodes and edges
@@ -811,7 +810,7 @@ class TaichiSimulation3DIntegral:
         tz *= magnetization[icell, 2]
 
         if ti.static(self.model_type == 0):  # MType_Vector
-            if not ti.static(forward_only):
+            if ti.static(not forward_only):
                 jx = self.in_row_index(icell, 0)
                 jy = self.in_row_index(icell, 1)
                 jz = self.in_row_index(icell, 2)
@@ -828,7 +827,7 @@ class TaichiSimulation3DIntegral:
         else:
             t = tx + ty + tz
 
-            if not ti.static(forward_only):
+            if ti.static(not forward_only):
                 if ti.static(accumulative == 0):  # NonAccumulative
                     ret[i, icell] = t
                 else:
