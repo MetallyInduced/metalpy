@@ -63,7 +63,7 @@ class Coordinates(np.ndarray):
             crs = 'WGS 84'
 
         self.crs = crs
-        assert self.ndim == 2 and self.shape[-1] in (2, 3), 'Coordinates supports only 2D or 3D points array.'
+        assert self.ndim in (1, 2) and self.shape[-1] in (2, 3), 'Coordinates supports only 2D or 3D points array.'
 
     @property
     def crs(self) -> CRS:
@@ -77,28 +77,50 @@ class Coordinates(np.ndarray):
         return self.view(np.ndarray)
 
     @property
+    def single(self):
+        return self.ndim == 1
+
+    @property
     def x(self):
-        return self[:, 0]
+        if self.single:
+            return self[0]
+        else:
+            return self[:, 0]
 
     @x.setter
     def x(self, val):
-        self[:, 0] = val
+        if self.single:
+            self[0] = val
+        else:
+            self[:, 0] = val
 
     @property
     def y(self):
-        return self[:, 1]
+        if self.single:
+            return self[1]
+        else:
+            return self[:, 1]
 
     @y.setter
     def y(self, val):
-        self[:, 1] = val
+        if self.single:
+            self[1] = val
+        else:
+            self[:, 1] = val
 
     @property
     def z(self):
-        return self[:, 2]
+        if self.single:
+            return self[2]
+        else:
+            return self[:, 2]
 
     @z.setter
     def z(self, val):
-        self[:, 2] = val
+        if self.single:
+            self[2] = val
+        else:
+            self[:, 2] = val
 
     @staticmethod
     def warn_invalid_modification():
@@ -143,20 +165,27 @@ class Coordinates(np.ndarray):
 
         * 指定函数`lambda crs: crs.code == 3857`以搜索匹配的坐标系
         """
-        bounds = np.c_[self.min(axis=0), self.max(axis=0)].ravel()
-        bounds2d = bounds[:4]
-
-        if self.crs == Coordinates.WGS_84:
-            wgs84_bounds = bounds2d
-        else:
-            to_wgs84 = Transformer.from_crs(self.crs, Coordinates.WGS_84, always_xy=True)
-            wgs84_bounds = np.c_[
-                to_wgs84.transform(*bounds2d[::2]),
-                to_wgs84.transform(*bounds2d[1::2])
-            ].ravel()
+        if isinstance(query, CRS):
+            crs = query
+            query = None
 
         if crs is None:
             assert query is not None, 'Either `crs` or `query` must be specified.'
+
+            if self.single:
+                bounds = np.asarray(self).repeat(2)
+            else:
+                bounds = np.c_[self.min(axis=0), self.max(axis=0)].ravel()
+            bounds2d = bounds[:4]
+
+            if self.crs == Coordinates.WGS_84:
+                wgs84_bounds = bounds2d
+            else:
+                to_wgs84 = Transformer.from_crs(self.crs, Coordinates.WGS_84, always_xy=True)
+                wgs84_bounds = np.c_[
+                    to_wgs84.transform(*bounds2d[::2]),
+                    to_wgs84.transform(*bounds2d[1::2])
+                ].ravel()
 
             l, r, b, t = wgs84_bounds
             area_of_interest = AreaOfInterest(
@@ -181,7 +210,7 @@ class Coordinates(np.ndarray):
                 elif callable(query):
                     crs_list = [crs for crs in crs_list if query(crs)]
                 else:
-                    crs_list = [crs for crs in crs_list if query == crs.name]
+                    crs_list = [crs for crs in crs_list if query == crs]
 
             assert len(crs_list) == 1, \
                 f'Multiple CRS-s found by `{query}`:\n' + Coordinates.format_crs_list_str(crs_list)
@@ -198,7 +227,6 @@ class Coordinates(np.ndarray):
             target = self.copy()
 
         target.x, target.y = transform.transform(target.x, target.y)
-        target.crs = crs
 
         return target
 

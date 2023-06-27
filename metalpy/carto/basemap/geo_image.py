@@ -150,7 +150,10 @@ class GeoImage:
 
         self.image.paste(img.image, offset)
 
-    def to_polydata(self, dest_crs: CRSLike | None = None, query_dest_crs: CRSQuery | None = None):
+    def to_polydata(self,
+                    dest_crs: CRSLike | None = None,
+                    query_dest_crs: CRSQuery | None = None,
+                    return_crs=False):
         import pyvista as pv
 
         bounds = self.edge_geo_bounds
@@ -169,11 +172,17 @@ class GeoImage:
         grid = grid.cast_to_unstructured_grid()
         geo_points: Coordinates = grid.points.view(Coordinates).with_crs(self.crs)
 
+        crs = None
         if dest_crs is not None or query_dest_crs is not None:
             geo_points.warp(crs=dest_crs, query=query_dest_crs, inplace=True)
             grid.points = geo_points
+            if return_crs:
+                crs = geo_points.crs
 
-        return grid
+        if return_crs:
+            return grid, crs
+        else:
+            return grid
 
     def save(self, fp, format=None, **params):
         self.image.save(fp, format=format, **params)
