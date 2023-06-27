@@ -5,7 +5,16 @@ import numpy as np
 import taichi as ti
 import tqdm
 
-from metalpy.utils.taichi import ti_kernel, ti_cfg, ti_ndarray, ti_func, ti_data_oriented, ti_index, ensure_contiguous
+from metalpy.utils.taichi import (
+    ti_kernel,
+    ti_cfg,
+    ti_ndarray,
+    ti_func,
+    ti_data_oriented,
+    ti_index,
+    ti_ndarray_from,
+    ensure_contiguous
+)
 from metalpy.utils.type import ensure_as_iterable, not_none_or_default
 
 from ...value_observer import ValueObserver
@@ -135,11 +144,19 @@ class TaichiSimulation3DIntegral:
         n_rows = sum(receiver.n_rows for receiver in self.receivers)
         if is_cpu:
             ret = np.zeros((n_rows, n_cols), dtype=np.float64)
+            xn = self.xn
+            yn = self.yn
+            zn = self.zn
+            magnetization = self.magnetization
         else:
             # According to https://docs.taichi-lang.org/docs/ndarray, or
             # https://github.com/taichi-dev/taichi/blob/8fdf7a7d/docs/lang/articles/basic/ndarray.md?plain=1#L23C35-L23C35
             # ti.ndarray-s are initialized to 0 by default.
             ret = ti_ndarray(dtype=ti.f64, shape=(n_rows, n_cols))
+            xn = ti_ndarray_from(self.xn)
+            yn = ti_ndarray_from(self.yn)
+            zn = ti_ndarray_from(self.zn)
+            magnetization = ti_ndarray_from(self.magnetization)
 
         # TODO: 由于Taichi目前采用i32作为索引类型，数组元素总数不能超过int32的上限，否则行为未定义
         #  如果后续Taichi支持i64索引类型，则可以去掉这个限制
@@ -188,7 +205,8 @@ class TaichiSimulation3DIntegral:
             n_components = len(components)
 
             for rx_locs in np.array_split(receiver_locations, n_batches):
-                section_rows = rx_locs.shape[0] * n_components
+                n_receivers = rx_locs.shape[0]
+                section_rows = n_receivers * n_components
 
                 if monitor is not None:
                     # 计算进度判定行区间
@@ -198,10 +216,10 @@ class TaichiSimulation3DIntegral:
                     processed = start_row * n_cols
 
                 self._kernel_matrix_forward(
-                    xn=self.xn, yn=self.yn, zn=self.zn,
+                    xn=xn, yn=yn, zn=zn,
                     receiver_locations=rx_locs,
                     model=model, forward_only=forward_only,
-                    magnetization=self.magnetization,
+                    magnetization=magnetization,
                     **components_indices, n_components=n_components,
                     start_row=start_row,
                     ret=ret)

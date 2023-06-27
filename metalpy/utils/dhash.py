@@ -176,6 +176,11 @@ def _hash_bytes(obj: bytes):
     return ret
 
 
+@register_dhasher(type(None))
+def _hash_none(_: None):
+    return 0o0225
+
+
 @register_dhasher(dict)
 def _hash_dict(obj: dict):
     return dhash(*sorted(obj.items(), key=lambda x: x[0]))

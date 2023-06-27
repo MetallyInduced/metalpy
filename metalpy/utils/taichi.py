@@ -108,6 +108,13 @@ def ti_ndarray(dtype, shape):
     return ti.ndarray(dtype, shape)
 
 
+def ti_zeros_like(arr, *, dtype=None):
+    ti_init_once()
+    if dtype is None:
+        dtype = to_taichi_type(arr.dtype)
+    return ti.ndarray(dtype, arr.shape)
+
+
 def ti_root():
     ti_init_once()
     return ti.root
