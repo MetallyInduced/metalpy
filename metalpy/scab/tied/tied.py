@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 
 from SimPEG.simulation import BaseSimulation
@@ -5,16 +7,17 @@ from SimPEG.simulation import BaseSimulation
 from metalpy.mexin import Mixin
 from metalpy.mexin import Patch
 from metalpy.utils.type import get_params_dict
-
 from metalpy.utils.object_path import get_full_qualified_path
 from metalpy.mexin.utils import TypeMap
 from metalpy.scab.distributed.policies import Distributable
+
+from .taichi_kernel_base import Profiler
 
 
 class TaichiContext(Mixin):
     _implementations = TypeMap()
 
-    def __init__(self, this, arch=None, max_cpu_threads=None, **kwargs):
+    def __init__(self, this, arch=None, max_cpu_threads=None, profile: Profiler | bool = False, **kwargs):
         """初始化taichi上下文
 
         Parameters
@@ -29,9 +32,17 @@ class TaichiContext(Mixin):
         from metalpy.utils.taichi import ti_prepare, ti_arch
 
         super().__init__(this)
+
         params = {}
+
         if arch is not None:
             params['arch'] = ti_arch(arch)
+
+        profile = Profiler.of(profile)
+        self.profile = profile
+        if profile.needs_kernel_profiler:
+            params['kernel_profiler'] = True
+
         if max_cpu_threads is not None:
             if max_cpu_threads < 0:
                 # 需要注意taichi目前使用的为虚拟核心数 (taichi/program/compile_config.cpp)
@@ -40,6 +51,7 @@ class TaichiContext(Mixin):
                 # 考虑到超线程的存在，-1可能仍然会导致计算机满载
                 max_cpu_threads = os.cpu_count() + max_cpu_threads
             params['cpu_max_num_threads'] = max_cpu_threads
+
         ti_prepare(**params, **kwargs)
 
     def post_apply(self, this):
@@ -49,7 +61,7 @@ class TaichiContext(Mixin):
             print(f'Taichi support for {get_full_qualified_path(this)} is not implemented. Ignoring it.')
             return
 
-        this.mixins.add(impl)
+        this.mixins.add(impl, profile=self.profile)
 
 
 class Tied(Patch, Distributable):

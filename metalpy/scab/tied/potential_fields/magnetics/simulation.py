@@ -1,21 +1,21 @@
 import os
 
 import numpy as np
+from SimPEG.potential_fields.magnetics import Simulation3DIntegral
 from discretize.utils import mkvc
 
-from metalpy.mexin import Mixin
 from metalpy.scab.progressed import Progress
 
 from .tied_simulation3d_integral import TaichiSimulation3DIntegral, Receiver
+from ...taichi_kernel_base import TiedMixin, tied_profile
 
 
-class TiedSimulation3DIntegralMixin(Mixin):
-    def __init__(self, this):
-        super().__init__(this)
+class TiedSimulation3DIntegralMixin(TiedMixin):
+    def __init__(self, this, **kwargs):
+        super().__init__(this, **kwargs)
 
-    def linear_operator(this, self):
-        from SimPEG.potential_fields.magnetics.simulation import Simulation3DIntegral
-        self: Simulation3DIntegral
+    @tied_profile
+    def linear_operator(this, self: Simulation3DIntegral):
         n_cells = self.nC
 
         if getattr(self, "model_type", None) == "vector":
