@@ -210,7 +210,7 @@ class Scene(OSMFormat, PTopoFormat):
         sizes = bounds.extent
 
         if cell_size is not None:
-            if not isinstance(cell_size, Iterable):
+            if np.isscalar(cell_size):
                 cell_size = [cell_size] * 3
             cell_size = np.asarray(cell_size)
             n_cells = np.ceil(sizes / cell_size).astype(int)

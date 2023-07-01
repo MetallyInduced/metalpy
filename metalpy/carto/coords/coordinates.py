@@ -10,12 +10,12 @@ from pyproj.aoi import AreaOfInterest
 from pyproj.database import query_utm_crs_info, query_crs_info
 
 from metalpy.carto.utils.crs import check_crs, CRSLike
-
+from metalpy.utils.numpy import FixedShapeNDArray
 
 CRSQuery = Union[str, re.Pattern, callable]
 
 
-class Coordinates(np.ndarray):
+class Coordinates(FixedShapeNDArray):
     """用于表示一个带有坐标系信息的坐标，支持进行便捷坐标转换
 
     Examples
@@ -34,21 +34,15 @@ class Coordinates(np.ndarray):
     def __array_finalize__(self, obj, **kwargs):
         self._init(getattr(obj, 'crs', None))
 
-    def __array_ufunc__(self, ufunc, method, *inputs, out=None, **kwargs):
-        inputs = tuple(inp.to_numpy() if isinstance(inp, Coordinates) else inp for inp in inputs)
-        if out is not None:
-            out = tuple(o.to_numpy() if isinstance(o, Coordinates) else o for o in out)
-        ret = super().__array_ufunc__(ufunc, method, *inputs, out=out, **kwargs)
+    def __array_ufunc__(self, *args, **kwargs):
+        ret = super().__array_ufunc__(*args, **kwargs)
+        if isinstance(ret, Coordinates):
+            ret.with_crs(self.crs)
 
-        if ret is NotImplemented:
-            return NotImplemented
-
-        if ret.ndim == self.ndim:
-            return Coordinates(ret, crs=self.crs)
-        else:
-            return ret
+        return ret
 
     def __getitem__(self, index):
+        # TODO: 决定什么时候切片的返回值可以继承Coordinates的属性
         return self.to_numpy()[index]
 
     def __setitem__(self, index, val):

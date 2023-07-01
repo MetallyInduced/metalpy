@@ -2,6 +2,8 @@ from typing import cast
 
 import numpy as np
 
+from metalpy.utils.numpy import FixedShapeNDArray
+
 
 def _regulate_nans(val, b1, b2):
     """b1 is asserted to be shorter than b2
@@ -63,12 +65,15 @@ def bounded(xmin=np.nan, xmax=np.nan, ymin=np.nan, ymax=np.nan, zmin=np.nan, zma
     )
 
 
-class Bounds(np.ndarray):
+class Bounds(FixedShapeNDArray):
     def __new__(cls, var_inp, *args, dtype=None) -> 'Bounds':
         if np.isscalar(var_inp):
             return np.asanyarray([var_inp, *args], dtype=dtype).view(cls)
         else:
             return np.asanyarray(var_inp, dtype=dtype).view(cls)
+
+    def __array_finalize__(self, _, **__):
+        pass
 
     @staticmethod
     def unbounded(n_axes=0) -> 'Bounds':
@@ -91,9 +96,6 @@ class Bounds(np.ndarray):
             ret.zmax = zmax
 
         return ret
-
-    def __array_finalize__(self, _, **__):
-        pass
 
     def as_corners(self):
         """从边界形式转换为角落点形式
@@ -232,12 +234,9 @@ class Bounds(np.ndarray):
     def n_axes(self): return self.shape[0] // 2
 
 
-class Corners(np.ndarray):
+class Corners(FixedShapeNDArray):
     def __new__(cls, input_arr):
         return np.asanyarray(input_arr).view(cls)
-
-    def __array_finalize__(self, _, **kwargs):
-        pass
 
     def as_bounds(self):
         """从角落点形式转换为边界形式
