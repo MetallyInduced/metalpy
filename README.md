@@ -17,32 +17,34 @@ which currently includes:
 1. **MEPA**: a general-purposed parallelization framework.
 2. [**Mexin**](metalpy/mexin/README.md): a code injection framework for Python.
 3. [**SCAB**](metalpy/scab/README.md): a collection of SimPEG related utilities and extensions.
+4. [**Carto**](metalpy/carto/README.md): cartography related utilities, aiming to download tile maps and
+save/load GeoTIFF images.
 
 Installation
 ------------
 Metalpy can be installed using _pip_:
 
 ```console
-pip install metalpy
+pip install "metalpy[complete]"
 ```
 
 <details><summary><b>Notes on installing with pip</b></summary>
 <p>
 
-metalpy includes SCAB, an extension to SimPEG,
-whose dependencies will *not* be installed when running `pip` directly like this:
+`metalpy` manages its dependencies separately, which means expected modules 
+should be specified in `pip` installation process.
 
+Supported commands are listed next:
 ```console
-pip install metalpy
-```
-
-Other supported commands are listed next:
-```console
-pip install "metalpy[scab]"      # Install requirements for SCAB module
-pip install "metalpy[tests]"     # Install requirements for tests
-pip install "metalpy[docs]"      # Install requirements for doc generation
-pip install "metalpy[complete]"  # Install all requirements
-pip install "metalpy[dev]"       # Install requirements for development
+pip install "metalpy[complete]"    # Install all requirements
+pip install "metalpy[scab]"        # Install requirements for SCAB
+pip install "metalpy[carto]"       # Install requirements for Carto
+pip install "metalpy[scab, carto]" # Install requirements for SCAB and Carto
+pip install "metalpy[mepa]"        # Install requirements for MEPA
+pip install "metalpy[mexin]"       # Install requirements for Mexin
+pip install "metalpy[tests]"       # Install requirements for tests
+pip install "metalpy[docs]"        # Install requirements for doc generation
+pip install "metalpy[dev]"         # Install requirements for development
 ```
 
 </p>

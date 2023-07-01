@@ -1,8 +1,8 @@
 import numpy as np
 
+from metalpy.utils.bounds import Bounds
 from metalpy.utils.dhash import dhash
 from . import Shape3D
-from .bounds import NoBounds
 
 
 class FullSpace(Shape3D):
@@ -26,7 +26,7 @@ class FullSpace(Shape3D):
 
     @property
     def local_bounds(self):
-        return NoBounds()
+        return Bounds.unbounded()
 
     def to_local_polydata(self):
         return None

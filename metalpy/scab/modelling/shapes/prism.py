@@ -3,10 +3,10 @@ import numpy as np
 from scipy.stats import linregress
 
 from metalpy.scab.modelling.shapes.cuboid import is_inside_cuboid
+from metalpy.utils.bounds import Bounds
 from metalpy.utils.dhash import dhash
 from metalpy.utils.ear_clip import ear_clip
 from . import Shape3D
-from .bounds import Bounds
 
 
 def is_abs_distance_in(arr, x0, r):
@@ -123,7 +123,7 @@ class Prism(Shape3D):
 
     @property
     def local_bounds(self):
-        return Bounds(*np.c_[
+        return Bounds(np.c_[
             np.r_[self.pts.min(axis=0), self.z0],
             np.r_[self.pts.max(axis=0), self.z1]
         ].ravel())

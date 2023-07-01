@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 from typing import Any, Union
 
 from metalpy.utils.dhash import dhash
+from metalpy.utils.model import pv_ufunc_assign, DataAssociation
 from .mix_modes import MixMode, Mixer, dhashable_mixer
 from .shapes import Shape3D
 
@@ -10,7 +13,7 @@ class Object:
 
     def __init__(self,
                  shape: Shape3D,
-                 models: Union[dict[str, Any], Any],
+                 models: Union[dict[str, Any], Any] | None = None,
                  mix_mode: Mixer = MixMode.Override):
         """代表一个三维几何体图层
 
@@ -31,6 +34,16 @@ class Object:
         self.models = models
 
         self.mix_mode = mix_mode
+
+    def to_polydata(self):
+        shape = self.shape
+        poly = shape.to_polydata()
+
+        if poly is not None:
+            for k, v in self.models.items():
+                pv_ufunc_assign(poly, DataAssociation.Cell, k, v, inplace=True)
+
+        return poly
 
     @property
     def mixer(self):

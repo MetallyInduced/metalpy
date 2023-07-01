@@ -8,7 +8,7 @@ from SimPEG.potential_fields import magnetics
 from matplotlib import pyplot as plt, gridspec
 
 from metalpy.scab import simpeg_patched, Progressed, Tied
-from metalpy.scab.modelling import Scene, Bounded
+from metalpy.scab.modelling import Scene
 from metalpy.scab.modelling.shapes import Cuboid, Prism, Ellipsoid, Tunnel
 from metalpy.scab.utils.misc import define_inducing_field
 from metalpy.utils.sensor_array import get_grids_ex
@@ -40,7 +40,7 @@ def main():
         source_field = define_inducing_field(50000, 45, 20)
         pts = get_grids_ex(origin=origin, end=end,
                            n=46,  # x, y方向观测点数
-                           zs=20   # 指定高度为3m
+                           zs=20   # 指定高度为20m
                            ).pts
 
         receiver_points = pts

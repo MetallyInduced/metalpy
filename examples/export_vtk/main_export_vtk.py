@@ -1,12 +1,13 @@
 import pyvista as pv
 
-from metalpy.scab.modelling import Scene, Bounded
-from metalpy.scab.modelling.shapes import Cuboid, Prism, Ellipsoid, Tunnel, Obj2
+from metalpy.scab.modelling import Scene
+from metalpy.scab.modelling.shapes import Cuboid, Prism, Ellipsoid, Tunnel, Obj2, BarFramework
+from metalpy.utils.bounds import bounded
 
 
 def main():
     scene = Scene.of(
-        Cuboid([1, 1, 1], size=2),
+        BarFramework(Cuboid([1, 1, 1], size=2), 0.2, n_rooms=2),
         Prism([[0, 0], [-2, 0], [-2, 1], [-1, 1]], 1, 3),
         Prism([[0, 0], [-2, 0], [-2, 1], [-1, 1]], 1, 3).rotated(90, 0, 0, degrees=True),
         Ellipsoid.spheroid(1, 3, 0).translated(0, -2, 2),
@@ -15,7 +16,8 @@ def main():
         models=1
     ).with_background(1e-5)
 
-    model_mesh = scene.build(cell_size=0.2, cache=True, bounds=Bounded(zmax=2))
+    # 使用bounded裁剪场景
+    model_mesh = scene.build(cell_size=0.1, cache=True, bounds=bounded(zmax=2))
     grids = model_mesh.to_polydata()
 
     p = pv.Plotter(shape=(1, 3))
@@ -24,7 +26,7 @@ def main():
     active_grids = grids.threshold([1, 1])
 
     p.subplot(0, 0)
-    p.add_mesh(models)
+    p.add_mesh(models, color='white')
     p.show_grid()
     p.show_axes()
 
@@ -36,7 +38,7 @@ def main():
     p.show_axes()
 
     p.subplot(0, 2)
-    p.add_mesh(models, opacity=0.4)
+    p.add_mesh(models, opacity=0.4, color='white')
     p.add_mesh(active_grids, show_edges=True)
     p.add_mesh(grids.threshold([0, 1]), show_edges=True, opacity=0.2)
     p.show_grid()

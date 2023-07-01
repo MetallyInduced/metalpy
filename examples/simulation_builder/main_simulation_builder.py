@@ -1,11 +1,12 @@
-import numpy as np
 from SimPEG.potential_fields.magnetics.simulation import Simulation3DIntegral
+
+from metalpy.utils.bounds import Bounds
 from metalpy.utils.file import make_cache_directory
 
 from metalpy.scab.utils.format import format_pandas
 from metalpy.utils.sensor_array import get_grids_ex
 from metalpy.scab import Tied, Progressed
-from metalpy.scab.modelling.shapes import Ellipsoid, Bounds
+from metalpy.scab.modelling.shapes import Ellipsoid
 from metalpy.scab.modelling import Scene
 from metalpy.scab.builder.simulation_builder import SimulationBuilder
 
@@ -17,7 +18,7 @@ def main():
     )
     bounds = Bounds(-50, 50, -20, 20, -20, 20)
     model_mesh = scene.build(cell_size=1, bounds=bounds)
-    scene.to_multiblock().plot(show_grid=True)
+    scene.to_multiblock().plot(show_grid=True, color='white')
     model_mesh.to_polydata().threshold(0.5).plot(color='white', show_grid=True, show_edges=True)
 
     # observation

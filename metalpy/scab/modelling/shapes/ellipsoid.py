@@ -1,9 +1,9 @@
 import numpy as np
 
 from metalpy.utils.dhash import dhash
+from metalpy.utils.bounds import Bounds
 from . import Shape3D
 from .cuboid import is_inside_cuboid
-from .bounds import Bounds
 
 
 class Ellipsoid(Shape3D):
@@ -87,7 +87,7 @@ class Ellipsoid(Shape3D):
 
     @property
     def local_bounds(self):
-        return Bounds(*np.c_[-self.radii, self.radii].ravel())
+        return Bounds(np.c_[-self.radii, self.radii].ravel())
 
     def to_local_polydata(self):
         import pyvista as pv

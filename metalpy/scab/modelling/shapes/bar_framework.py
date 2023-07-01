@@ -3,9 +3,8 @@ from typing import Iterable
 
 import numpy as np
 
-from . import Shape3D, Cuboid
-from .composition import Composition
-from ..mix_modes import MixMode
+from metalpy.scab.modelling.mix_modes import MixMode
+from . import Shape3D, Cuboid, Composition
 
 
 def clarify_spec(spec, n_params=3):

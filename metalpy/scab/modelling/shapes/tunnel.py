@@ -1,8 +1,8 @@
 import numpy as np
 
 from metalpy.utils.dhash import dhash
+from metalpy.utils.bounds import Bounds
 from . import Shape3D
-from .bounds import Bounds
 
 
 def is_abs_distance_in(arr, x0, r):
@@ -64,7 +64,7 @@ class Tunnel(Shape3D):
         x0, y0, z0 = self.p0
         r1 = self.r1
         L = self.L
-        return Bounds(*np.r_[
+        return Bounds(np.r_[
             x0, L,
             y0 - r1, y0 + r1,
             z0 - r1, z0 + r1,

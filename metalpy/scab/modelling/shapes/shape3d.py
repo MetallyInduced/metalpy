@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
+from functools import reduce
 from typing import Iterable
 
 import numpy as np
 
 from metalpy.utils.dhash import dhash
-from .bounds import Bounds
+from metalpy.utils.bounds import Bounds, union
 from ..transform import CompositeTransform, Transform, Translation, Rotation
 
 
@@ -152,11 +153,12 @@ class Shape3D(ABC):
             Shape在世界坐标系下的长方体包围盒[x0, x1, y0, y1, z0, z1]
         """
         bounds = self.oriented_bounds
+
         ret = np.zeros(6)
         ret[::2] = np.min(bounds, axis=1)
         ret[1::2] = np.max(bounds, axis=1)
 
-        return Bounds(*ret)
+        return Bounds(ret)
 
     @property
     def oriented_bounds(self) -> np.ndarray:
@@ -198,7 +200,7 @@ class Shape3D(ABC):
         ret[::2] = np.min(bounds, axis=1)
         ret[1::2] = np.max(bounds, axis=1)
 
-        return Bounds(*ret)
+        return Bounds(ret)
 
     @property
     def local_oriented_bounds(self) -> np.ndarray:
@@ -212,7 +214,13 @@ class Shape3D(ABC):
             Shape在局部坐标系下的八点包围盒[[x0, y0, z0], ...[x7, y7, z7]]
         """
         local_bounds = self.local_bounds
-        x, y, z = np.meshgrid(local_bounds[0:2], local_bounds[2:4], local_bounds[4:6], indexing='ij')
+
+        nans = [np.nan, np.nan]
+        xrng = local_bounds.xrange if local_bounds.n_axes > 0 else nans
+        yrng = local_bounds.yrange if local_bounds.n_axes > 1 else nans
+        zrng = local_bounds.zrange if local_bounds.n_axes > 2 else nans
+
+        x, y, z = np.meshgrid(xrng, yrng, zrng, indexing='ij')
         return np.c_[x.ravel(), y.ravel(), z.ravel()]
 
     @property
@@ -340,11 +348,4 @@ class Shape3D(ABC):
 
 
 def bounding_box_of(shapes: Iterable[Shape3D]):
-    bounds = None
-    for m in shapes:
-        if bounds is None:
-            bounds = m.bounds
-            continue
-        bounds = Bounds.merge(bounds, m.bounds)
-
-    return bounds
+    return reduce(union, (shape.bounds for shape in shapes))

@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from enum import IntFlag, auto
+from enum import IntFlag
 import functools
-
-import taichi as ti
 
 from metalpy.mexin import Mixin
 
 
 class Profiler(IntFlag):
-    Scoped = 1  # 输出Taichi处理编译等中间过程的耗时情况
+    Disabled = 0     # 无Profiler
+    Scoped = 1       # 输出Taichi处理编译等中间过程的耗时情况
     CountKernel = 2  # 输出Taichi Kernel的运行情况，但相同kernel合并
     TraceKernel = 4  # 输出所有Taichi Kernel的运行情况
 
@@ -23,6 +22,8 @@ class Profiler(IntFlag):
     def of(val):
         if val is True:
             return Profiler.Default
+        elif val is False:
+            return Profiler.Disabled
         else:
             return val
 
@@ -42,6 +43,8 @@ def tied_profile(fn):
     """
     @functools.wraps(fn)
     def wrapper(self: TiedMixin, *args, **kwargs):
+        import taichi as ti
+
         ret = fn(self, *args, **kwargs)
         profile = self.profile
 

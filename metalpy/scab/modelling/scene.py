@@ -1,14 +1,18 @@
+from __future__ import annotations
+
 import copy
 import os.path
-from typing import Any, Union, Iterable, cast
+from typing import Any, Union, Iterable, cast, Mapping
 
 import numpy as np
 import tqdm
 from discretize import TensorMesh
 
 from metalpy.mepa import LinearExecutor
-from metalpy.utils.file import ensure_dir, make_cache_directory
+from metalpy.utils.bounds import Bounds
 from metalpy.utils.dhash import dhash
+from metalpy.utils.file import ensure_dir, make_cache_directory
+from metalpy.utils.model import as_pyvista_array
 from metalpy.scab.utils.hash import dhash_discretize_mesh
 from .formats.osm import OSMFormat
 from .formats.ptopo import PTopoFormat
@@ -17,7 +21,6 @@ from .mix_modes import MixMode
 from .object import Object
 from .modelled_mesh import ModelledMesh
 from .shapes import Shape3D
-from .shapes.bounds import Bounds
 from .shapes.full_space import FullSpace
 from .shapes.shape3d import bounding_box_of
 
@@ -33,12 +36,18 @@ class Scene(OSMFormat, PTopoFormat):
         self.backgrounds_layer = Layer(mix_mode=MixMode.KeepOriginal)
 
     @staticmethod
-    def of(*shapes: Shape3D, models: Union[Any, dict, list[Any], list[dict], None] = None):
+    def of(*shapes: Shape3D, models: Union[Any, dict, list[Any], None] = None):
         ret = Scene()
-        if not isinstance(models, list):
+
+        if (
+            models is None
+            or isinstance(models, Mapping)
+            or not isinstance(models, Iterable)
+        ):
             models = [models] * len(shapes)
-        for shape, value in zip(shapes, models):
-            ret.append(shape, value)
+
+        for shape, model in zip(shapes, models):
+            ret.append(shape, model)
 
         return ret
 
@@ -65,6 +74,23 @@ class Scene(OSMFormat, PTopoFormat):
         self.objects_layer.append(obj)
 
         return obj
+
+    def extend(self, shapes: Iterable[Shape3D], models: Union[dict[str, Any], Any]) -> list[Object]:
+        """添加多个三维几何体
+
+        Parameters
+        ----------
+        shapes
+            三维几何体集合
+        models
+            三维几何体的参数
+
+        Returns
+        -------
+        ret
+            返回构造的三维几何体集合
+        """
+        return [self.append(s, models) for s in shapes]
 
     def append_background(self, value, region_shape=None):
         if region_shape is None:
@@ -178,11 +204,10 @@ class Scene(OSMFormat, PTopoFormat):
         """
         actual_bounds: Bounds = self.bounds
         if bounds is not None:
-            bounds = np.asarray(bounds)
-            actual_bounds.bounds[bounds != None] = bounds[bounds != None]
+            actual_bounds.override(by=bounds)
 
         bounds = actual_bounds
-        sizes = bounds[1::2] - bounds[::2]
+        sizes = bounds.extent
 
         if cell_size is not None:
             if not isinstance(cell_size, Iterable):
@@ -225,8 +250,8 @@ class Scene(OSMFormat, PTopoFormat):
 
         Returns
         -------
-        ret
-            (mesh, model)，网格输出同create_mesh，模型输出同build_model
+        model_mesh
+            模型网格
 
         See Also
         --------
@@ -237,6 +262,18 @@ class Scene(OSMFormat, PTopoFormat):
         pruned = self.build_model(mesh, executor=executor, progress=progress, cache=cache, cache_dir=cache_dir)
 
         return pruned
+
+    def build_objects(self, mesh, worker_id, progress=None):
+        if progress is True:
+            progress = tqdm.tqdm(total=len(self))
+
+        models = []
+
+        for obj, ind, sub_models in Scene._build_objects(self.objects, mesh, worker_id, progress):
+            mask = Scene.is_active(ind)
+            models.append(ModelledMesh(mesh, dict(sub_models), ind_active=mask))
+
+        return models
 
     @property
     def layers(self) -> Iterable[Layer]:
@@ -281,8 +318,8 @@ class Scene(OSMFormat, PTopoFormat):
         import pyvista as pv
 
         ret = pv.MultiBlock()
-        for shape in self.shapes:
-            poly = shape.to_polydata()
+        for obj in self.objects:
+            poly = obj.to_polydata()
             if poly is not None:
                 ret.append(poly)
 
@@ -316,8 +353,7 @@ class Scene(OSMFormat, PTopoFormat):
             models = copy.copy(models)
 
         for key in models:
-            if models[key].dtype == bool:
-                models[key] = models[key].astype(np.int8)
+            models[key] = as_pyvista_array(models[key])
 
         # TensorMesh会转换为pv.RectilinearGrid
         grids: pv.RectilinearGrid = cast(
@@ -400,8 +436,7 @@ class Scene(OSMFormat, PTopoFormat):
                 prev_layer[non_overlapping_mask] = current_layer[non_overlapping_mask]
 
     @staticmethod
-    def _build_layer(layer: Layer, mesh, worker_id, progress=None):
-        objects = layer.objects
+    def _build_objects(objects: objects, mesh, worker_id, progress=None):
         models = {}
 
         for obj in objects:
@@ -409,7 +444,6 @@ class Scene(OSMFormat, PTopoFormat):
 
             # place的结果应该为布尔数组或范围为[0, 1]的数组，指示对应网格位置是否有效或有效程度
             ind: np.ndarray = shape.place(mesh, worker_id)
-            mask = Scene.is_active(ind)
 
             def model_generator():
                 for key, current_value in obj.items():
@@ -420,10 +454,21 @@ class Scene(OSMFormat, PTopoFormat):
                         current_layer = ind * current_value
                     yield key, current_layer
 
-            Scene._merge_models(models, model_generator(), mask, obj.mixer)
+            yield obj, ind, model_generator()
 
             if progress is not None:
                 progress.update(1)
+
+        return models
+
+    @staticmethod
+    def _build_layer(layer: Layer, mesh, worker_id, progress=None):
+        objects = layer.objects
+        models = {}
+
+        for obj, ind, sub_models in Scene._build_objects(objects, mesh, worker_id, progress):
+            mask = Scene.is_active(ind)
+            Scene._merge_models(models, sub_models, mask, obj.mixer)
 
         return models
 

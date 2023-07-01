@@ -3,9 +3,9 @@ from typing import Iterable, Union
 import numpy as np
 
 from metalpy.utils.dhash import dhash
+from metalpy.utils.bounds import Bounds
 from . import Shape3D
 from metalpy.utils.misc import plot_opaque_cube
-from .bounds import Bounds
 
 
 def is_inside_cuboid(mesh, corner, lengths):
@@ -137,7 +137,7 @@ class Cuboid(Shape3D):
 
     @property
     def local_bounds(self):
-        return Bounds(*np.c_[self.corner, self.corner + self.lengths].ravel())
+        return Bounds(np.c_[self.corner, self.corner + self.lengths].ravel())
 
     def to_local_polydata(self):
         import pyvista as pv

@@ -1,8 +1,6 @@
-from functools import reduce
-
 from metalpy.utils.dhash import dhash
 from . import Shape3D
-from .bounds import Bounds
+from .shape3d import bounding_box_of
 from ..mix_modes import Mixer, MixMode, dhashable_mixer
 
 
@@ -47,7 +45,7 @@ class Composition(Shape3D):
 
     @property
     def local_bounds(self):
-        return reduce(Bounds.merge, (shape.bounds for shape in self))
+        return bounding_box_of(self)
 
     def to_local_polydata(self):
         import pyvista as pv

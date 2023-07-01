@@ -1,5 +1,6 @@
 import os.path
 import pickle
+from enum import Enum
 
 import numpy as np
 import pyvista as pv
@@ -21,7 +22,15 @@ def dhash_model(model, n_samples=10):
     return _hash_array(model.points, n_samples)
 
 
-def extract_model_list_bounds(model_list):
+def as_pyvista_array(arr):
+    arr = np.asarray(arr)
+    if arr.dtype == bool:
+        arr = arr.astype(np.int8)
+
+    return arr
+
+
+def extract_model_list_bounds(model_list: list[pv.DataSet]):
     bounds = None
     for m in model_list:
         if bounds is None:
@@ -186,9 +195,88 @@ class ModelTranslation:
         self.inplace = inplace
 
     def __call__(self, mesh):
-        if isinstance(mesh, pv.MultiBlock):
-            return pv.MultiBlock(
-                {k: self(mesh[k]) for k in mesh.keys()}
-            )
+        return pv_ufunc_apply(mesh, self._translate, inplace=self.inplace)
+
+    def _translate(self, x):
+        return x.translate(self.offset, inplace=self.inplace)
+
+
+def pv_ufunc_apply(obj, fn, inplace=True):
+    if isinstance(obj, pv.MultiBlock):
+        if inplace:
+            for k in obj.keys():
+                pv_ufunc_apply(obj[k], fn, inplace=inplace)
+            return obj
         else:
-            return mesh.translate(self.offset, inplace=self.inplace)
+            return pv.MultiBlock(
+                {k: pv_ufunc_apply(obj[k], fn, inplace=inplace) for k in obj.keys()}
+            )
+    else:
+        return fn(obj)
+
+
+class DataAssociation(Enum):
+    Cell = 'cell'
+    Point = 'point'
+    Row = 'row'
+
+    Field = 'field'
+
+    def __str__(self):
+        return self.value
+
+    @property
+    def field_count(self):
+        if self == DataAssociation.Field:
+            return None
+        else:
+            return f'n_{self}s'
+
+    @property
+    def field_collection(self):
+        return f'{self}_data'
+
+
+def pv_ufunc_assign(obj: pv.DataSet, data_type: DataAssociation, key, val, inplace=True):
+    """赋值给对象的数据字段，对MultiBlock则作用于其中的每个对象
+
+    Parameters
+    ----------
+    obj
+        待赋值对象
+    data_type
+        待赋值数据类型，例如 "`cell`", "`point`", "`field`"
+    key
+        待赋值字段类型
+    val
+        值，如果为单个值，则会通过np.full展开到对应字段长度
+    inplace
+        指示操作是否直接在目标对象上进行
+
+    Returns
+    -------
+    obj
+        obj自身，如果`inplace`为False，则为拷贝的新对象
+    """
+    if inplace is False:
+        obj = obj.copy()
+
+    val = as_pyvista_array(val)
+
+    name_count = data_type.field_count
+    name_collection = data_type.field_collection
+
+    def ufunc(x):
+        element_count = getattr(x, name_count)
+        data_collection = getattr(x, name_collection)
+
+        if val.ndim == 0:
+            _val = np.full(element_count, val)
+        else:
+            _val = val
+
+        data_collection.__setitem__(key, _val)
+
+        return x
+
+    pv_ufunc_apply(obj, ufunc, inplace=inplace)
