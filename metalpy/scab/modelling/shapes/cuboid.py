@@ -5,7 +5,6 @@ import numpy as np
 from metalpy.utils.dhash import dhash
 from metalpy.utils.bounds import Bounds
 from . import Shape3D
-from metalpy.utils.misc import plot_opaque_cube
 
 
 def is_inside_cuboid(mesh, corner, lengths):
@@ -114,15 +113,6 @@ class Cuboid(Shape3D):
         """
         return np.argmax(self.lengths)
 
-    def markHeight(self, mesh2d):
-        corner2d = self.corner[0:2]
-        lengths2d = self.lengths[0:2]
-        indices = is_inside_cuboid(mesh2d, corner2d, lengths2d)
-
-        indices = indices * self.z1()
-
-        return indices
-
     def do_hash(self):
         return hash((*self.corner, *self.lengths))
 
@@ -131,9 +121,6 @@ class Cuboid(Shape3D):
 
     def do_clone(self):
         return Cuboid(corner=self.corner.copy(), size=self.lengths)
-
-    def plot(self, ax, color):
-        plot_opaque_cube(ax, *self.corner, *self.lengths, color=color)
 
     @property
     def local_bounds(self):
