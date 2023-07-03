@@ -90,7 +90,7 @@ class BarFramework(Composition):
         a0, a1 = self.axis_span(axis)
         ra = self.bar_radius(axis)
         na = self.n_rooms(axis)
-        return np.linspace(a0 + ra, a1 - ra, na)
+        return np.linspace(a0 + ra, a1 - ra, na + 1)
 
     def _create_bars(self, axis):
         # 长轴为c，坐标为a，b
