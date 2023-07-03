@@ -223,18 +223,6 @@ class Shape3D(ABC):
         x, y, z = np.meshgrid(xrng, yrng, zrng, indexing='ij')
         return np.c_[x.ravel(), y.ravel(), z.ravel()]
 
-    @property
-    def local_bounding_size(self) -> np.ndarray:
-        """获取Shape在局部坐标系下的长方体包围盒尺寸
-
-        Returns
-        -------
-        ret : array(3)
-            Shape在局部坐标系下的长方体包围盒三个方向上的尺寸[dx, dy, dz]
-        """
-        bounds = self.local_bounds
-        return bounds[1::2] - bounds[::2]
-
     def apply(self, trans: Transform, inplace=False):
         """逻辑上对空间体位置进行变换，目前通过对网格点进行逆变换实现
 

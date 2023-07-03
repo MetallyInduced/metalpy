@@ -1,9 +1,11 @@
+from functools import cached_property
 from itertools import product
 from typing import Iterable
 
 import numpy as np
 
 from metalpy.scab.modelling.mix_modes import MixMode
+from metalpy.utils.bounds import Bounds
 from . import Shape3D, Cuboid, Composition
 
 
@@ -36,7 +38,7 @@ def clarify_spec(spec, n_params=3):
 
 
 class BarFramework(Composition):
-    def __init__(self, outline: Shape3D, bar_spec, n_rooms=None, room_spec=None):
+    def __init__(self, outline: Shape3D, bar_spec, n_rooms=None, room_spec=None, bounds=None):
         """
         Parameters
         ----------
@@ -53,6 +55,9 @@ class BarFramework(Composition):
         """
         self.bar_spec = bar_spec = clarify_spec(bar_spec)
 
+        if bounds is not None:
+            self.framework_bounds = Bounds(bounds)
+
         if n_rooms is None:
             # 假设使用房间尺寸定义
             # 则保证生成的房间不大于指定的尺寸
@@ -60,37 +65,82 @@ class BarFramework(Composition):
             room_spec = clarify_spec(room_spec)
             # 约定条柱不会超出outline定义的边界
             # 因此从边界条柱的中心开始算，实际的有效空间大小有缩小
-            sizes = outline.local_bounding_size - bar_spec
+            sizes = outline.local_bounds.extent - bar_spec
             n_rooms = np.ceil(sizes / room_spec).astype(int)
         else:
             n_rooms = clarify_spec(n_rooms)
 
         self._n_rooms = n_rooms
-
         self.outline = outline
-        bars = [*self._create_bars(0), *self._create_bars(1), *self._create_bars(2)]
 
         super().__init__(
-            outline,
-            Composition(*bars, mix_mode=MixMode.Max),
             mix_mode=MixMode.Min
         )
-        self.bars.transforms = outline.transforms.clone()
+
+    def with_(self, bar_spec=None, n_rooms=None, outer_bars_only=False):
+        if bar_spec is not None:
+            self.bar_spec = clarify_spec(bar_spec, 3)
+
+        if n_rooms is not None:
+            self._n_rooms = clarify_spec(n_rooms, 3)
+        elif outer_bars_only:
+            self._n_rooms = clarify_spec(1, 3)
+
+        return self
+
+    def __getitem__(self, indices):
+        full = slice(None, None, None)
+
+        n_rooms = self.n_rooms()
+        bounds = self.local_bounds
+
+        for axis, slicer in enumerate(indices):
+            if slicer == full:
+                continue
+
+            if np.isscalar(slicer):
+                slicer = slice(slicer, slicer + 1)
+
+            centers = self.centers(axis)
+            r = self.bar_radius(axis)
+
+            lower_bars = centers[:-1][slicer]
+            upper_bars = centers[1:][slicer]
+            bounds.set(
+                axis,
+                min=min(lower_bars) - r,
+                max=max(upper_bars) + r,
+            )
+
+            n_rooms[axis] = len(lower_bars)
+
+        return BarFramework(
+            outline=self.outline,
+            bar_spec=self.bar_spec,
+            n_rooms=n_rooms,
+            bounds=bounds
+        )
 
     def bar_radius(self, axis):
         return self.bar_spec[axis] / 2
 
-    def n_rooms(self, axis):
-        return self._n_rooms[axis]
+    def n_rooms(self, axis=None):
+        if axis is None:
+            return self._n_rooms.copy()
+        else:
+            return self._n_rooms[axis]
+
+    def n_bars(self, axis=None):
+        return self.n_rooms(axis) + 1
 
     def axis_span(self, axis):
-        return self.outline.local_bounds[axis * 2], self.outline.local_bounds[axis * 2 + 1]
+        return self.framework_bounds[axis * 2], self.framework_bounds[axis * 2 + 1]
 
     def centers(self, axis):
         a0, a1 = self.axis_span(axis)
         ra = self.bar_radius(axis)
-        na = self.n_rooms(axis)
-        return np.linspace(a0 + ra, a1 - ra, na + 1)
+        na = self.n_bars(axis)
+        return np.linspace(a0 + ra, a1 - ra, na)
 
     def _create_bars(self, axis):
         # 长轴为c，坐标为a，b
@@ -105,9 +155,32 @@ class BarFramework(Composition):
             end = np.r_[ax + ra, bx + rb, c1][axes]
             yield Cuboid(corner=origin, corner2=end)
 
+    @cached_property
+    def framework_bounds(self):
+        return self.outline.local_bounds
+
     @property
+    def local_bounds(self):
+        return self.framework_bounds.copy()
+
+    @cached_property
     def bars(self):
-        return self[1]
+        ret = Composition(
+            *self._create_bars(0),
+            *self._create_bars(1),
+            *self._create_bars(2),
+            mix_mode=MixMode.Max
+        )
+        ret.transforms = self.outline.transforms.clone()
+
+        return ret
+
+    @cached_property
+    def shapes(self):
+        return [
+            self.outline,
+            self.bars
+        ]
 
     def to_local_polydata(self):
         return self.bars.to_polydata()

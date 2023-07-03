@@ -153,6 +153,13 @@ class Bounds(FixedShapeNDArray):
 
         return target
 
+    def set(self, axis, min=None, max=None):
+        if min is not None:
+            self[2 * axis] = min
+
+        if max is not None:
+            self[2 * axis + 1] = max
+
     __or__ = union
     __and__ = intersects
 
@@ -247,6 +254,13 @@ class Corners(FixedShapeNDArray):
             角边界形式表示的
         """
         return self.T.ravel().view(Bounds)
+
+    def set(self, axis, min=None, max=None):
+        if min is not None:
+            self[0, axis] = min
+
+        if max is not None:
+            self[1, axis] = max
 
     @property
     def extent(self):
