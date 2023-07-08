@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import warnings
-from typing import Union
+from typing import Union, Callable
 
 import numpy as np
 from pyproj import CRS, Transformer
@@ -10,9 +10,11 @@ from pyproj.aoi import AreaOfInterest
 from pyproj.database import query_utm_crs_info, query_crs_info
 
 from metalpy.carto.utils.crs import check_crs, CRSLike
+from metalpy.utils.bounds import Bounds
 from metalpy.utils.numpy import FixedShapeNDArray
+from metalpy.utils.string import format_string_list
 
-CRSQuery = Union[str, re.Pattern, callable]
+CRSQuery = Union[str, re.Pattern, Callable]
 
 
 class Coordinates(FixedShapeNDArray):
@@ -116,6 +118,13 @@ class Coordinates(FixedShapeNDArray):
         else:
             self[:, 2] = val
 
+    @property
+    def bounds(self):
+        if self.single:
+            return np.asarray(self).repeat(2).view(Bounds)
+        else:
+            return np.c_[self.min(axis=0), self.max(axis=0)].ravel().view(Bounds)
+
     @staticmethod
     def warn_invalid_modification():
         warnings.warn('Modifying dims of Coordinates is not allowed.')
@@ -166,10 +175,7 @@ class Coordinates(FixedShapeNDArray):
         if crs is None:
             assert query is not None, 'Either `crs` or `query` must be specified.'
 
-            if self.single:
-                bounds = np.asarray(self).repeat(2)
-            else:
-                bounds = np.c_[self.min(axis=0), self.max(axis=0)].ravel()
+            bounds = self.bounds
             bounds2d = bounds[:4]
 
             if self.crs == Coordinates.WGS_84:
@@ -201,7 +207,7 @@ class Coordinates(FixedShapeNDArray):
                 elif isinstance(query, str):
                     # e.g. CGCS2000 / 3-degree Gauss-Kruger zone
                     crs_list = [crs for crs in crs_list if query in crs.name]
-                elif callable(query):
+                elif isinstance(query, Callable):
                     crs_list = [crs for crs in crs_list if query(crs)]
                 else:
                     crs_list = [crs for crs in crs_list if query == crs]
@@ -226,4 +232,4 @@ class Coordinates(FixedShapeNDArray):
 
     @staticmethod
     def format_crs_list_str(crs_list):
-        return '\n'.join(['    - ' + crs.name for crs in crs_list])
+        return format_string_list([crs.name for crs in crs_list], multiline=True)
