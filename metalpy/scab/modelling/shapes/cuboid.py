@@ -7,11 +7,6 @@ from metalpy.utils.bounds import Bounds
 from . import Shape3D
 
 
-def is_inside_cuboid(mesh, corner, lengths):
-    deltas = mesh - corner
-    return np.all(deltas >= 0, axis=1) & np.all(deltas <= lengths, axis=1)
-
-
 class Cuboid(Shape3D):
     def __init__(self,
                  corner: Iterable = None,
@@ -83,9 +78,8 @@ class Cuboid(Shape3D):
         self.corner = corner
         self.lengths = size
 
-    def do_place(self, mesh_cell_centers, worker_id):
-        indices = is_inside_cuboid(mesh_cell_centers, self.corner, self.lengths)
-        return indices
+    def do_place(self, mesh_cell_centers, progress):
+        return np.full(len(mesh_cell_centers), True)
 
     @property
     def x0(self): return self.corner[0]

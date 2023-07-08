@@ -82,7 +82,7 @@ class Bounds(FixedShapeNDArray):
     @staticmethod
     def partial(xmin=np.nan, xmax=np.nan, ymin=np.nan, ymax=np.nan, zmin=np.nan, zmax=np.nan, *, n_axes=None):
         if n_axes is None:
-            n_axes = np.where(np.isnan([0, 0, xmin, xmax, ymin, ymax, zmin, zmax]))[0][-1] // 2
+            n_axes = np.where(~np.isnan([0, 0, xmin, xmax, ymin, ymax, zmin, zmax]))[0][-1] // 2
 
         ret = Bounds.unbounded(n_axes)
 
@@ -105,7 +105,7 @@ class Bounds(FixedShapeNDArray):
         ret
             角落点形式表示的
         """
-        return self.reshape(2, -1).T.view(Corners)
+        return self.reshape(-1, 2).T.view(Corners)
 
     def expand(self, proportion=None, increment=None, inplace=False):
         number = (int, float)

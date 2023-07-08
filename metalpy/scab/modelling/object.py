@@ -73,6 +73,14 @@ class Object:
     def model(self, val: Any):
         self.models[Object.DEFAULT_KEY] = val
 
+    @property
+    def n_tasks(self):
+        return self.shape.n_tasks
+
+    @property
+    def progress_manually(self):
+        return self.shape.progress_manually
+
     def items(self):
         for k, v in self.models.items():
             yield k, v

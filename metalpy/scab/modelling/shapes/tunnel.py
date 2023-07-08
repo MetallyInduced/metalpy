@@ -30,7 +30,7 @@ class Tunnel(Shape3D):
         self.r1 = r1
         self.L = L
 
-    def do_place(self, mesh_cell_centers, worker_id):
+    def do_place(self, mesh_cell_centers, progress):
         x0, y0, z0 = self.p0
         L = self.L
         r0, r1 = self.r0, self.r1

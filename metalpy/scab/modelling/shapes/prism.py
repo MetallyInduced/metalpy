@@ -2,7 +2,6 @@ import numpy as np
 
 from scipy.stats import linregress
 
-from metalpy.scab.modelling.shapes.cuboid import is_inside_cuboid
 from metalpy.utils.bounds import Bounds
 from metalpy.utils.dhash import dhash
 from metalpy.utils.ear_clip import ear_clip
@@ -81,13 +80,8 @@ class Prism(Shape3D):
     def h(self):
         return self.z1 - self.z0
 
-    def do_place(self, mesh_cell_centers, worker_id):
-        # 优化: 只判断在xyz三轴边界框内的点
-        p0 = np.asarray((*np.min(self.pts, axis=0), self.z0))
-        p1 = np.asarray((*np.max(self.pts, axis=0), self.z1))
-        indices = is_inside_cuboid(mesh_cell_centers, p0, p1 - p0)
-
-        n_possible_grids = np.sum(indices)
+    def do_place(self, mesh_cell_centers, progress):
+        n_possible_grids = len(mesh_cell_centers)
 
         # 优化: 使用射线法，取向+y方向的射线
         if n_possible_grids > 0:
@@ -96,7 +90,7 @@ class Prism(Shape3D):
             for i in range(n_edges):
                 edges.append(Edge(self.pts[i], self.pts[(i + 1) % n_edges]))
 
-            mesh = mesh_cell_centers[indices, 0:2]
+            mesh = mesh_cell_centers[:, 0:2]
             n_intersects = np.zeros(n_possible_grids, dtype=int)
 
             for edge in edges:
@@ -105,11 +99,9 @@ class Prism(Shape3D):
 
             indices_horizontally_satisfied = (n_intersects & 1) == 1
         else:
-            indices_horizontally_satisfied = False
+            indices_horizontally_satisfied = np.full(n_possible_grids, False)
 
-        indices[indices] = indices_horizontally_satisfied
-
-        return indices
+        return indices_horizontally_satisfied
 
     def do_hash(self):
         return hash((*self.pts.ravel(), self.z0, self.z1))

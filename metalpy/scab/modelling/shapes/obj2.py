@@ -11,6 +11,7 @@ from metalpy.utils.bounds import Bounds
 from metalpy.utils.model import hash_model, split_models_in_memory, load_model_file, load_grouped_file, \
     extract_model_list_bounds, dhash_model
 from . import Shape3D
+from ..utils.mesh import is_inside_cuboid
 
 
 def check_density(length, dx, nx, _default):
@@ -158,7 +159,13 @@ class Obj2(Shape3D):
 
             self.models = models
 
-    def place_impl(self, model, mesh_cell_centers, worker_id):
+    def place_impl(self, model, mesh_cell_centers, progress):
+        p0, p1 = Bounds(model.bounds).as_corners()
+        indices = is_inside_cuboid(mesh_cell_centers, p0, p1 - p0)
+
+        mesh_cell_centers = mesh_cell_centers[indices]
+        active_indices = indices[indices]
+
         poly = pv.PolyData(mesh_cell_centers)
         mesh = pv.UnstructuredGrid(poly.cast_to_unstructured_grid())
         surface = model.extract_surface()
@@ -167,23 +174,28 @@ class Obj2(Shape3D):
             surface_distance = mesh.compute_implicit_distance(surface)
             smin, smax = self.surface_range
 
-            indices = surface_distance['implicit_distance']
+            dist = surface_distance['implicit_distance']
 
             if smax is not None:
-                indices = indices <= smax
+                active_indices &= dist <= smax
 
             if smin is not None:
-                indices = indices >= smin
+                active_indices &= dist >= smin
         else:
             selection = mesh.select_enclosed_points(surface, tolerance=0.0, check_surface=not self.ignore_surface_check)
-            indices = selection['SelectedPoints'].view(np.bool_)
+            active_indices = selection['SelectedPoints'].view(np.bool_)
+
+        indices[indices] = active_indices
+
+        if progress is not None:
+            progress.update(1)
 
         return indices
 
-    def do_place(self, mesh_cell_centers, worker_id):
+    def do_place(self, mesh_cell_centers, progress):
         indices = None
         for model in self.models:
-            ret = self.place_impl(model, mesh_cell_centers, worker_id)
+            ret = self.place_impl(model, mesh_cell_centers, progress)
             if indices is None:
                 indices = ret
             else:
@@ -227,3 +239,11 @@ class Obj2(Shape3D):
     @property
     def area(self):
         return sum([m.area for m in self.models])
+
+    @property
+    def n_tasks(self):
+        return len(self.models)
+
+    @property
+    def progress_manually(self):
+        return True

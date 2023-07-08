@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from functools import reduce
 from typing import Iterable
@@ -7,21 +9,28 @@ import numpy as np
 from metalpy.utils.dhash import dhash
 from metalpy.utils.bounds import Bounds, union
 from ..transform import CompositeTransform, Transform, Translation, Rotation
+from ..utils.mesh import is_inside_cuboid
 
 
 class Shape3D(ABC):
     def __init__(self):
         self.transforms = CompositeTransform()
 
-    def place(self, mesh_cell_centers, worker_id):
+    @property
+    def prune_mesh(self):
+        """指示在子类do_place前自动根据Bounds框裁剪边界之外的网格
+        """
+        return True
+
+    def place(self, mesh_cell_centers, progress):
         """计算模型体所占用的网格
 
         Parameters
         ----------
         mesh_cell_centers
             3维网格中心点坐标
-        worker_id
-            worker的id，一般用于指示是否显示进度条
+        progress
+            进度条实例或None，当子类的n_task属性不为1时，需自行更新进度条
 
         Returns
         -------
@@ -29,22 +38,36 @@ class Shape3D(ABC):
             布尔数组或浮点数组，浮点数组原则上来说取值范围应为[0, 1]，
             指示对应网格位置是否有效或有效的程度， 0 代表非活动网格
         """
-        mesh = self.before_place(mesh_cell_centers, worker_id)
-        return self.do_place(mesh, worker_id)
+        mesh_cell_centers = self.before_place(mesh_cell_centers, progress)
 
-    def before_place(self, mesh_cell_centers, worker_id):
+        indices = None
+        if self.prune_mesh:
+            p0, p1 = self.local_bounds.as_corners()
+            indices = is_inside_cuboid(mesh_cell_centers, p0, p1 - p0)
+            mesh_cell_centers = mesh_cell_centers[indices]
+
+        ind = self.do_place(mesh_cell_centers, progress)
+
+        if indices is not None:
+            indices[indices] = ind
+        else:
+            indices = ind
+
+        return indices
+
+    def before_place(self, mesh_cell_centers, progress):
         return self.transforms.inverse_transform(mesh_cell_centers)
 
     @abstractmethod
-    def do_place(self, mesh_cell_centers, worker_id):
+    def do_place(self, mesh_cell_centers, progress):
         """计算模型体所占用的网格的实现函数，所有Shape3D的子类需要重写该函数
 
         Parameters
         ----------
         mesh_cell_centers
             3维网格中心点坐标
-        worker_id
-            worker的id，一般用于指示是否显示进度条
+        progress
+            进度条实例或None，当子类的n_task属性不为1时，需自行更新进度条
 
         Returns
         -------
@@ -333,6 +356,25 @@ class Shape3D(ABC):
         """获取该几何体的外表面积
         """
         raise NotImplementedError()
+
+    @property
+    def n_tasks(self):
+        """指示子类的细分任务数。
+
+        当返回值不为1时，子类可选择自行更新进度条，或重载progress_manually来指定是否自行更新进度条。
+
+        Notes
+        -----
+        注意，如果n_tasks为动态值且可能为1，
+        则可能需要手动重载progress_manually来协助Scene明确是否需要在Shape3D外进行更新
+        """
+        return 1
+
+    @property
+    def progress_manually(self):
+        """指示子类是否自行更新进度条
+        """
+        return self.n_tasks != 1
 
 
 def bounding_box_of(shapes: Iterable[Shape3D]):

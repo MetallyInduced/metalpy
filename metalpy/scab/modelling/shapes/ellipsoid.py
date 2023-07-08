@@ -3,7 +3,6 @@ import numpy as np
 from metalpy.utils.dhash import dhash
 from metalpy.utils.bounds import Bounds
 from . import Shape3D
-from .cuboid import is_inside_cuboid
 
 
 class Ellipsoid(Shape3D):
@@ -67,14 +66,8 @@ class Ellipsoid(Shape3D):
         r[polar_axis] = c
         return Ellipsoid(*r)
 
-    def do_place(self, mesh_cell_centers, worker_id):
-        # 优化：只判断在xyz三轴边界框内的点
-        possible_targets = is_inside_cuboid(mesh_cell_centers, -self.radii, 2 * self.radii)
-
-        indices = np.zeros(len(mesh_cell_centers), dtype=np.bool8)
-        indices[possible_targets] = np.sum((mesh_cell_centers[possible_targets] / self.radii) ** 2, axis=1) < 1
-
-        return indices
+    def do_place(self, mesh_cell_centers, progress):
+        return np.sum((mesh_cell_centers / self.radii) ** 2, axis=1) < 1
 
     def do_hash(self):
         return hash((*self.radii,))

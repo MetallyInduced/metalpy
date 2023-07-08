@@ -11,7 +11,7 @@ class FullSpace(Shape3D):
         """
         super().__init__()
 
-    def do_place(self, mesh_cell_centers, worker_id):
+    def do_place(self, mesh_cell_centers, progress):
         indices = np.ones(mesh_cell_centers.shape[0], dtype=bool)
         return indices
 

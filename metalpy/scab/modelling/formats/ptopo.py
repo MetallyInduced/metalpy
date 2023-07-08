@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import cast, Iterable
 
-from metalpy.scab.modelling.shapes import Prism, Cuboid
+from metalpy.scab.modelling.shapes import Prism, Cuboid, BarFramework
 from metalpy.utils.file import PathLike, openable
 
 
-def dumps_ptopo(models: Iterable[Prism, Cuboid]) -> list:
+def dumps_ptopo(models: Iterable[Prism, Cuboid, BarFramework]) -> list:
     ret = []
     for model in models:
+        if isinstance(model, BarFramework):
+            model = model.outline
+
         if isinstance(model, Cuboid):
             pdef = [[
                 [model.x0, model.y0],

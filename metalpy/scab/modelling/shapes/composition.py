@@ -18,17 +18,28 @@ class Composition(Shape3D):
         return MixMode.dispatch(self.mix_mode)
 
     @cached_property
-    def shapes(self):
+    def shapes(self) -> list[Shape3D]:
         return []
-    
-    def do_place(self, mesh_cell_centers, worker_id):
+
+    @property
+    def n_tasks(self):
+        return sum((s.n_tasks for s in self.shapes))
+
+    @property
+    def progress_manually(self):
+        return True
+
+    def do_place(self, mesh_cell_centers, progress):
         ret = None
         for shape in self.shapes:
-            indices = shape.place(mesh_cell_centers, worker_id)
+            indices = shape.place(mesh_cell_centers, progress)
             if ret is None:
                 ret = indices
             else:
                 ret = self.mixer(ret, indices)
+
+            if progress is not None and not shape.progress_manually:
+                progress.update(shape.n_tasks)
 
         return ret
 

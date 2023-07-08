@@ -36,8 +36,43 @@ class Scene(OSMFormat, PTopoFormat):
         self.backgrounds_layer = Layer(mix_mode=MixMode.KeepOriginal)
 
     @staticmethod
-    def of(*shapes: Shape3D, models: Union[Any, dict, list[Any], None] = None):
+    def of(*shapes: Shape3D | Iterable[Shape3D],
+           models: Union[Any, dict, list[Any], None] = None) -> 'Scene':
+        """从一组Shape3D实例创建场景，并赋予相同的模型值`models`
+
+        Parameters
+        ----------
+        shapes
+            一组Shape3D实例
+        models
+            三维几何体的参数
+
+        Returns
+        -------
+        scene
+            新创建的场景
+
+        Notes
+        -----
+        支持通过变长参数或数组传递shapes
+
+        Examples
+        --------
+        >>> from metalpy.scab.modelling.shapes import Cuboid, Prism
+        >>> shapes = [
+        >>>     Cuboid([1, 1, 1], size=2),
+        >>>     Prism([[0, 0], [-2, 0], [-2, 1], [-1, 1]], 1, 3),
+        >>> ]
+        >>> Scene.of(shapes)  # OK!
+        >>> Scene.of(*shapes)  # OK!
+        """
         ret = Scene()
+
+        if len(shapes) == 1 and not isinstance(shapes[0], Shape3D):
+            # 假设传入的为Shape3D实例数组，而非以变长参数形式传递
+            shapes = shapes[0]
+
+        assert all([isinstance(s, Shape3D) for s in shapes]), '`scene` accepts only `Shape3D` instances.'
 
         if (
             models is None
@@ -158,12 +193,11 @@ class Scene(OSMFormat, PTopoFormat):
 
             futures = []
             for i, worker in enumerate(executor.get_workers()):
-                futures.append(
-                    executor.submit(self._build_mesh_worker, tuple(self.layers), input_mesh.assign(worker),
-                                    worker_id=i,
-                                    show_modeling_progress=i == 0 if progress else False,
-                                    worker=worker, )
-                )
+                futures.append(executor.submit(
+                    self._build_mesh_worker, tuple(self.layers), input_mesh.assign(worker),
+                    show_modeling_progress=i == 0 if progress else False,
+                    worker=worker
+                ))
             executor.gather(futures)
 
             models_dict = {}
@@ -263,13 +297,13 @@ class Scene(OSMFormat, PTopoFormat):
 
         return pruned
 
-    def build_objects(self, mesh, worker_id, progress=None):
+    def build_objects(self, mesh, progress=None):
         if progress is True:
             progress = tqdm.tqdm(total=len(self))
 
         models = []
 
-        for obj, ind, sub_models in Scene._build_objects(self.objects, mesh, worker_id, progress):
+        for obj, ind, sub_models in Scene._build_objects(self.objects, mesh, progress):
             mask = Scene.is_active(ind)
             models.append(ModelledMesh(mesh, dict(sub_models), ind_active=mask))
 
@@ -436,14 +470,14 @@ class Scene(OSMFormat, PTopoFormat):
                 prev_layer[non_overlapping_mask] = current_layer[non_overlapping_mask]
 
     @staticmethod
-    def _build_objects(objects: objects, mesh, worker_id, progress=None):
+    def _build_objects(objects: objects, mesh, progress=None):
         models = {}
 
         for obj in objects:
             shape = obj.shape
 
             # place的结果应该为布尔数组或范围为[0, 1]的数组，指示对应网格位置是否有效或有效程度
-            ind: np.ndarray = shape.place(mesh, worker_id)
+            ind: np.ndarray = shape.place(mesh, progress)
 
             def model_generator():
                 for key, current_value in obj.items():
@@ -456,35 +490,35 @@ class Scene(OSMFormat, PTopoFormat):
 
             yield obj, ind, model_generator()
 
-            if progress is not None:
-                progress.update(1)
+            if progress is not None and not obj.progress_manually:
+                progress.update(obj.n_tasks)
 
         return models
 
     @staticmethod
-    def _build_layer(layer: Layer, mesh, worker_id, progress=None):
+    def _build_layer(layer: Layer, mesh, progress=None):
         objects = layer.objects
         models = {}
 
-        for obj, ind, sub_models in Scene._build_objects(objects, mesh, worker_id, progress):
+        for obj, ind, sub_models in Scene._build_objects(objects, mesh, progress):
             mask = Scene.is_active(ind)
             Scene._merge_models(models, sub_models, mask, obj.mixer)
 
         return models
 
     @staticmethod
-    def _build_mesh_worker(layers: list[Layer], mesh, show_modeling_progress, worker_id):
+    def _build_mesh_worker(layers: list[Layer], mesh, show_modeling_progress):
         models = {}
 
         if show_modeling_progress:
             layers = list(layers)
-            progress = tqdm.tqdm(total=sum((len(layer) for layer in layers)),
+            progress = tqdm.tqdm(total=sum((obj.n_tasks for layer in layers for obj in layer)),
                                  position=0, leave=False, ncols=80)
         else:
             progress = None
 
         for layer in layers:
-            layer_models = Scene._build_layer(layer, mesh, worker_id, progress)
+            layer_models = Scene._build_layer(layer, mesh, progress)
             Scene._merge_models(models, layer_models.items(), None, layer.mixer)
 
         if progress is not None:
