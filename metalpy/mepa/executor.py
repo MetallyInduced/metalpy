@@ -1,6 +1,12 @@
-import contextlib
-from abc import ABC, abstractmethod
+from __future__ import annotations
 
+import contextlib
+import re
+from abc import ABC, abstractmethod
+from collections.abc import Collection
+from typing import Callable
+
+from . import Worker
 from .task_allocator import TaskAllocator, SingleTaskAllocator
 from .utils import structured_traverse
 
@@ -23,6 +29,32 @@ class Executor(ABC):
             workers = [worker]
         return self.do_submit(func, workers=workers, *args, **kwargs)
 
+    def extract_by_name(self, pat: str | re.Pattern | Callable):
+        """筛选符合条件的worker构成子执行器
+
+        Parameters
+        ----------
+        pat
+            模式，支持通过字符串包含worker名/正则匹配worker名/函数谓词判定/重载`==`运算符等方式进行
+
+        Returns
+        -------
+        sub_executor
+            提取的worker构造的新的执行器
+        """
+        from .sub_executor import SubExecutor
+
+        if isinstance(pat, str):
+            workers = [w for w in self.get_workers() if pat in w.get_name()]
+        elif isinstance(pat, re.Pattern):
+            workers = [w for w in self.get_workers() if pat.match(w.get_name())]
+        elif isinstance(pat, Callable):
+            workers = [w for w in self.get_workers() if pat(w)]
+        else:
+            workers = [w for w in self.get_workers() if pat == w]
+
+        return SubExecutor(parent=self, workers=workers)
+
     @abstractmethod
     def do_submit(self, func, *args, workers=None, **kwargs):
         pass
@@ -34,7 +66,7 @@ class Executor(ABC):
         return TaskAllocator(self.get_n_units(), *data_list)
 
     @abstractmethod
-    def get_workers(self):
+    def get_workers(self) -> Collection[Worker]:
         pass
 
     @abstractmethod

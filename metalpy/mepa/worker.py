@@ -27,3 +27,9 @@ class Worker:
 
     def get_in_group_id(self):
         return self.id
+    
+    def __repr__(self):
+        return f'{type(self).__name__}(' \
+               f'name={self.get_name()}, ' \
+               f'weight={self.get_weight()}' \
+               f')'
