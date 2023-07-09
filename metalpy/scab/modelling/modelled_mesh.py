@@ -7,7 +7,7 @@ import numpy as np
 from discretize import TensorMesh
 
 from metalpy.scab.modelling.object import Object
-from metalpy.utils.type import is_numeric_array
+from metalpy.utils.type import is_numeric_array, get_first_key
 
 
 class ModelledMesh:
@@ -242,35 +242,44 @@ class ModelledMesh:
         import pyvista as pv
         from metalpy.scab.modelling import Scene
 
+        key_active_cells = 'ACTIVE'
+        active_scalars = None
+
         models = {}
         if not is_numeric_array(scalars):
             if scalars is None:
                 scalars = self._models.keys()
+                active_scalars = self.default_key
             elif isinstance(scalars, str):
                 scalars = (scalars,)
+                active_scalars = scalars
 
             for scalar in scalars:
+                if active_scalars is None:
+                    active_scalars = scalar
                 models[scalar] = self._models[scalar]
+        elif isinstance(scalars, np.ndarray):
+            # assumed to be model array
+            key_model = 'model'
+
+            while key_model in models:
+                warnings.warn(f'Conflicted key with default key `{key_model}`, renaming it.')
+                key_active_cells = f'_{key_model}_'
+
+            models[key_model] = scalars
+            active_scalars = key_model
 
         if extra_models is not None:
             models.update(extra_models)
+            if active_scalars is None:
+                active_scalars = get_first_key(extra_models)
+
         models.update(kwargs)
-
-        key_active_cells = 'ACTIVE'
-        active_scalars = key_active_cells
-
-        if isinstance(scalars, np.ndarray):
-            # assumed to be model array
-            key_active_model = 'model'
-
-            while key_active_model in models:
-                warnings.warn(f'Keys of `models` conflicts with default scalars key {key_active_model}, renaming it.')
-                key_active_cells = f'_{key_active_model}_'
-            models = {key_active_model: scalars}
-            active_scalars = key_active_model
+        if active_scalars is None:
+            active_scalars = get_first_key(extra_models)
 
         while key_active_cells in models:
-            warnings.warn(f'Keys of `models` conflicts with default key {key_active_cells}, renaming it.')
+            warnings.warn(f'Conflicted key with default key `{key_active_cells}` detected, renaming it.')
             key_active_cells = f'_{key_active_cells}_'
 
         models[key_active_cells] = self._ind_active  # ensured as complete model

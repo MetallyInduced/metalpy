@@ -148,6 +148,13 @@ def not_none_or_default(val, _default=None, default=None, supplier: Callable | N
         return val
 
 
+def get_first_key(dictionary):
+    for k in dictionary:
+        return k
+
+    return None
+
+
 def get_params_dict(**kwargs):
     return dict(kwargs)
 
