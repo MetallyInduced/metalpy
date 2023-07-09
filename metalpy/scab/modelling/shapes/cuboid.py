@@ -113,8 +113,11 @@ class Cuboid(Shape3D):
     def __dhash__(self):
         return dhash(super().__dhash__(), *self.corner, *self.lengths)
 
-    def do_clone(self):
-        return Cuboid(corner=self.corner.copy(), size=self.lengths)
+    def do_clone(self, deep=True):
+        return Cuboid(
+            corner=self.corner.copy(),
+            size=self.lengths.copy()
+        )
 
     @property
     def local_bounds(self):

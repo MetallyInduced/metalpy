@@ -56,8 +56,13 @@ class Tunnel(Shape3D):
         return dhash(super().__dhash__(),
                      self.r0, self.r1, self.L, *self.p0)
 
-    def do_clone(self):
-        return Tunnel(self.p0, self.r0, self.r1, self.L)
+    def do_clone(self, deep=True):
+        return Tunnel(
+            self.p0.copy(),
+            self.r0,
+            self.r1,
+            self.L
+        )
 
     @property
     def local_bounds(self):

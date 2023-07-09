@@ -58,8 +58,11 @@ class Composition(Shape3D):
     def __dhash__(self):
         return dhash(super().__dhash__(), *self.shapes, dhashable_mixer(self.mix_mode))
 
-    def do_clone(self):
-        return Composition(*self.shapes, mix_mode=self.mix_mode)
+    def do_clone(self, deep=True):
+        return Composition(
+            *[s.clone(deep=deep) for s in self.shapes],
+            mix_mode=self.mix_mode
+        )
 
     @property
     def local_bounds(self):

@@ -102,13 +102,13 @@ class Shape3D(ABC):
     def __dhash__(self):
         return dhash(self.transforms)
 
-    def clone(self):
-        ret = self.do_clone()
+    def clone(self, deep=True):
+        ret = self.do_clone(deep=deep)
         ret.transforms = self.transforms.clone()
         return ret
 
     @abstractmethod
-    def do_clone(self):
+    def do_clone(self, deep=True):
         raise NotImplementedError()
 
     def to_polydata(self):

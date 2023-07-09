@@ -21,7 +21,7 @@ class FullSpace(Shape3D):
     def __dhash__(self):
         return dhash()
 
-    def do_clone(self):
+    def do_clone(self, deep=True):
         return FullSpace()
 
     @property

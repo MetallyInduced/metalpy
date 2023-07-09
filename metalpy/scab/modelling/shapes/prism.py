@@ -110,8 +110,8 @@ class Prism(Shape3D):
         return dhash(super().__dhash__(),
                      self.z0, self.z1, *self.pts.ravel())
 
-    def do_clone(self):
-        return Prism(self.pts, self.z0, self.z1)
+    def do_clone(self, deep=True):
+        return Prism(self.pts.copy(), self.z0, self.z1)
 
     @property
     def local_bounds(self):

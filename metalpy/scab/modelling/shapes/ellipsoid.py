@@ -75,7 +75,7 @@ class Ellipsoid(Shape3D):
     def __dhash__(self):
         return dhash(super().__dhash__(), *self.radii)
 
-    def do_clone(self):
+    def do_clone(self, deep=True):
         return Ellipsoid(*self.radii)
 
     @property

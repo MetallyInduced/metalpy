@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from datetime import timedelta, datetime
 
 
+PathLikeType = (str, os.PathLike)
 PathLike = Union[str, os.PathLike]
 cache_dir = Path('./.cache')
 
@@ -269,4 +270,4 @@ def file_cached(func=None, ttl: 'timedelta' = None):
 
 
 def openable(path):
-    return isinstance(path, (str, Path))
+    return isinstance(path, PathLikeType)
