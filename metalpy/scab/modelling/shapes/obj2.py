@@ -89,7 +89,6 @@ class Obj2(Shape3D):
 
         self.ignore_surface_check = ignore_surface_check
         if surface_thickness is not None or surface_range is not None:
-            self.surface_only = True
             if surface_range is not None:
                 if isinstance(surface_range, Iterable):
                     self.surface_range = tuple(surface_range)
@@ -104,7 +103,6 @@ class Obj2(Shape3D):
                 else:
                     self.surface_range = None
         else:
-            self.surface_only = False
             self.surface_range = None
 
         if model is not None:
@@ -159,6 +157,10 @@ class Obj2(Shape3D):
 
             self.models = models
 
+    @property
+    def surface_only(self):
+        return self.surface_range is not None
+
     def place_impl(self, model, mesh_cell_centers, progress):
         p0, p1 = Bounds(model.bounds).as_corners()
         indices = is_inside_cuboid(mesh_cell_centers, p0, p1 - p0)
@@ -170,7 +172,7 @@ class Obj2(Shape3D):
         mesh = pv.UnstructuredGrid(poly.cast_to_unstructured_grid())
         surface = model.extract_surface()
 
-        if self.surface_only:
+        if self.surface_range:
             surface_distance = mesh.compute_implicit_distance(surface)
             smin, smax = self.surface_range
 
@@ -207,16 +209,13 @@ class Obj2(Shape3D):
         n_samples = np.max((2, 10 // len(self.models)))
         surface_range = self.surface_range if self.surface_range is not None else (None,)
         return hash((*(hash_model(m, n_samples) for m in self.models),
-                     self.surface_only,
                      *surface_range,
                      ))
 
     def __dhash__(self):
         n_samples = np.max((2, 10 // len(self.models)))
-        surface_range = self.surface_range if self.surface_range is not None else (None,)
         return dhash(super().__dhash__(),
-                     self.surface_only,
-                     *surface_range,
+                     self.surface_range,
                      *(dhash_model(m, n_samples) for m in self.models),
                      )
 
@@ -227,7 +226,13 @@ class Obj2(Shape3D):
 
     @property
     def local_bounds(self):
-        return Bounds(extract_model_list_bounds(self.models))
+        ret = Bounds(extract_model_list_bounds(self.models))
+        if self.surface_range:
+            smax = self.surface_range[1]
+            if smax is not None:
+                ret.expand(increment=smax)
+
+        return ret
 
     def to_local_polydata(self):
         return pv.merge(self.models, merge_points=False).copy(deep=True)

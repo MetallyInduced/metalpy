@@ -115,8 +115,7 @@ class Bounds(FixedShapeNDArray):
             if isinstance(proportion, number):
                 proportion = deltas * proportion
             increment = self.extent.repeat(2) * proportion
-
-        if isinstance(proportion, number):
+        elif isinstance(increment, number):
             increment = increment * deltas
 
         if inplace:
