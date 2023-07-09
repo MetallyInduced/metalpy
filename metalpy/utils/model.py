@@ -237,7 +237,11 @@ class DataAssociation(Enum):
         return f'{self}_data'
 
 
-def pv_ufunc_assign(obj: pv.DataSet, data_type: DataAssociation, key, val, inplace=True):
+def pv_ufunc_assign(obj: pv.DataSet,
+                    data_type: DataAssociation,
+                    key, val,
+                    inplace=True,
+                    set_active=True):
     """赋值给对象的数据字段，对MultiBlock则作用于其中的每个对象
 
     Parameters
@@ -252,6 +256,8 @@ def pv_ufunc_assign(obj: pv.DataSet, data_type: DataAssociation, key, val, inpla
         值，如果为单个值，则会通过np.full展开到对应字段长度
     inplace
         指示操作是否直接在目标对象上进行
+    set_active
+        指示是否将新赋予的值设置为默认向量
 
     Returns
     -------
@@ -276,6 +282,9 @@ def pv_ufunc_assign(obj: pv.DataSet, data_type: DataAssociation, key, val, inpla
             _val = val
 
         data_collection.__setitem__(key, _val)
+
+        if set_active:
+            x.set_active_scalars(key)
 
         return x
 
