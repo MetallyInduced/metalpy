@@ -1,4 +1,5 @@
 import pyvista as pv
+from scipy.spatial.transform import Rotation
 
 from metalpy.scab.modelling import Scene
 from metalpy.scab.modelling.shapes import Cuboid, Prism, Ellipsoid, Tunnel, Obj2, BarFramework

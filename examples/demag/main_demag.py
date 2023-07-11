@@ -32,7 +32,7 @@ def main(grid_size, gpu=False):
         model_mesh = Scene.of(spheroid, models=80).build(cell_size=grid_size, executor=LinearExecutor(1))
         active_cells = model_mesh.active_cells
         model = model_mesh.get_active_model()
-        mesh = model_mesh.base_mesh
+        mesh = model_mesh.mesh
 
         source_field = define_inducing_field(50000, 45, 20)
 

@@ -30,7 +30,7 @@ def main():
 
     scene = Scene.of(Obj2(text, subdivide=True))
     model_mesh = scene.build(cell_size=cell_size)
-    mesh = model_mesh.base_mesh
+    mesh = model_mesh.mesh
     ind_active = model_mesh.active_cells
     nx, ny, nz = mesh.nCx, mesh.nCy, mesh.nCz
     colored_model_layer = np.ones(nx * ny, dtype=np.int64)

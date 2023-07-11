@@ -26,5 +26,5 @@ def test_build():
 
     for model_mesh in ret[1:]:
         assert_equal(model_mesh.n_cells, ref_mesh.n_cells)
-        assert_equal(model_mesh.base_mesh.cell_centers, ref_mesh.base_mesh.cell_centers)
+        assert_equal(model_mesh.mesh.cell_centers, ref_mesh.mesh.cell_centers)
         assert_equal(model_mesh.get_active_model(), model_mesh.get_active_model())

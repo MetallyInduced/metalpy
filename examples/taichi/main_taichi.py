@@ -21,7 +21,7 @@ def main():
     b0, b1 = bounds[::2], bounds[1::2]
     grid_size = 0.5
     model_mesh = scene.build(cell_size=grid_size)
-    mesh = model_mesh.base_mesh
+    mesh = model_mesh.mesh
     ind_active = model_mesh.active_cells
 
     n_active = model_mesh.n_active_cells

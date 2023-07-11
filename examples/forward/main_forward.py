@@ -34,7 +34,7 @@ def main():
     origin, end = bounds[::2], bounds[1::2]
     active_cells = model_mesh.active_cells
     active_model = model_mesh.get_active_model()
-    mesh = model_mesh.base_mesh
+    mesh = model_mesh.mesh
 
     with simpeg_patched(Tied(max_cpu_threads=-1), Progressed()):
         source_field = define_inducing_field(50000, 45, 20)

@@ -5,9 +5,11 @@ from typing import Iterable
 
 import numpy as np
 from discretize import TensorMesh
+from numpy.typing import ArrayLike
 
 from metalpy.scab.modelling.object import Object
-from metalpy.utils.type import is_numeric_array, get_first_key
+from metalpy.utils.numpy import ensure_as_numpy_array_collection
+from metalpy.utils.type import is_numeric_array, get_first_key, ensure_set_key
 
 
 class ModelledMesh:
@@ -25,19 +27,31 @@ class ModelledMesh:
 
     def __init__(self,
                  mesh: TensorMesh,
-                 models: dict[str, np.ndarray] | None = None,
-                 ind_active: np.ndarray = None,
-                 **kwargs: np.ndarray):
+                 models: dict[str, ArrayLike] | ArrayLike | None = None,
+                 ind_active: ArrayLike = None,
+                 **kwargs: ArrayLike):
         from metalpy.scab.modelling import Scene
 
-        self.base_mesh = mesh
+        self._mesh = mesh
+
+        default_key = None
+        converted_models = ensure_as_numpy_array_collection(kwargs)
 
         if models is not None:
-            kwargs.update(models)
+            if is_numeric_array(models):
+                default_key = ensure_set_key(
+                    converted_models,
+                    Object.DEFAULT_KEY,
+                    np.asarray(models)
+                )
+            else:
+                converted_models.update(ensure_as_numpy_array_collection(models))
 
-        self._models = kwargs
+        if default_key is None:
+            default_key = get_first_key(converted_models)
 
         if ind_active is not None:
+            ind_active = np.asarray(ind_active)
             if ind_active.dtype == bool:
                 assert ind_active.shape[0] == self.n_cells, \
                     f'`ind_active` defines activeness for all mesh cells,' \
@@ -47,30 +61,38 @@ class ModelledMesh:
                 assert np.issubdtype(ind_active.dtype, np.integer), \
                     f'`ind_active` must be array of `bool` or `integer`. Got `{ind_active.dtype}`.'
         else:
-            for key, model in kwargs.items():
-                assert model.shape[0] == self.n_cells, \
-                    f'`ModelledMesh`\'s constructor expects models to contain all mesh cells\'s values' \
-                    f' in order to build `active_index`.' \
-                    f' Avoid this by either specifying `active_index` manually or' \
-                    f' converting models["{key}"] to match all the mesh cells.' \
-                    f' Got {model.shape[0]}, expected {self.n_cells}.'
-            ind_active = Scene.compute_active(kwargs.values())
+            if len(converted_models) > 0:
+                for key, model in converted_models.items():
+                    assert model.shape[0] == self.n_cells, \
+                        f'`ModelledMesh`\'s constructor expects models to contain all mesh cells\'s values' \
+                        f' in order to build `active_index`.' \
+                        f' Avoid this by either specifying `active_index` manually or' \
+                        f' converting models["{key}"] to match all the mesh cells.' \
+                        f' Got {model.shape[0]}, expected {self.n_cells}.'
+                ind_active = Scene.compute_active(converted_models.values())
+            else:
+                ind_active = np.ones(mesh.n_cells, dtype=bool)
 
-        if ind_active is None:
-            ind_active = np.ones(mesh.n_cells, dtype=bool)
-
+        self._models = converted_models
         self._ind_active = ind_active
-        self._default_key = None
+        self._default_key = default_key
 
     @property
     def model(self):
         """获取默认model（active形式）
+
+        Notes
+        -----
+        默认活跃的数据为：
+        1. models的第一个键
+        2. 若models为空，则为kwargs的第一个键
+        3. 若kwargs也为空，无选中的激活数据，则为active_cells
         """
         return self.get_active_model()
 
     @property
     def mesh(self):
-        return self.base_mesh
+        return self._mesh
 
     @property
     def active_cells(self):
@@ -89,7 +111,7 @@ class ModelledMesh:
 
     @property
     def n_cells(self):
-        return self.base_mesh.n_cells
+        return self.mesh.n_cells
 
     @property
     def default_key(self):
@@ -108,7 +130,7 @@ class ModelledMesh:
             if self.has_default_model:
                 key = self.default_key
             else:
-                raise RuntimeError('Mesh contains various models, please specify one by name.')
+                return np.ones(self.n_active_cells, dtype=bool)
 
         return self.map_to_active(self._models[key])
 
@@ -123,7 +145,7 @@ class ModelledMesh:
             if self.has_default_model:
                 key = self.default_key
             else:
-                raise RuntimeError('Mesh contains various models, please specify one by name.')
+                return self.active_cells
 
         return self.map_to_complete(self._models[key])
 
@@ -200,13 +222,10 @@ class ModelledMesh:
         return len(self._models)
 
     def __getitem__(self, item):
-        ret = self._models[item]
-        if ret.shape[0] == self.n_active_cells:
-            return ret
-        else:
-            return ret[self.active_cells]
+        return self.get_active_model(item)
 
-    def __setitem__(self, item, model):
+    def __setitem__(self, item, model: ArrayLike):
+        model = np.asarray(model)
         assert model.shape[0] in (self.n_active_cells, self.n_cells), \
             f'`ModelledMesh` only accepts models matching active cells or all mesh cells.' \
             f' Got model with size {model.shape[0]}, expected {self.n_active_cells} or {self.n_cells}.'
@@ -216,9 +235,9 @@ class ModelledMesh:
         return item in self._models
     
     def to_polydata(self,
-                    scalars: str | Iterable[str] | np.ndarray | None = None,
-                    extra_models: dict[str, np.ndarray] | None = None,
-                    **kwargs: np.ndarray):
+                    scalars: str | Iterable[str] | ArrayLike | None = None,
+                    extra_models: dict[str, ArrayLike] | None = None,
+                    **kwargs: ArrayLike):
         """导出模型网格为PyVista模型
 
         Parameters
@@ -242,7 +261,7 @@ class ModelledMesh:
         import pyvista as pv
         from metalpy.scab.modelling import Scene
 
-        key_active_cells = 'ACTIVE'
+        default_key_active_cells = 'ACTIVE'
         active_scalars = None
 
         models = {}
@@ -262,12 +281,11 @@ class ModelledMesh:
             # assumed to be model array
             key_model = 'model'
 
-            while key_model in models:
-                warnings.warn(f'Conflicted key with default key `{key_model}`, renaming it.')
-                key_active_cells = f'_{key_model}_'
-
-            models[key_model] = scalars
-            active_scalars = key_model
+            active_scalars = ensure_set_key(
+                models,
+                key_model,
+                scalars
+            )
 
         if extra_models is not None:
             models.update(extra_models)
@@ -278,18 +296,24 @@ class ModelledMesh:
         if active_scalars is None:
             active_scalars = get_first_key(extra_models)
 
-        while key_active_cells in models:
-            warnings.warn(f'Conflicted key with default key `{key_active_cells}` detected, renaming it.')
-            key_active_cells = f'_{key_active_cells}_'
-
-        models[key_active_cells] = self._ind_active  # ensured as complete model
+        key_active_cells = ensure_set_key(
+            models,
+            default_key_active_cells,
+            self._ind_active  # 保证为complete_model
+        )
+        if key_active_cells != default_key_active_cells:
+            warnings.warn(f'Conflicted key with default key `{default_key_active_cells}` detected,'
+                          f' renaming it to `{key_active_cells}`.')
 
         for key in models:
             model = models[key]
             model = self.map_to_complete(model)
             models[key] = model
 
-        ret: pv.RectilinearGrid = Scene.mesh_to_polydata(self.base_mesh, models)
+        if active_scalars is None:
+            active_scalars = key_active_cells
+
+        ret: pv.RectilinearGrid = Scene.mesh_to_polydata(self.mesh, models)
         ret.set_active_scalars(active_scalars)
 
         return ret

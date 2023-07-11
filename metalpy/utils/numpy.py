@@ -1,4 +1,19 @@
+from typing import Mapping, Iterable
+
 import numpy as np
+
+
+def ensure_as_numpy_array_collection(array_collection):
+    if isinstance(array_collection, dict):
+        return {k: np.asarray(v) for k, v in array_collection.items()}
+    elif isinstance(array_collection, list):
+        return [np.asarray(v) for v in array_collection]
+    elif isinstance(array_collection, tuple):
+        return (np.asarray(v) for v in array_collection)
+    elif isinstance(array_collection, Mapping):
+        return {k: np.asarray(v) for k, v in array_collection.items()}
+    elif isinstance(array_collection, Iterable):
+        return [np.asarray(v) for v in array_collection]
 
 
 def array_homogeneous_key(arr: np.ndarray):

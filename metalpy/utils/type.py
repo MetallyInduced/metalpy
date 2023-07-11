@@ -155,6 +155,17 @@ def get_first_key(dictionary):
     return None
 
 
+def ensure_set_key(dictionary, key, value, *, transfer=None):
+    while key in dictionary:
+        if transfer is None:
+            def transfer(x):
+                return f'_{x}_'
+        key = transfer(key)
+
+    dictionary[key] = value
+    return key
+
+
 def get_params_dict(**kwargs):
     return dict(kwargs)
 

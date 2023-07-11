@@ -23,7 +23,7 @@ class BasePFSimulationBuilder(SimulationBuilder):
             self._model_mesh = mesh
             if ind_active == undefined:
                 ind_active = mesh.active_cells
-            mesh = mesh.base_mesh
+            mesh = mesh.mesh
 
         return mesh, ind_active
 
