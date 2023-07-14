@@ -1,6 +1,6 @@
 import functools
 
-from metalpy.utils.object_path import get_full_qualified_path, reassign_object_name, mock_object
+from metalpy.utils.object_path import get_full_qualified_path, reassign_object_name
 
 
 class XX:
