@@ -26,7 +26,7 @@ def structured_traverse(struct, func):
 
 
 def exception_caught(func, *args, **kwargs):
-    """用于处理Loki无法正确识别并捕获异常的问题
+    """用于处理loky无法正确识别并捕获异常的问题
     TODO: 参考multiprocessing进行重新创建堆栈，从而帮助调试
     """
     try:

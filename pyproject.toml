@@ -9,7 +9,7 @@ authors = [
 ]
 description = "Essential tools and libraries for SimPEG and related workflows."
 readme = "README-pypi.md"
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 license = { file = "LICENSE.txt" }
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -32,6 +32,7 @@ utils = [
 ]
 mexin = []
 mepa = [
+    "loky",
     "distributed",
     "psutil",
 ]
