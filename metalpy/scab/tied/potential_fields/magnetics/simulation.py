@@ -12,6 +12,13 @@ from ...taichi_kernel_base import TiedMixin, tied_profile
 
 class TiedSimulation3DIntegralMixin(TiedMixin):
     def __init__(self, this, **kwargs):
+        """
+        Notes
+        -----
+        SimPEG原版的磁正演过程会忽略mesh的orientation属性，直接进行正演。
+        TiedSimulation3DIntegralMixin通过逆向旋转所有相关量来实现了网格旋转。
+        因此如果mesh.orientation不为单位矩阵（即存在旋转），则行为会与SimPEG不一致。
+        """
         super().__init__(this, **kwargs)
 
     @tied_profile
@@ -56,9 +63,12 @@ class TiedSimulation3DIntegralMixin(TiedMixin):
             self.mesh.h[2].min(),
         ]
 
-        magnetization = self.M  # (nC, 3)的矩阵或None
-        if magnetization is None:
-            # 输入标量，TaichiSimulation3DIntegral内部会自动转换为(nC, 3)的矩阵
+        if self.model_type == 'scalar':
+            magnetization = self.M  # (nC, 3)的矩阵
+        else:
+            # 输入向量，TaichiSimulation3DIntegral内部会自动转换为(nC, 3)的矩阵
+            # 向量模式下（model_type='vector'），dpred输入为三轴等效磁化率，乘以地磁场幅值得到磁化矩阵（地磁场方向此时不参与计算）
+            # 与Simulation3DIntegral.evaluate_integral中`if self.model_type == "vector"`分支行为一致
             magnetization = self.survey.source_field.amplitude
 
         if self.model_type == 'scalar':
@@ -93,4 +103,5 @@ class TiedSimulation3DIntegralMixin(TiedMixin):
             print(f"writing sensitivity to {sens_name}")
             os.makedirs(self.sensitivity_path, exist_ok=True)
             np.save(sens_name, kernel)
+
         return kernel

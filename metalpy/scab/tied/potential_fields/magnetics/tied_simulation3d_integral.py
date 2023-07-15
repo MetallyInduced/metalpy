@@ -1,4 +1,3 @@
-import numbers
 from typing import Union, Iterable
 
 import numpy as np
@@ -84,9 +83,12 @@ class TaichiSimulation3DIntegral:
             tmi_projection = np.asarray([0])  # dummy variable
 
         if magnetization is None:
-            magnetization = np.ones((n_cells, 3), dtype=np.int8)
-        elif isinstance(magnetization, (numbers.Number, np.number)):
-            magnetization = np.ones((n_cells, 3)) * magnetization
+            magnetization = 1
+
+        magnetization = np.asarray(magnetization)
+        if magnetization.ndim == 2 and np.allclose(magnetization - magnetization[0], 0):
+            # 标量模式下SimPEG会将地磁场重复n_cell行，判断如果重复则可以压缩磁化矩阵
+            magnetization = magnetization[0]
 
         self.receivers = receivers
         self.xn = xn
@@ -157,6 +159,7 @@ class TaichiSimulation3DIntegral:
             yn = ti_ndarray_from(self.yn)
             zn = ti_ndarray_from(self.zn)
             magnetization = ti_ndarray_from(self.magnetization)
+        magnetization_dim = self.magnetization.ndim
 
         # TODO: 由于Taichi目前采用i32作为索引类型，数组元素总数不能超过int32的上限，否则行为未定义
         #  如果后续Taichi支持i64索引类型，则可以去掉这个限制
@@ -220,6 +223,7 @@ class TaichiSimulation3DIntegral:
                     receiver_locations=rx_locs,
                     model=model, forward_only=forward_only,
                     magnetization=magnetization,
+                    magnetization_dim=magnetization_dim,
                     **components_indices, n_components=n_components,
                     start_row=start_row,
                     ret=ret)
@@ -252,6 +256,7 @@ class TaichiSimulation3DIntegral:
             ibzz: ti.template(),
             n_components: ti.template(),
             magnetization: ti.types.ndarray(),
+            magnetization_dim: ti.template(),
             model: ti.types.ndarray(),
             forward_only: ti.template(),
             start_row: ti.i64,
@@ -270,7 +275,9 @@ class TaichiSimulation3DIntegral:
         n_components
             需要计算的分量数
         magnetization
-            磁化矩阵，scalar模型下为array(3 * n_cells, n_cells)，vector模型下为array(3 * n_cells, 3 * n_cells)
+            磁化矩阵，array(n_cells, 3) or array(3,) or array()
+        magnetization_dim
+            磁化矩阵维度
         model
             模型参数，scalar模型下为array(n_cells,)，vector模型下为array(n_cells, 3)
         forward_only
@@ -447,7 +454,7 @@ class TaichiSimulation3DIntegral:
                         icell=icell, iobs=iobs, n_obs=n_obs, icomponent=ibx,
                         n_components=n_components,
                         model=model, forward_only=forward_only,
-                        magnetization=magnetization,
+                        magnetization=magnetization, magnetization_dim=magnetization_dim,
                         accumulative=self.NonAccumulative
                     )
 
@@ -457,7 +464,7 @@ class TaichiSimulation3DIntegral:
                         icell=icell, iobs=iobs, n_obs=n_obs, icomponent=itmi,
                         n_components=n_components,
                         model=model, forward_only=forward_only,
-                        magnetization=magnetization,
+                        magnetization=magnetization, magnetization_dim=magnetization_dim,
                         accumulative=self.Accumulative
                     )
 
@@ -497,7 +504,7 @@ class TaichiSimulation3DIntegral:
                         icell=icell, iobs=iobs, n_obs=n_obs, icomponent=iby,
                         n_components=n_components,
                         model=model, forward_only=forward_only,
-                        magnetization=magnetization,
+                        magnetization=magnetization, magnetization_dim=magnetization_dim,
                         accumulative=self.NonAccumulative
                     )
 
@@ -507,7 +514,7 @@ class TaichiSimulation3DIntegral:
                         icell=icell, iobs=iobs, n_obs=n_obs, icomponent=itmi,
                         n_components=n_components,
                         model=model, forward_only=forward_only,
-                        magnetization=magnetization,
+                        magnetization=magnetization, magnetization_dim=magnetization_dim,
                         accumulative=self.Accumulative
                     )
 
@@ -547,7 +554,7 @@ class TaichiSimulation3DIntegral:
                         icell=icell, iobs=iobs, n_obs=n_obs, icomponent=ibz,
                         n_components=n_components,
                         model=model, forward_only=forward_only,
-                        magnetization=magnetization,
+                        magnetization=magnetization, magnetization_dim=magnetization_dim,
                         accumulative=self.NonAccumulative
                     )
 
@@ -557,7 +564,7 @@ class TaichiSimulation3DIntegral:
                         icell=icell, iobs=iobs, n_obs=n_obs, icomponent=itmi,
                         n_components=n_components,
                         model=model, forward_only=forward_only,
-                        magnetization=magnetization,
+                        magnetization=magnetization, magnetization_dim=magnetization_dim,
                         accumulative=self.Accumulative
                     )
 
@@ -601,7 +608,7 @@ class TaichiSimulation3DIntegral:
                         icell=icell, iobs=iobs, n_obs=n_obs, icomponent=ibxx,
                         n_components=n_components,
                         model=model, forward_only=forward_only,
-                        magnetization=magnetization,
+                        magnetization=magnetization, magnetization_dim=magnetization_dim,
                         accumulative=self.NonAccumulative
                     )
 
@@ -611,7 +618,7 @@ class TaichiSimulation3DIntegral:
                         icell=icell, iobs=iobs, n_obs=n_obs, icomponent=ibzz,
                         n_components=n_components,
                         model=model, forward_only=forward_only,
-                        magnetization=magnetization,
+                        magnetization=magnetization, magnetization_dim=magnetization_dim,
                         accumulative=self.Accumulative
                     )
 
@@ -655,7 +662,7 @@ class TaichiSimulation3DIntegral:
                         icell=icell, iobs=iobs, n_obs=n_obs, icomponent=ibyy,
                         n_components=n_components,
                         model=model, forward_only=forward_only,
-                        magnetization=magnetization,
+                        magnetization=magnetization, magnetization_dim=magnetization_dim,
                         accumulative=self.NonAccumulative
                     )
 
@@ -665,7 +672,7 @@ class TaichiSimulation3DIntegral:
                         icell=icell, iobs=iobs, n_obs=n_obs, icomponent=ibzz,
                         n_components=n_components,
                         model=model, forward_only=forward_only,
-                        magnetization=magnetization,
+                        magnetization=magnetization, magnetization_dim=magnetization_dim,
                         accumulative=self.Accumulative
                     )
 
@@ -701,7 +708,7 @@ class TaichiSimulation3DIntegral:
                     icell=icell, iobs=iobs, n_obs=n_obs, icomponent=ibxy,
                     n_components=n_components,
                     model=model, forward_only=forward_only,
-                    magnetization=magnetization,
+                    magnetization=magnetization, magnetization_dim=magnetization_dim,
                     accumulative=self.NonAccumulative
                 )
 
@@ -737,7 +744,7 @@ class TaichiSimulation3DIntegral:
                     icell=icell, iobs=iobs, n_obs=n_obs, icomponent=ibxz,
                     n_components=n_components,
                     model=model, forward_only=forward_only,
-                    magnetization=magnetization,
+                    magnetization=magnetization, magnetization_dim=magnetization_dim,
                     accumulative=self.NonAccumulative
                 )
 
@@ -773,7 +780,7 @@ class TaichiSimulation3DIntegral:
                     icell=icell, iobs=iobs, n_obs=n_obs, icomponent=ibyz,
                     n_components=n_components,
                     model=model, forward_only=forward_only,
-                    magnetization=magnetization,
+                    magnetization=magnetization, magnetization_dim=magnetization_dim,
                     accumulative=self.NonAccumulative
                 )
 
@@ -788,6 +795,7 @@ class TaichiSimulation3DIntegral:
             icomponent: ti.template(),
             model: ti.types.ndarray(),
             magnetization: ti.types.ndarray(),
+            magnetization_dim: ti.template(),
             n_components: ti.template(),
             forward_only: ti.template(),
             accumulative: ti.template(),
@@ -803,7 +811,9 @@ class TaichiSimulation3DIntegral:
         start_row
             输出矩阵的起点行
         magnetization
-            磁化矩阵，array(n_cells, 3)
+            磁化矩阵，array(n_cells, 3) or array(3,) or array()
+        magnetization_dim
+            磁化矩阵维度
         model
             模型数组，如果为scalar模型则应为array(n_cells,)否则应为array(n_cells, 3)
         icell
@@ -823,9 +833,19 @@ class TaichiSimulation3DIntegral:
         """
         i = self.in_col_index(iobs, icomponent, n_components, n_obs) + start_row
 
-        tx *= magnetization[icell, 0]
-        ty *= magnetization[icell, 1]
-        tz *= magnetization[icell, 2]
+        # 根据磁化矩阵的维度选择计算方式
+        if ti.static(magnetization_dim == 2):
+            tx *= magnetization[icell, 0]
+            ty *= magnetization[icell, 1]
+            tz *= magnetization[icell, 2]
+        elif ti.static(magnetization_dim == 1):
+            tx *= magnetization[0]
+            ty *= magnetization[1]
+            tz *= magnetization[2]
+        else:
+            tx *= magnetization[None]
+            ty *= magnetization[None]
+            tz *= magnetization[None]
 
         if ti.static(self.model_type == 0):  # MType_Vector
             if ti.static(not forward_only):
