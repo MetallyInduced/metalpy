@@ -85,8 +85,8 @@ class TaichiSimulation3DIntegral:
 
         if magnetization is None:
             magnetization = np.ones((n_cells, 3), dtype=np.int8)
-        elif isinstance(magnetization, (numbers.Number, np.number)):
-            magnetization = np.ones((n_cells, 3)) * magnetization
+        elif magnetization.ndim == 1:
+            magnetization = magnetization[np.newaxis, :].repeat(n_cells, axis=0)  # TODO: 在kernel中直接访问？
 
         self.receivers = receivers
         self.xn = xn

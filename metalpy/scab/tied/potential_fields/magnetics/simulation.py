@@ -12,6 +12,13 @@ from ...taichi_kernel_base import TiedMixin, tied_profile
 
 class TiedSimulation3DIntegralMixin(TiedMixin):
     def __init__(self, this, **kwargs):
+        """
+        Notes
+        -----
+        SimPEG原版的磁正演过程会忽略mesh的orientation属性，直接进行正演。
+        TiedSimulation3DIntegralMixin通过逆向旋转所有相关量来实现了网格旋转。
+        因此如果mesh.orientation不为单位矩阵（即存在旋转），则行为会与SimPEG不一致。
+        """
         super().__init__(this, **kwargs)
 
     @tied_profile
@@ -56,10 +63,23 @@ class TiedSimulation3DIntegralMixin(TiedMixin):
             self.mesh.h[2].min(),
         ]
 
+        rotation = this._get_mesh_rotation()
+        mesh_center = None
+        if rotation is not None:
+            mesh_center = np.r_[
+                xn[0, 0] + xn[-1, 1],
+                yn[0, 0] + yn[-1, 1],
+                zn[0, 0] + zn[-1, 1],
+            ] / 2
+
         magnetization = self.M  # (nC, 3)的矩阵或None
         if magnetization is None:
-            # 输入标量，TaichiSimulation3DIntegral内部会自动转换为(nC, 3)的矩阵
-            magnetization = self.survey.source_field.amplitude
+            if rotation is None:
+                # 输入地磁场向量，TaichiSimulation3DIntegral内部会自动转换为(nC, 3)的矩阵
+                magnetization = self.survey.source_field.b0
+
+        if rotation is not None:
+            magnetization = rotation.apply(magnetization, inverse=True)
 
         if self.model_type == 'scalar':
             model_type = TaichiSimulation3DIntegral.MType_Scalar
@@ -69,6 +89,9 @@ class TiedSimulation3DIntegralMixin(TiedMixin):
                 model = model.reshape(3, -1).T
 
         receivers = [Receiver(rx.locations, rx.components) for rx in self.survey.source_field.receiver_list]
+        if rotation is not None:
+            for rx in receivers:
+                rx.receiver_locations = rotation.apply(rx.receiver_locations - mesh_center, inverse=True)
 
         progress = self.mixins.get(Progress)
         if progress is not None:
@@ -93,4 +116,18 @@ class TiedSimulation3DIntegralMixin(TiedMixin):
             print(f"writing sensitivity to {sens_name}")
             os.makedirs(self.sensitivity_path, exist_ok=True)
             np.save(sens_name, kernel)
+
         return kernel
+
+    def _get_kernel_function(self):
+        pass
+
+    def _get_mesh_rotation(this, self: Simulation3DIntegral):
+        orientation = self.mesh.orientation
+
+        if not np.allclose(orientation, np.identity(3)):
+            # 存在旋转
+            from scipy.spatial.transform import Rotation
+            return Rotation.from_matrix(orientation)
+        else:
+            return None
