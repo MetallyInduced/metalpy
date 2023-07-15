@@ -17,7 +17,7 @@ from metalpy.scab.utils.hash import dhash_discretize_mesh
 from .formats.osm import OSMFormat
 from .formats.ptopo import PTopoFormat
 from .layer import Layer
-from .mix_modes import MixMode
+from .mix_modes import MixMode, Mixer
 from .object import Object
 from .modelled_mesh import ModelledMesh
 from .shapes import Shape3D
@@ -90,7 +90,10 @@ class Scene(OSMFormat, PTopoFormat):
         self.append_background(value, region_shape)
         return self
 
-    def append(self, shape: Shape3D, models: Union[dict[str, Any], Any]) -> Object:
+    def append(self, 
+               shape: Shape3D,
+               models: Union[dict[str, Any], Any],
+               mix_mode: Mixer = MixMode.Override) -> Object:
         """添加三维几何体
 
         Parameters
@@ -99,18 +102,23 @@ class Scene(OSMFormat, PTopoFormat):
             三维几何体
         models
             三维几何体的参数
+        mix_mode
+            对象混合模式
 
         Returns
         -------
         ret
             返回构造的三维几何体
         """
-        obj = Object(shape, models)
+        obj = Object(shape, models, mix_mode=mix_mode)
         self.objects_layer.append(obj)
 
         return obj
 
-    def extend(self, shapes: Iterable[Shape3D], models: Union[dict[str, Any], Any]) -> list[Object]:
+    def extend(self,
+               shapes: Iterable[Shape3D],
+               models: Union[dict[str, Any], Any],
+               mix_mode: Mixer = MixMode.Override) -> list[Object]:
         """添加多个三维几何体
 
         Parameters
@@ -119,13 +127,15 @@ class Scene(OSMFormat, PTopoFormat):
             三维几何体集合
         models
             三维几何体的参数
+        mix_mode
+            对象混合模式
 
         Returns
         -------
         ret
             返回构造的三维几何体集合
         """
-        return [self.append(s, models) for s in shapes]
+        return [self.append(s, models, mix_mode=mix_mode) for s in shapes]
 
     def append_background(self, value, region_shape=None):
         if region_shape is None:
