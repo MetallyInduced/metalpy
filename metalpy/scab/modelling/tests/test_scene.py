@@ -2,7 +2,7 @@ import numpy as np
 from numpy.testing import assert_equal
 
 from metalpy.scab.modelling import Scene
-from metalpy.scab.modelling.shapes import Cuboid, Prism, Ellipsoid, Tunnel, Obj2
+from metalpy.scab.modelling.shapes import Cuboid, Prism, Ellipsoid, Tunnel
 
 
 def test_build():

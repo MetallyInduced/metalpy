@@ -107,7 +107,7 @@ class Bounds(FixedShapeNDArray):
         """
         return self.reshape(-1, 2).T.view(Corners)
 
-    def expand(self, proportion=None, increment=None, inplace=False):
+    def expand(self, *, proportion=None, increment=None, inplace=False):
         number = (int, float)
         deltas = np.tile(np.asarray((-1, 1)), self.n_axes)
         if increment is None:
@@ -126,7 +126,7 @@ class Bounds(FixedShapeNDArray):
         target += increment
         return target
 
-    def override(self, by, inplace=True):
+    def override(self, by, *, inplace=False):
         """用other中的非nan值替换当前边界中的对应位置值
 
         Parameters

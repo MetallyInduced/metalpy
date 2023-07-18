@@ -248,7 +248,7 @@ class Scene(OSMFormat, PTopoFormat):
         """
         actual_bounds: Bounds = self.bounds
         if bounds is not None:
-            actual_bounds.override(by=bounds)
+            actual_bounds.override(by=bounds, inplace=True)
 
         bounds = actual_bounds
         sizes = bounds.extent

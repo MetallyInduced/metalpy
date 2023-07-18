@@ -40,8 +40,8 @@ class MixMode(Enum):
     Override = override.__func__.__name__  # 直接覆盖
     KeepOriginal = keep_original.__func__.__name__  # 保留原值
     Max = max.__func__.__name__  # 取最大值
-    Min = min.__func__.__name__  # 取最小
-    Mean = mean.__func__.__name__  # 取最小
+    Min = min.__func__.__name__  # 取最小值
+    Mean = mean.__func__.__name__  # 取平均值
 
 
 Mixer = Union[MixMode, Callable]

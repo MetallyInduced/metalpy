@@ -73,6 +73,7 @@ class BarFramework(Composition):
         self._n_rooms = n_rooms
         self.outline = outline
 
+        # Shape3D层面保证所有place的结果为正值，所以Min和Max可以分别作为交集和并集使用
         super().__init__(
             mix_mode=MixMode.Min
         )
@@ -161,7 +162,7 @@ class BarFramework(Composition):
 
     @property
     def local_bounds(self):
-        return self.framework_bounds.copy()
+        return self.framework_bounds & self.outline.local_bounds
 
     @cached_property
     def bars(self):
