@@ -143,6 +143,17 @@ class SimulationBuilder:
         Notes
         -----
         如果找不到给定的参数名，且allow_vars为False或目标不接受varkw，则抛出错误
+
+        参数中已设置的实参会以相同名字的kwarg传递给绑定的函数，
+        例如设置一个函数为名为`model_type`的形参提供实参，
+        则如果之前该实参有绑定过值，_supplies的wrapper会将该值连同用户输入一并传递给绑定的函数。
+
+        >>>@SimulationBuilder._supplies('model_type')
+        >>>def model_type(self, type=None, *, model_type=None):
+        >>>    pass
+
+        >>>builder.model_type('scalar')  # model_type的输入: type='scalar'
+        >>>builder.model_type('vector')  # model_type的输入: type='vector', model_type='scalar'
         """
         keysets = tuple((keyset,) if isinstance(keyset, str) else keyset for keyset in keysets)
 
