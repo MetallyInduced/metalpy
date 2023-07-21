@@ -7,15 +7,16 @@ from SimPEG.potential_fields.base import BasePFSimulation
 from metalpy.utils.type import undefined
 from metalpy.scab.modelling.modelled_mesh import ModelledMesh
 from .. import SimulationBuilder
+from ..simulation import LinearSimulationBuilder
 
 
-class BasePFSimulationBuilder(SimulationBuilder):
+class BasePFSimulationBuilder(LinearSimulationBuilder):
     def __init__(self, sim_cls: BasePFSimulation):
         super().__init__(sim_cls)
         self._model_mesh: ModelledMesh | None = None
 
     @SimulationBuilder._supplies('mesh', ['ind_active', 'actInd'])
-    def active_mesh(self, mesh, ind_active=undefined, **_):
+    def active_mesh(self, mesh, ind_active=undefined):
         if not isinstance(mesh, ModelledMesh):
             ind = ind_active if ind_active != undefined else None
             self._model_mesh = ModelledMesh(mesh, ind_active=ind)

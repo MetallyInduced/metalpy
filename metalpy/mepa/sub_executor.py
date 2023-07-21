@@ -21,7 +21,7 @@ class SubExecutor(Executor):
             diff = workers - self.workers
             if len(diff) != 0:
                 warnings.warn(
-                    'Unexpected workers found.\n'
+                    'Unexpected workers found. '
                     + format_string_list([f'`{w.name}`' for w in diff], multiline=True)
                 )
         else:

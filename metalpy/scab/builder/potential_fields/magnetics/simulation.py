@@ -54,7 +54,7 @@ class Simulation3DIntegralBuilder(BasePFSimulationBuilder):
     def model_type(self, *, vector: bool): ...
 
     @SimulationBuilder._supplies('model_type')
-    def model_type(self, type=None, *, scalar=None, vector=None, **_):
+    def model_type(self, type=None, *, scalar=None, vector=None):
         """设置模型类型，对应Simulation3DIntegral的model_type参数。
 
         `scalar`代表标量模型，输入为每个网格的磁化率。
@@ -63,7 +63,6 @@ class Simulation3DIntegralBuilder(BasePFSimulationBuilder):
         为(n_cells, 3)形式模型的按Fortran序展开（flatten(order='F')）
         或使用discretize.utils的mkvc。
         """
-
         assert (type is None) + (scalar is None) + (vector is None) == 2, \
             'Only one of `model_type`, `scalar` or `vector` can be provided for `model_type()`.'
         if type is not None:
@@ -82,8 +81,14 @@ class Simulation3DIntegralBuilder(BasePFSimulationBuilder):
     def vector_model(self):
         return self.model_type(vector=True)
 
+    @SimulationBuilder._supplies('chiMap')
+    def chi_map(self, chi_map: maps.IdentityMap):
+        return chi_map
+
     @SimulationBuilder._assembles('chiMap')
     def _chi_map(self):
+        # TODO: 考察是否需要默认提供 maps.ChiMap （从磁化率转换为磁导率，数值上约相差1）
+        #   需要注意，向量模型不可直接使用 maps.ChiMap
         n_params = self._model_mesh.n_active_cells
         if self._model_type == 'vector':
             n_params *= 3
