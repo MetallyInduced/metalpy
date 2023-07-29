@@ -394,7 +394,7 @@ class ModelledMesh:
 
         models.update(kwargs)
         if active_scalars is None:
-            active_scalars = get_first_key(extra_models)
+            active_scalars = get_first_key(kwargs)
 
         key_active_cells = ensure_set_key(
             models,
