@@ -83,18 +83,6 @@ class Shape3D(ABC):
         """
         raise NotImplementedError()
 
-    @abstractmethod
-    def do_hash(self):
-        """哈希函数，返回当前shape的哈希，
-        由基类的__hash__调用，并混合transforms的哈希作为shape的完整哈希值返回
-
-        Returns
-        -------
-        ret : int
-            当前shape的哈希值
-        """
-        raise NotImplementedError()
-
     def __hash__(self):
         return dhash(self).digest()
 

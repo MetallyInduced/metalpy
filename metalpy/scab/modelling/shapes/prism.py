@@ -58,7 +58,7 @@ class Edge:
 
 
 class Prism(Shape3D):
-    def __init__(self, pts, z0, z1, verbose=True):
+    def __init__(self, pts, z0, z1, verbose=True, cells=None):
         """定义任意底面棱锥
 
         Parameters
@@ -69,12 +69,23 @@ class Prism(Shape3D):
             底面和顶面高度
         verbose
             是否输出辅助信息（主要为顶点数较多时导出PyVista模型会触发进度条）
+        cells
+            array(n-2, 3)，每行包含三个属于(0, n-1)的下标，指定pts三角化后的结果
         """
         super().__init__()
         self.pts = np.asarray(pts)
         self.z0 = min(z0, z1)
         self.z1 = max(z0, z1)
-        self.verbose = verbose
+
+        if cells is not None:
+            cells_shape = (len(self.pts) - 2, 3)
+            cells = np.asarray(cells)
+            assert cells.shape == cells_shape, \
+                f'`cells` must have shape {cells_shape},' \
+                f' containing triangulated polygon cells. (got {cells.shape})'
+            self.triangulated_polygon = np.asarray(cells)
+        else:
+            self.triangulated_polygon = ear_clip(self.pts, verbose=verbose)
 
     @property
     def h(self):
@@ -103,12 +114,13 @@ class Prism(Shape3D):
 
         return indices_horizontally_satisfied
 
-    def do_hash(self):
-        return hash((*self.pts.ravel(), self.z0, self.z1))
-
     def __dhash__(self):
-        return dhash(super().__dhash__(),
-                     self.z0, self.z1, *self.pts.ravel())
+        return dhash(
+            super().__dhash__(),
+            self.z0, self.z1,
+            *self.pts.ravel(),
+            self.triangulated_polygon
+        )
 
     def do_clone(self, deep=True):
         return Prism(self.pts.copy(), self.z0, self.z1)
@@ -119,9 +131,6 @@ class Prism(Shape3D):
             np.r_[self.pts.min(axis=0), self.z0],
             np.r_[self.pts.max(axis=0), self.z1]
         ].ravel())
-
-    def triangulated_vertices(self):
-        return ear_clip(self.pts, verbose=self.verbose)
 
     def to_local_polydata(self):
         import pyvista as pv
@@ -135,7 +144,7 @@ class Prism(Shape3D):
         vertices = np.c_[vh, vz]
         indices = np.arange(0, n_vertices, 1).reshape([-1, 2]).T
 
-        faces = self.triangulated_vertices()
+        faces = self.triangulated_polygon
         top_face = np.c_[np.repeat(3, faces.shape[0]), faces * 2].ravel()  # 上顶面
         bottom_face = np.c_[np.repeat(3, faces.shape[0]), faces * 2 + 1].ravel()  # 下底面
         edge_counts = np.ones(n_pts, dtype=np.integer) * 4
@@ -153,7 +162,7 @@ class Prism(Shape3D):
     @property
     def bottom_area(self):
         s = 0
-        for vi in self.triangulated_vertices():
+        for vi in self.triangulated_polygon:
             v = self.pts[vi]
             si = np.abs(np.cross(v[1] - v[0], v[2] - v[0])) / 2
             s += si

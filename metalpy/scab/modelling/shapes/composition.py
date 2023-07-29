@@ -52,9 +52,6 @@ class Composition(Shape3D):
     def __getitem__(self, item):
         return self.shapes[item]
 
-    def do_hash(self):
-        return hash((*self.shapes, dhash(dhashable_mixer(self.mix_mode))))
-
     def __dhash__(self):
         return dhash(super().__dhash__(), *self.shapes, dhashable_mixer(self.mix_mode))
 

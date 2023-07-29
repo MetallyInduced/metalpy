@@ -107,9 +107,6 @@ class Cuboid(Shape3D):
         """
         return np.argmax(self.lengths)
 
-    def do_hash(self):
-        return hash((*self.corner, *self.lengths))
-
     def __dhash__(self):
         return dhash(super().__dhash__(), *self.corner, *self.lengths)
 

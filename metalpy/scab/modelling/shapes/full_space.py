@@ -15,9 +15,6 @@ class FullSpace(Shape3D):
         indices = np.ones(mesh_cell_centers.shape[0], dtype=bool)
         return indices
 
-    def do_hash(self):
-        return 0
-
     def __dhash__(self):
         return dhash()
 

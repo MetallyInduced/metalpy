@@ -69,9 +69,6 @@ class Ellipsoid(Shape3D):
     def do_place(self, mesh_cell_centers, progress):
         return np.sum((mesh_cell_centers / self.radii) ** 2, axis=1) < 1
 
-    def do_hash(self):
-        return hash((*self.radii,))
-
     def __dhash__(self):
         return dhash(super().__dhash__(), *self.radii)
 

@@ -49,9 +49,6 @@ class Tunnel(Shape3D):
 
         return indices
 
-    def do_hash(self):
-        return hash((*self.p0, self.r0, self.r1, self.L))
-
     def __dhash__(self):
         return dhash(super().__dhash__(),
                      self.r0, self.r1, self.L, *self.p0)

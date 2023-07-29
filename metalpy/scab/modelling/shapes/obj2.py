@@ -7,10 +7,10 @@ from typing import Union, Iterable
 import numpy as np
 import pyvista as pv
 
-from metalpy.utils.dhash import dhash
 from metalpy.utils.bounds import Bounds
+from metalpy.utils.dhash import dhash
 from metalpy.utils.file import openable
-from metalpy.utils.model import hash_model, split_models_in_memory, load_model_file, load_grouped_file, \
+from metalpy.utils.model import split_models_in_memory, load_model_file, load_grouped_file, \
     extract_model_list_bounds, dhash_model
 from . import Shape3D
 from ..utils.mesh import is_inside_cuboid
@@ -255,13 +255,6 @@ class Obj2(Shape3D):
                 indices = np.logical_or(indices, ret)
 
         return indices
-
-    def do_hash(self):
-        n_samples = np.max((2, 10 // len(self.models)))
-        surface_range = self.surface_range if self.surface_range is not None else (None,)
-        return hash((*(hash_model(m, n_samples) for m in self.models),
-                     *surface_range,
-                     ))
 
     def __dhash__(self):
         n_samples = np.max((2, 10 // len(self.models)))

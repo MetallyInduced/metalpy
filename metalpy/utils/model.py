@@ -95,7 +95,7 @@ def load_grouped_file(model_file, verbose=True):
 
 
 def split_models_in_memory(model, verbose=True):
-    cache = make_cache_file(f'{dhash_model(model)}.sub')
+    cache = make_cache_file(f'model_division/{dhash_model(model)}.sub')
     if os.path.exists(cache):
         with open(cache, 'rb') as f:
             if verbose:
@@ -142,7 +142,9 @@ def split_models_in_memory_edgewisely(model, verbose=True, pointwise_progress=No
     models = []
     for g in points.get_groups():
         indices = np.asarray(list(g))
-        models.append(model.extract_points(indices, adjacent_cells=False))
+        sub_model = model.extract_points(indices, adjacent_cells=False)
+        sub_model.clear_data()
+        models.append(sub_model)
 
     return models
 
@@ -184,6 +186,7 @@ def split_models_in_memory_pointwisely(model, verbose=True):
     for g in groups:
         indices = np.argwhere(unions.unions == g).squeeze()
         sub_model = model.extract_points(indices, adjacent_cells=False)
+        sub_model.clear_data()
         models.append(sub_model.extract_surface())
 
     return models
