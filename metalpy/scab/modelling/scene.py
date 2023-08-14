@@ -470,6 +470,12 @@ class Scene(OSMFormat, PTopoFormat):
             else:
                 prev_layer = models[key]
                 filled_ind = Scene.is_active(prev_layer)
+
+                # 将已有的层转换为可以容纳待合并各层数据的类型（如int -> float）
+                promoted_type = np.promote_types(prev_layer.dtype, current_layer.dtype)
+                if promoted_type != prev_layer.dtype:
+                    prev_layer = models[key] = prev_layer.astype(promoted_type)
+
                 overlapping_mask = filled_ind & current_mask
                 non_overlapping_mask = current_mask ^ overlapping_mask
 

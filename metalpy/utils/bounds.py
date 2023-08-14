@@ -66,6 +66,11 @@ def bounded(xmin=np.nan, xmax=np.nan, ymin=np.nan, ymax=np.nan, zmin=np.nan, zma
 
 
 class Bounds(FixedShapeNDArray):
+    """用于表示一个边界，接受数字和np.nan作为内容（不允许存在np.inf）
+
+    使用np.nan用于表示在该方向上“无界”，对应到min方向上即为-inf，max方向上即为+inf
+    """
+
     def __new__(cls, var_inp, *args, dtype=None) -> 'Bounds':
         if np.isscalar(var_inp):
             return np.asanyarray([var_inp, *args], dtype=dtype).view(cls)
@@ -77,6 +82,18 @@ class Bounds(FixedShapeNDArray):
 
     @staticmethod
     def unbounded(n_axes=0) -> 'Bounds':
+        """获取无界边界
+
+        Parameters
+        ----------
+        n_axes
+            维度
+
+        Returns
+        -------
+        ret
+            无界形式下的n维边界（全为np.nan）
+        """
         return np.full(n_axes * 2, np.nan).view(Bounds)
 
     @staticmethod
@@ -106,6 +123,21 @@ class Bounds(FixedShapeNDArray):
             角落点形式表示的
         """
         return self.reshape(-1, 2).T.view(Corners)
+
+    def to_inf_format(self):
+        """将无界条件从标准形式转换为正负无穷形式
+
+        Returns
+        -------
+        ret
+            正负无穷形式表示的边界（非标准形式）
+        """
+        ret = self.copy()
+        infs = np.inf * np.tile([-1, 1], self.n_axes)
+        mask = np.isnan(ret)
+        ret[mask] = infs[mask]
+
+        return ret
 
     def expand(self, *, proportion=None, increment=None, inplace=False):
         number = (int, float)
@@ -153,11 +185,26 @@ class Bounds(FixedShapeNDArray):
         return target
 
     def set(self, axis, min=None, max=None):
+        if np.size(min) == 2 and max is None:
+            # 适配 b.set(0, [0, 10]) 用法
+            min, max = min
+
         if min is not None:
+            if np.isneginf(min):
+                min = np.nan
+            elif np.isposinf(min):
+                raise ValueError(f'Min bound cannot be set to `+inf` in axis {axis}.')
             self[2 * axis] = min
 
         if max is not None:
+            if np.isposinf(max):
+                max = np.nan
+            elif np.isneginf(max):
+                raise ValueError(f'Max bound cannot be set to `-inf` in axis {axis}.')
             self[2 * axis + 1] = max
+
+    def get(self, axis):
+        return self[2 * axis: 2 * axis + 2]
 
     __or__ = union
     __and__ = intersects
@@ -254,12 +301,42 @@ class Corners(FixedShapeNDArray):
         """
         return self.T.ravel().view(Bounds)
 
+    def to_inf_format(self) -> np.ndarray:
+        """将无界条件从标准形式转换为正负无穷形式
+
+        Returns
+        -------
+        ret
+            正负无穷形式表示的角落点（非标准形式）
+        """
+        ret = np.array(self)
+        infs = np.inf * np.asarray([-1, 1]).repeat(self.n_axes).reshape((2, -1))
+        mask = np.isnan(ret)
+        ret[mask] = infs[mask]
+
+        return ret
+
     def set(self, axis, min=None, max=None):
+        if np.size(min) == 2 and max is None:
+            # 适配 c.set(0, [0, 10]) 用法
+            min, max = min
+
         if min is not None:
+            if np.isneginf(min):
+                min = np.nan
+            elif np.isposinf(min):
+                raise ValueError(f'Min bound cannot be set to `+inf` in axis {axis}.')
             self[0, axis] = min
 
         if max is not None:
+            if np.isposinf(max):
+                max = np.nan
+            elif np.isneginf(max):
+                raise ValueError(f'Max bound cannot be set to `-inf` in axis {axis}.')
             self[1, axis] = max
+
+    def get(self, axis):
+        return self[:, axis]
 
     @property
     def extent(self):

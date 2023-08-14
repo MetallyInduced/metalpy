@@ -150,14 +150,14 @@ class ModelledMesh:
     def keys(self):
         return self._models.keys()
 
-    def get_active_model(self, key=None):
+    def get_active_model(self, key=None, **kwargs):
         if key is None:
             if self.has_default_model:
                 key = self.default_key
             else:
                 return np.ones(self.n_active_cells, dtype=bool)
 
-        return self.map_to_active(self.get_raw_model(key))
+        return self.map_to_active(self.get_raw_model(key), **kwargs)
 
     def is_active_model(self, model):
         return model.shape[0] == self.n_active_cells
@@ -169,14 +169,14 @@ class ModelledMesh:
         mask = self.check_complete_mask(mask)
         return np.all(self.active_cells | mask == self.active_cells)
 
-    def get_complete_model(self, key=None):
+    def get_complete_model(self, key=None, **kwargs):
         if key is None:
             if self.has_default_model:
                 key = self.default_key
             else:
                 return self.active_cells
 
-        return self.map_to_complete(self.get_raw_model(key))
+        return self.map_to_complete(self.get_raw_model(key), **kwargs)
 
     def _unsupported_model_exception(self, model):
         return ValueError(f'Unsupported model size {model.shape},'
@@ -220,6 +220,11 @@ class ModelledMesh:
             ret = model
             if dtype is not None:
                 ret = ret.astype(dtype, copy=copy)
+                copy = False
+
+            if copy:
+                ret = ret.copy()
+
             if fill_inactive is not None:
                 ret[~self.active_cells] = fill_inactive
         elif self.is_active_model(model):
@@ -235,7 +240,7 @@ class ModelledMesh:
 
         return ret
 
-    def map_to_active(self, model: ArrayLike, dtype=None):
+    def map_to_active(self, model: ArrayLike, dtype=None, copy=True):
         model = np.asarray(model)
         if self.is_active_model(model):
             ret = model
@@ -245,7 +250,11 @@ class ModelledMesh:
             raise self._unsupported_model_exception(model)
 
         if dtype is not None:
-            ret = ret.astype(dtype)
+            ret = ret.astype(dtype, copy=copy)
+            copy = False
+
+        if copy:
+            ret = ret.copy()
 
         return ret
 

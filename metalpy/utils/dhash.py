@@ -195,7 +195,7 @@ def _hash_function(obj):
 def _hash_array(arr: np.ndarray, n_samples=10, sparse=False):
     if not sparse:
         arr = arr.ravel()
-        rand = np.random.RandomState(int(arr[len(arr) // 2]))
+        rand = np.random.RandomState(int(arr[len(arr) // 2]) % 2**32)
         n_samples = min(n_samples, len(arr))
 
         # 加入shape作为参数防止类似np.ones(100)和np.ones(1000)的冲突

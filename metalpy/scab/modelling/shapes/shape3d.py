@@ -9,7 +9,7 @@ import numpy as np
 from metalpy.utils.dhash import dhash
 from metalpy.utils.bounds import Bounds, union
 from ..transform import CompositeTransform, Transform, Translation, Rotation
-from ..utils.mesh import is_inside_cuboid
+from ..utils.mesh import is_inside_bounds
 
 
 class Shape3D(ABC):
@@ -42,8 +42,7 @@ class Shape3D(ABC):
 
         indices = None
         if self.prune_mesh:
-            p0, p1 = self.local_bounds.as_corners()
-            indices = is_inside_cuboid(mesh_cell_centers, p0, p1 - p0)
+            indices = is_inside_bounds(mesh_cell_centers, self.local_bounds)
             mesh_cell_centers = mesh_cell_centers[indices]
 
         ind = self.do_place(mesh_cell_centers, progress)
@@ -165,9 +164,16 @@ class Shape3D(ABC):
         """
         bounds = self.oriented_bounds
 
-        ret = np.zeros(6)
-        ret[::2] = np.min(bounds, axis=1)
-        ret[1::2] = np.max(bounds, axis=1)
+        ret = Bounds.unbounded(3)
+        for i in range(ret.n_axes):
+            val = bounds[:, i]
+            val = val[~np.isnan(val)]
+
+            if len(bounds) == 0:
+                # 无上下界
+                continue
+
+            ret.set(i, min=val.min(), max=val.max())
 
         return Bounds(ret)
 
@@ -179,9 +185,17 @@ class Shape3D(ABC):
         -------
         ret : array(8, 3)
             Shape在世界坐标系下的八点包围盒[[x0, y0, z0], ...[x7, y7, z7]]
+
+        Notes
+        -----
+        八点包围盒表示法下，无界会使用对应的正负无穷（inf）表示（Bounds约定nan为无界）
+
+        各种空间变换由于精度问题，对无界 / 正负无穷（inf）边界的变换结果可能无法预测
         """
         bounds = self.local_oriented_bounds
-        return self.transforms.transform(bounds).T
+        bounds = self.transforms.transform(bounds)
+
+        return bounds
 
     @property
     def local_center(self) -> np.ndarray:
@@ -223,13 +237,19 @@ class Shape3D(ABC):
         -------
         ret : array(8, 3)
             Shape在局部坐标系下的八点包围盒[[x0, y0, z0], ...[x7, y7, z7]]
-        """
-        local_bounds = self.local_bounds
 
-        nans = [np.nan, np.nan]
-        xrng = local_bounds.xrange if local_bounds.n_axes > 0 else nans
-        yrng = local_bounds.yrange if local_bounds.n_axes > 1 else nans
-        zrng = local_bounds.zrange if local_bounds.n_axes > 2 else nans
+        Notes
+        -----
+        八点包围盒表示法下，无界会使用对应的正负无穷（inf）表示（Bounds约定nan为无界）
+        """
+        infs = [np.inf, -np.inf]
+
+        local_bounds = self.local_bounds.to_inf_format()
+        n_axes = local_bounds.n_axes
+
+        xrng = local_bounds.xrange if n_axes > 0 else infs
+        yrng = local_bounds.yrange if n_axes > 1 else infs
+        zrng = local_bounds.zrange if n_axes > 2 else infs
 
         x, y, z = np.meshgrid(xrng, yrng, zrng, indexing='ij')
         return np.c_[x.ravel(), y.ravel(), z.ravel()]

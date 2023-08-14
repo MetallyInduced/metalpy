@@ -369,7 +369,7 @@ def objpath(obj) -> str:
     elif isinstance(obj, str):
         ret = obj
     else:
-        warnings.warn(f'Object `{type(obj).__name__}` is not convertible to dotted name. Will try using str(), '
+        warnings.warn(f'Object `{get_type_name(obj)}` is not convertible to dotted name. Will try using str(), '
                       f'which may lead to unexpected result.')
         ret = str(obj)
 
@@ -648,6 +648,10 @@ def get_nest(obj):
                 ret = inspect.getmodule(obj)
 
         return ret
+
+
+def get_type_name(instance):
+    return type(instance).__name__
 
 
 _NAME_PATTERN = None
