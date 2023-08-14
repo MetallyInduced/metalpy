@@ -227,6 +227,7 @@ class Coordinates(FixedShapeNDArray):
             target = self.copy()
 
         target.x, target.y = transform.transform(target.x, target.y)
+        target.crs = crs
 
         return target
 
