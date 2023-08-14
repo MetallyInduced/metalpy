@@ -1,6 +1,7 @@
 import os.path
 import pickle
 from enum import Enum
+from typing import Iterable, Literal, Union
 
 import numpy as np
 import pyvista as pv
@@ -11,6 +12,7 @@ from .dhash import _hash_array
 from .file import make_cache_file, make_cache_directory
 from .hash import hash_numpy_array
 from .obj_splitter import ObjSplitter
+from .string import parse_axes_labels
 from .time import Timer
 
 
@@ -106,12 +108,12 @@ def split_models_in_memory(model, verbose=True):
         ret = []
 
         if verbose:
-            progress = tqdm.tqdm(total=model.n_points, desc='Splitting models by edge connectivity')
+            progress = tqdm.tqdm(total=model.n_faces, desc='Splitting models by edge connectivity')
         else:
             progress = None
 
         for m in models:
-            ms = split_models_in_memory_edgewisely(m, verbose=verbose, pointwise_progress=progress)
+            ms = split_models_in_memory_edgewisely(m, verbose=verbose, progress=progress)
             ret.extend(ms)
 
         with open(cache, 'wb') as f:
@@ -122,29 +124,29 @@ def split_models_in_memory(model, verbose=True):
     return ret
 
 
-def split_models_in_memory_edgewisely(model, verbose=True, pointwise_progress=None):
+def split_models_in_memory_edgewisely(model, verbose=True, progress=None):
     points = ConnectedTriangleSurfaces()
     model_faces = model.faces
     i = 0
     faces_size = len(model_faces)
 
-    if verbose and pointwise_progress is None:
-        pointwise_progress = tqdm.tqdm(total=faces_size, desc='Splitting models by edge connectivity')
+    if verbose and progress is None:
+        progress = tqdm.tqdm(total=faces_size, desc='Splitting models by edge connectivity')
 
     while i < faces_size:
         nv = model_faces[i]
         pts = model_faces[i + 1:i + nv + 1]
         i = i + nv + 1
         points.add(pts)
-        if verbose:
-            pointwise_progress.update(nv + 1)
+        if progress is not None:
+            progress.update(1)
 
     models = []
     for g in points.get_groups():
         indices = np.asarray(list(g))
         sub_model = model.extract_points(indices, adjacent_cells=False)
         sub_model.clear_data()
-        models.append(sub_model)
+        models.append(sub_model.extract_surface())
 
     return models
 
@@ -158,6 +160,7 @@ def split_models_in_memory_pointwisely(model, verbose=True):
     i = 0
     faces_size = len(model_faces)
 
+    progress = None
     if verbose:
         progress = tqdm.tqdm(total=faces_size, desc='Splitting models by point connectivity')
 
@@ -169,7 +172,7 @@ def split_models_in_memory_pointwisely(model, verbose=True):
         for p2 in pts[1:]:
             unions.connect(p1, p2)
 
-        if verbose:
+        if progress is not None:
             progress.update(nv + 1)
 
     if verbose:
@@ -292,3 +295,27 @@ def pv_ufunc_assign(obj: pv.DataSet,
         return x
 
     pv_ufunc_apply(obj, ufunc, inplace=inplace)
+
+
+AxesLabels = Iterable[Union[Literal['x', 'y', 'z'], int]]
+
+
+def reset_model_axes(model, new_axes: AxesLabels, inplace=False):
+    new_axes = parse_axes_labels(new_axes, max_length=3)
+    return reset_model_axes_unsafe(model=model, new_axes=new_axes, inplace=inplace)
+
+
+def reset_model_axes_unsafe(model, new_axes: list[int], inplace=False):
+    if not inplace:
+        model = model.copy(deep=True)
+
+    original_axes = []
+    sub_axes = []
+    for i, a in enumerate(new_axes):
+        if i != a:
+            original_axes.append(i)
+            sub_axes.append(a)
+
+    model.points[:, sub_axes] = model.points[:, original_axes]
+
+    return model

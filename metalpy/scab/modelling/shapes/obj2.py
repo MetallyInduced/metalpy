@@ -11,9 +11,10 @@ from metalpy.utils.bounds import Bounds
 from metalpy.utils.dhash import dhash
 from metalpy.utils.file import openable
 from metalpy.utils.model import split_models_in_memory, load_model_file, load_grouped_file, \
-    extract_model_list_bounds, dhash_model
+    extract_model_list_bounds, dhash_model, AxesLabels, reset_model_axes_unsafe
+from metalpy.utils.string import parse_axes_labels
 from . import Shape3D
-from ..utils.mesh import is_inside_cuboid
+from ..utils.mesh import is_inside_bounds
 
 
 def check_density(length, dx, nx, _default):
@@ -55,11 +56,12 @@ class Obj2(Shape3D):
     SUBDIVIDE_FILE = 'file'
     SUBDIVIDE_NONE = False
 
-    def __init__(self, model: Union[str, pv.DataSet, None],
+    def __init__(self, model: Union[str, "pv.DataSet", None],
                  xsize=None, ysize=None, zsize=None, size=None,
                  xscale=None, yscale=None, zscale=None, scale=None,
                  surface_thickness=None, surface_range: float | list[float] | None = None,
                  subdivide: str | bool | None = SUBDIVIDE_NONE,
+                 reset_axes: AxesLabels | None = None,
                  ignore_surface_check=False,
                  keep_original_model=True,
                  verbose=True):
@@ -83,8 +85,12 @@ class Obj2(Shape3D):
             是否模型细分（非通用）。
             SUBDIVIDE_IN_MEMORY 载入后根据点连接性来模型细分。
             SUBDIVIDE_FILE 对模型文件进行组分割（仅限obj文件）再载入。
+        reset_axes
+            是否重设模型三轴顺序。
+            使用一个长度为3的字符或整数数组，指示每个新轴分别对应的原坐标轴。
+            例如：交换y和z轴，则指定"xzy"
         ignore_surface_check
-            代表使用内置体素化算法时不检测模型封闭性
+            代表使用内置体素化算法时跳过检测模型封闭性
         keep_original_model
             代表是否保留最初导入的未分割的模型，如果为`False`则不会保留，to_polydata()等涉及获取原始模型的操作会通过pv.merge获得。
             适用于不需要再次访问原始模型的情形。
@@ -117,10 +123,10 @@ class Obj2(Shape3D):
         models = None
         did_subdivision = False
         if model is not None:
-            should_scale_be_inplace = False
+            owns_model = False
             if openable(model):
                 model_path = model
-                should_scale_be_inplace = True  # 从文件导入的model的scale操作可以inplace
+                owns_model = True  # 从文件导入的model的scale操作可以inplace
 
                 if not subdivide:
                     model = load_model_file(model_path, verbose=verbose)
@@ -145,7 +151,19 @@ class Obj2(Shape3D):
                 elif subdivide == Obj2.SUBDIVIDE_IN_MEMORY:  # 导入后通过连通性分析分割模型
                     models = split_models_in_memory(model, verbose=verbose)
                     did_subdivision = True
-                    should_scale_be_inplace = True
+
+            owns_parts = did_subdivision  # 指示细分模型是否可以inplace操作
+
+            if reset_axes is not None:
+                new_axes = parse_axes_labels(reset_axes, max_length=3)
+
+                for i in range(len(models)):
+                    models[i] = reset_model_axes_unsafe(models[i], new_axes=new_axes, inplace=owns_parts)
+                owns_parts = True
+
+                if did_subdivision and keep_original_model:
+                    model = reset_model_axes_unsafe(model, new_axes=new_axes, inplace=owns_model)
+                    owns_model = True
 
             bounds = extract_model_list_bounds(models)
             xl, yl, zl = bounds[1::2] - bounds[0::2]
@@ -165,17 +183,21 @@ class Obj2(Shape3D):
 
             if np.any(np.asarray(scale) != 1):
                 for i in range(len(models)):
-                    models[i] = models[i].scale(scale, inplace=should_scale_be_inplace)
+                    models[i] = models[i].scale(scale, inplace=owns_parts)
+                owns_parts = True
                 if did_subdivision and keep_original_model:
-                    model = model.scale(scale, inplace=should_scale_be_inplace)
+                    model = model.scale(scale, inplace=owns_model)
+                    owns_model = True
 
                 bounds = extract_model_list_bounds(models)
-                should_scale_be_inplace = True
 
-            for m in models:
-                m.translate(-bounds[::2], inplace=should_scale_be_inplace)
+            # 保证载入的模型起始点为0
+            for i in range(len(models)):
+                models[i] = models[i].translate(-bounds[::2], inplace=owns_parts)
+            owns_parts = True
             if did_subdivision and keep_original_model:
-                model = model.translate(-bounds[::2], inplace=should_scale_be_inplace)
+                model = model.translate(-bounds[::2], inplace=owns_model)
+                owns_model = True
 
         self.models = models
 
@@ -213,8 +235,7 @@ class Obj2(Shape3D):
         return self.model.copy(deep=copy)
 
     def place_impl(self, model, mesh_cell_centers, progress):
-        p0, p1 = Bounds(model.bounds).as_corners()
-        indices = is_inside_cuboid(mesh_cell_centers, p0, p1 - p0)
+        indices = is_inside_bounds(mesh_cell_centers, model.bounds)
 
         mesh_cell_centers = mesh_cell_centers[indices]
         active_indices = indices[indices]

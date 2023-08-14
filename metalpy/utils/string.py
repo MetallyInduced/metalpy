@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import re
 import warnings
-from typing import Literal, Callable
+from typing import Literal, Callable, Iterable, TypeVar, Sequence
+
+_T = TypeVar('_T')
 
 
 def replace_batch(string, mapping):
     keys = (re.escape(k) for k in mapping.keys())
-    pattern = re.compile('(' + '|'.join(keys) + ')')
+    pattern = re.compile('(' + '|'.join(re.escape(keys)) + ')')
     result = pattern.sub(lambda x: mapping[x.group()], string)
 
     return result
@@ -108,3 +110,73 @@ def format_string_list(strs,
             return ', '.join(formatted[:-1]) + ' and ' + formatted[-1]
         else:
             return formatted[0]
+
+
+def parse_axes_labels(
+        labels: Iterable[str | int] | int,
+        max_length: int | None = None,
+        length: int | None = None
+):
+    return parse_labels(labels=labels, accepts='xyz', max_length=max_length, length=length)
+
+
+def parse_labels(
+        labels: Iterable[_T | int] | _T | int,
+        accepts: Sequence[_T],
+        max_length: int | None = None,
+        length: int | None = None
+):
+    """解析一组字符串或数组为下标数组，例如将 'xzy' 解析为 [0, 2, 1]。
+
+    Parameters
+    ----------
+    labels
+        待解析的labels
+    accepts
+        指定接受的字符列表
+    max_length
+        指定接受的最大标签数
+    length
+        指定接受的标签数，多余或少于均拒绝
+
+    Returns
+    -------
+    parsed_indices
+        根绝给定的字符或整数列表解析的下标列表
+
+    Examples
+    --------
+    >>> print(parse_axes_labels('xzy'))
+    <<< [0, 2, 1]
+    """
+    max_idx = len(accepts)
+    error_msg = f'`parse_axes_labels` accepts only' \
+                f' {format_string_list(accepts, multiline=False)}' \
+                f' or integer number < {max_idx}. Got `{{got}}`.'
+
+    if length is not None:
+        max_length = length
+
+    if not isinstance(labels, Iterable):
+        labels = (labels,)
+
+    ret = []
+
+    for c in labels:
+        if isinstance(c, int):
+            idx = c
+        else:
+            try:
+                idx = accepts.index(c)
+            except ValueError:
+                idx = max_idx  # 找不到喵
+        assert idx < max_idx, error_msg.format(got=c)
+        ret.append(idx)
+
+        if max_length is not None:
+            assert len(ret) <= max_length, 'Too many labels.'
+
+    if length is not None:
+        assert len(ret) == length, f'Exactly {length} label(s) are required.'
+
+    return ret
