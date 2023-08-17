@@ -142,6 +142,13 @@ class Shape3D(ABC):
         """
         raise NotImplementedError()
 
+    def to_scene(self):
+        from metalpy.scab.modelling import Scene
+        return Scene.of(self)
+
+    def build(self, *args, **kwargs):
+        return self.to_scene().build(*args, **kwargs)
+
     @property
     def center(self) -> np.ndarray:
         """获取Shape在世界坐标系下的中心点坐标
