@@ -1,5 +1,6 @@
 import copy
 import functools
+import inspect
 import os
 import warnings
 from typing import Sized
@@ -289,32 +290,46 @@ def ti_index(i, j, stype: ti.template(), struct_size, array_size):
         return j * array_size + i  # [x, x, ..., x, y, y, ..., y, z, z, ..., z]
 
 
+def ti_get_raw_function(kernel):
+    raw = getattr(kernel, 'func', None) or getattr(kernel, '_primal', None) or kernel
+    raw = getattr(raw, 'func', None) or raw
+
+    return raw
+
+
 def wrappable_for_ti_func(annotator):
     @functools.wraps(annotator)
     def wrapper(actual_func):
         # 用于处理ti.func或ti.kernel包装的函数
         # 这两类包装主要将实际功能函数添加到函数对象的__dict__中供调用
+        funcs = []
         if getattr(actual_func, '_is_taichi_function', False):
-            setattr(actual_func, 'func', annotator(getattr(actual_func, 'func')))
-            return actual_func
+            funcs.extend(['func'])
         elif getattr(actual_func, '_is_wrapped_kernel', False):
-            setattr(actual_func, '_primal', annotator(getattr(actual_func, '_primal')))
-            setattr(actual_func, '_adjoint', annotator(getattr(actual_func, '_adjoint')))
-            return actual_func
+            funcs.extend(['_primal', '_adjoint'])
 
-        return annotator(actual_func)
+        ret = annotator(actual_func)
+
+        for k in funcs:
+            setattr(ret, k, annotator(getattr(ret, k)))
+
+        return ret
 
     return wrapper
 
 
-def check_contiguous(arr):
+def check_contiguous(arr, name=None):
     typename = type(arr).__name__
     if typename == 'ndarray':
         import numpy as np
         if not arr.flags.contiguous:
-            warnings.warn('Uncontiguous array detected.'
-                          ' Copying to contiguous memory,'
-                          ' which will consume extra memory.',
+            if name is None:
+                loc = ''
+            else:
+                loc = f' at `{name}`'
+            warnings.warn(f'Uncontiguous array detected{loc}.'
+                          f' Copying to contiguous memory,'
+                          f' which will consume extra memory.',
                           stacklevel=3)
             return np.ascontiguousarray(arr)
     else:
@@ -326,9 +341,31 @@ def check_contiguous(arr):
 
 @wrappable_for_ti_func
 def ensure_contiguous(func):
+    """用于保证输入数组为连续数组（Taichi要求kernel的输入为连续数组）
+
+    Parameters
+    ----------
+    func
+        待包装的kernel函数
+
+    Returns
+    -------
+    ret
+        会自动查询输入的参数是否为连续数组，若否则拷贝一份到连续内存上
+
+    Notes
+    -----
+    可能会导致引用数组地址变化，如果用于接受输出的数组被转换，则可能会导致输出到错误的位置
+    """
+    specs = inspect.getfullargspec(ti_get_raw_function(func))
+
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        args = tuple(check_contiguous(arg) for arg in args)
-        kwargs = {k: check_contiguous(v) for k, v in kwargs.items()}
+        n_args = len(args)
+        n_varargs = len(specs.args) - n_args
+        arg_names = specs.args + ([f'__vararg{i}' for i in range(-n_varargs)] if n_varargs < 0 else [])
+        args = tuple(check_contiguous(arg, name=name) for arg, name in zip(args, arg_names))
+        kwargs = {k: check_contiguous(v, name=k) for k, v in kwargs.items()}
         func(*args, **kwargs)
 
     return wrapper
