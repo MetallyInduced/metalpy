@@ -13,7 +13,6 @@ class SubExecutor(Executor):
         super().__init__()
         self.workers = set(workers)
         self.parent = parent
-        self.n_units = sum([w.weight for w in self.workers])
 
     def do_submit(self, func, *args, workers=None, **kwargs):
         if workers is not None:
@@ -30,9 +29,6 @@ class SubExecutor(Executor):
 
     def get_workers(self):
         return self.workers
-
-    def get_n_units(self):
-        return self.n_units
 
     def is_local(self):
         return self.parent.is_local()

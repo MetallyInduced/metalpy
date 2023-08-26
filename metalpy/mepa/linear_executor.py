@@ -17,7 +17,6 @@ class LinearExecutor(Executor):
             n_units = psutil.cpu_count(logical=False)
 
         self.workers = [Worker(f'local-{i}', 1) for i in range(n_units)]
-        self.n_units = n_units
 
     def do_submit(self, func, *args, workers=None, **kwargs):
         # 自动提取所有future
@@ -27,9 +26,6 @@ class LinearExecutor(Executor):
 
     def get_workers(self):
         return self.workers
-
-    def get_n_units(self):
-        return self.n_units
 
     def is_local(self):
         return True

@@ -9,15 +9,24 @@ from .worker import Worker
 
 
 class DaskExecutor(Executor):
-    def __init__(self, scheduler_addr, n_units=None, extra_paths=None, excludes=None):
-        """
-        构造基于dask.distributed的执行器
-        :param scheduler_addr: 调度器地址，包括协议和端口号
-        :param n_units: 工作单位数，实际为 min(n_units, n_actual_working_units)
+    def __init__(self, scheduler_addr, extra_paths=None, excludes=None, upload_modules=True):
+        """构造基于dask.distributed的执行器
+
+        Parameters
+        ----------
+        scheduler_addr
+            调度器地址，包括协议和端口号，例如 "tcp://xx.yy.zz:8786"
+        extra_paths
+            额外需要自动搜索并上传代码到集群的模块路径
+        excludes
+            需要排除不自动搜索并上传代码到集群的模块路径
+        upload_modules
+            指定是否自动搜索代码并上传到集群
         """
         super().__init__()
         self.client = Client(scheduler_addr)
-        configure_dask_client(self.client, extra_paths=extra_paths, excludes=excludes)
+        if upload_modules:
+            configure_dask_client(self.client, extra_paths=extra_paths, excludes=excludes)
 
         worker_groups = {}
         for addr, worker in self.client.scheduler_info()['workers'].items():
@@ -45,11 +54,6 @@ class DaskExecutor(Executor):
                 self.workers.append(worker_instance)
                 n_actual_working_units += weight
 
-        if n_units is None:
-            self.n_units = n_actual_working_units
-        else:
-            self.n_units = n_units
-
         self.client_id = str(uuid.uuid4())
         self._sub = None
 
@@ -73,9 +77,6 @@ class DaskExecutor(Executor):
 
     def get_workers(self):
         return self.workers
-
-    def get_n_units(self):
-        return self.n_units
 
     def is_local(self):
         return False

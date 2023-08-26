@@ -2,13 +2,15 @@ import numpy as np
 
 
 class SingleTaskAllocator:
-    def __init__(self, n_splits, data):
-        self.arrays = np.array_split(data, n_splits)
-        self.index = 0
+    def __init__(self, total, data):
+        self.data = data
+        self.total = total
+        self.base_index = 0
 
     def slice(self, n_slices=1):
-        ret = np.vstack(self.arrays[self.index: self.index + n_slices])
-        self.index += n_slices
+        end = self.base_index + int(np.ceil(len(self.data) * n_slices / self.total))
+        ret = self.data[self.base_index:end]
+        self.base_index = end
         return ret
 
     def assign(self, worker):
@@ -16,10 +18,10 @@ class SingleTaskAllocator:
 
 
 class TaskAllocator:
-    def __init__(self, n_splits, *data_list):
+    def __init__(self, total, *data_list):
         self.allocators = []
         for data in data_list:
-            self.allocators.append(SingleTaskAllocator(n_splits, data))
+            self.allocators.append(SingleTaskAllocator(total, data))
 
     def assign(self, worker):
         ret = []

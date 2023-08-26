@@ -12,11 +12,6 @@ from .utils import structured_traverse
 
 
 class Executor(ABC):
-    """
-    Note:
-    1. 工作单元 n_units 以资源池中的基础算力作为单位。
-        例：假设存在worker a和b，a的算力是b的两倍，则以b为基本单位，返回1+2=3
-    """
     def __init__(self, event_interval=0.5):
         self.event_interval = event_interval
         self._running = False
@@ -60,23 +55,24 @@ class Executor(ABC):
         pass
 
     def arrange_single(self, data):
-        return SingleTaskAllocator(self.get_n_units(), data)
+        return SingleTaskAllocator(self.get_total_weights(), data)
 
     def arrange(self, *data_list):
-        return TaskAllocator(self.get_n_units(), *data_list)
+        return TaskAllocator(self.get_total_weights(), *data_list)
 
     @abstractmethod
     def get_workers(self) -> Collection[Worker]:
         pass
 
-    @abstractmethod
-    def get_n_units(self):
+    def get_n_workers(self):
+        """返回当前集群的总worker数
         """
-        返回当前集群的基本工作单位数
-        :return: 当前集群的基本工作单位数
-        :rtype: int
+        return len(self.get_workers())
+
+    def get_total_weights(self):
+        """返回当前集群所有worker的权重和
         """
-        pass
+        return [w.get_weight() for w in self.get_workers()]
 
     @abstractmethod
     def is_local(self):

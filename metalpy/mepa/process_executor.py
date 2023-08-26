@@ -13,9 +13,12 @@ from .worker import Worker
 
 class ProcessExecutor(Executor):
     def __init__(self, n_units=None):
-        """
-        构造基于ProcessPoolExecutor的执行器
-        :param n_units: 工作单位数，一般为物理核心数
+        """构造基于ProcessPoolExecutor的执行器
+
+        Parameters
+        ----------
+        n_units
+            工作单位数，一般为物理核心数
         """
         super().__init__()
         if n_units is None:
@@ -23,7 +26,6 @@ class ProcessExecutor(Executor):
 
         self.pool = get_reusable_executor(max_workers=n_units, kill_workers=True)
         self.workers = [Worker(f'proc-{i}', 1) for i in range(n_units)]
-        self.n_units = n_units
 
         self._queue = None
 
@@ -53,9 +55,6 @@ class ProcessExecutor(Executor):
 
     def get_workers(self):
         return self.workers
-
-    def get_n_units(self):
-        return self.n_units
 
     def is_local(self):
         return True
