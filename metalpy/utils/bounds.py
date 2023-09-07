@@ -286,6 +286,10 @@ class Bounds(FixedShapeNDArray):
     @property
     def n_axes(self): return self.shape[0] // 2
 
+    @property
+    def center(self):
+        return (self.origin + self.end) / 2
+
 
 class Corners(FixedShapeNDArray):
     def __new__(cls, input_arr):
@@ -414,3 +418,7 @@ class Corners(FixedShapeNDArray):
 
     @property
     def n_axes(self): return self.origin.shape[0]
+
+    @property
+    def center(self):
+        return (self.origin + self.end) / 2

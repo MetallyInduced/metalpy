@@ -8,6 +8,7 @@ import numpy as np
 from pyproj import CRS, Transformer
 from pyproj.aoi import AreaOfInterest
 from pyproj.database import query_utm_crs_info, query_crs_info
+from pyproj.exceptions import CRSError
 
 from metalpy.carto.utils.crs import check_crs, CRSLike
 from metalpy.utils.bounds import Bounds
@@ -119,7 +120,7 @@ class Coordinates(FixedShapeNDArray):
             self[:, 2] = val
 
     @property
-    def bounds(self):
+    def bounds(self) -> Bounds:
         if self.single:
             return np.asarray(self).repeat(2).view(Bounds)
         else:
@@ -172,6 +173,15 @@ class Coordinates(FixedShapeNDArray):
             crs = query
             query = None
 
+        if crs is not None:
+            try:
+                crs = check_crs(crs)
+            except CRSError:
+                warnings.warn(f'Unknown CRS `{crs}`. Did you mean `query={repr(crs)}`?'
+                              f' Trying to search for related CRS.')
+                query = crs
+                crs = None
+
         if crs is None:
             assert query is not None, 'Either `crs` or `query` must be specified.'
 
@@ -216,8 +226,6 @@ class Coordinates(FixedShapeNDArray):
                 f'Multiple CRS-s found by `{query}`: ' + Coordinates.format_crs_list_str(crs_list)
 
             crs = CRS.from_epsg(crs_list[0].code)
-        else:
-            crs = check_crs(crs)
 
         transform = Transformer.from_crs(self.crs, crs, always_xy=True)
 

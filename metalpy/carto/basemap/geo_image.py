@@ -167,7 +167,19 @@ class GeoImage:
 
         img = np.asarray(self.image)
         n_channels = img.shape[2] if img.ndim > 2 else 1
-        grid['Image'] = img.reshape(-1, n_channels)
+        image_data = img.reshape(-1, n_channels)
+
+        data_name = 'Image'
+        alias = None  # PyVista中绘制`_rgb`或`_rgba`后缀的数据时会自动启用彩色模式（rgb=True）
+        if n_channels == 3:
+            alias = f'{data_name}_rgb'
+        elif n_channels == 4:
+            alias = f'{data_name}_rgba'
+
+        grid[data_name] = image_data
+        if alias is not None:
+            grid[alias] = image_data
+            grid.set_active_scalars(alias)
 
         grid = grid.cast_to_unstructured_grid()
         geo_points: Coordinates = grid.points.view(Coordinates).with_crs(self.crs)

@@ -31,6 +31,16 @@ class SliceView:
     def __init__(self, plotter: pv.BasePlotter, index_loc=None):
         """实现一个三维模型的切片视图
 
+        Notes
+        -----
+        初始化后使用绑定主视角鼠标事件
+            plotter.enable_cell_picking(callback=slice_view.clip_by_selection, show=False, through=False)
+
+        操作方式为：
+
+        `p`: 切分所点击网格所在正交平面
+        `r`: 切分选定区域内的网格
+
         Parameters
         ----------
         plotter

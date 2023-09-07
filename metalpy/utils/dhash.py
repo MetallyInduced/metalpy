@@ -186,8 +186,9 @@ def _hash_dict(obj: dict):
     return dhash(*sorted(obj.items(), key=lambda x: x[0]))
 
 
-@register_dhasher(type(_hash_dict))
-def _hash_function(obj):
+@register_dhasher(type)
+@register_dhasher(type(_hash_dict))  # function
+def _hash_serializable(obj):
     return dhash(cloudpickle.dumps(obj))
 
 
