@@ -1,7 +1,7 @@
 import os.path
 import pickle
 from enum import Enum
-from typing import Iterable, Literal, Union
+from typing import Iterable, Literal, Union, Any
 
 import numpy as np
 import pyvista as pv
@@ -14,6 +14,10 @@ from .hash import hash_numpy_array
 from .obj_splitter import ObjSplitter
 from .string import parse_axes_labels
 from .time import Timer
+
+
+DataSetLike = Union[pv.DataSet, pv.MultiBlock]
+DataSetLikeType = (pv.DataSet, pv.MultiBlock)
 
 
 def hash_model(model, n_samples=10):
@@ -207,7 +211,27 @@ class ModelTranslation:
         return x.translate(self.offset, inplace=self.inplace)
 
 
-def pv_ufunc_apply(obj, fn, inplace=True):
+def pv_ufunc_apply(obj: DataSetLike, fn, *, inplace=True):
+    """对PyVista对象执行指定函数。
+
+    如果目标为 :class:`pyvista.DataSet` 及其子类，则直接将fn作用于obj；
+    如果目标为 :class:`pyvista.MultiBlock` 则遍历其所有成员递归执行pv_ufunc_apply。
+
+    Parameters
+    ----------
+    obj
+        需要应用函数`fn`的PyVista对象
+    fn
+        需要应用到`obj`对象上的处理函数。
+        要求为`inplace`操作，具体操作是否直接在`obj`上执行由pv_ufunc_apply的`inplace`选项控制，并执行复制等操作。
+    inplace
+        指示操作是否直接在目标对象上进行
+
+    Returns
+    -------
+    obj
+        obj自身，如果`inplace`为False，则为拷贝的新对象
+    """
     if isinstance(obj, pv.MultiBlock):
         if inplace:
             for k in obj.keys():
@@ -218,7 +242,10 @@ def pv_ufunc_apply(obj, fn, inplace=True):
                 {k: pv_ufunc_apply(obj[k], fn, inplace=inplace) for k in obj.keys()}
             )
     else:
-        return fn(obj)
+        if not inplace:
+            obj = obj.copy()
+        fn(obj)
+        return obj
 
 
 class DataAssociation(Enum):
@@ -319,3 +346,29 @@ def reset_model_axes_unsafe(model, new_axes: list[int], inplace=False):
     model.points[:, sub_axes] = model.points[:, original_axes]
 
     return model
+
+
+def convert_model_dict_to_multiblock(model_dict: dict[Any, pv.DataSet], root=None):
+    """将模型字典转换为pv.MultiBlock实例，支持嵌套字典
+
+    Parameters
+    ----------
+    model_dict
+        模型字典
+    root
+        基础MultiBlock实例
+
+    Returns
+    -------
+    multi_block
+        从模型字典构造的嵌套MultiBlock
+    """
+    if root is None:
+        root = pv.MultiBlock()
+
+    for k, v in model_dict.items():
+        if isinstance(v, dict):
+            v = convert_model_dict_to_multiblock(v)
+        root[k] = v
+
+    return root

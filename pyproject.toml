@@ -39,6 +39,7 @@ mepa = [
 carto = [
     "numpy",
     "pillow",
+    "imageio",
     "requests",
     "pyproj",
     "rasterio",

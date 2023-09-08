@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import PIL.Image
 import numpy as np
 from PIL.Image import Image
-import PIL.Image
 
-from metalpy.utils.bounds import Bounds
-from metalpy.carto.coords import Coordinates
-from metalpy.carto.utils.crs import CRSLike
 from metalpy.carto.coords.coordinates import CRSQuery
+from metalpy.carto.utils.crs import CRSLike
+from metalpy.carto.pyvista.crs import warp_dataset
+from metalpy.utils.bounds import Bounds
 
 from .geo_image_ref_system import GeoImageRefSystem
 
@@ -182,19 +182,23 @@ class GeoImage:
             grid.set_active_scalars(alias)
 
         grid = grid.cast_to_unstructured_grid()
-        geo_points: Coordinates = grid.points.view(Coordinates).with_crs(self.crs)
-
-        crs = None
-        if dest_crs is not None or query_dest_crs is not None:
-            geo_points.warp(crs=dest_crs, query=query_dest_crs, inplace=True)
-            grid.points = geo_points
-            if return_crs:
-                crs = geo_points.crs
 
         if return_crs:
-            return grid, crs
+            result = (grid, self.crs)
         else:
-            return grid
+            result = grid
+
+        if dest_crs is not None or query_dest_crs is not None:
+            result = warp_dataset(
+                grid,
+                src_crs=self.crs,
+                crs=dest_crs,
+                query=query_dest_crs,
+                inplace=True,
+                return_crs=return_crs
+            )
+
+        return result
 
     def save(self, fp, format=None, **params):
         self.image.save(fp, format=format, **params)
