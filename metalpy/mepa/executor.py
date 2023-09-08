@@ -54,11 +54,11 @@ class Executor(ABC):
     def do_submit(self, func, *args, workers=None, **kwargs):
         pass
 
-    def arrange_single(self, data):
-        return SingleTaskAllocator(self.get_total_weights(), data)
+    def arrange(self, data):
+        return SingleTaskAllocator(data, total=self.get_total_weights())
 
-    def arrange(self, *data_list):
-        return TaskAllocator(self.get_total_weights(), *data_list)
+    def arrange_many(self, *data_list):
+        return TaskAllocator(*data_list, total=self.get_total_weights())
 
     @abstractmethod
     def get_workers(self) -> Collection[Worker]:
@@ -72,7 +72,7 @@ class Executor(ABC):
     def get_total_weights(self):
         """返回当前集群所有worker的权重和
         """
-        return [w.get_weight() for w in self.get_workers()]
+        return sum([w.get_weight() for w in self.get_workers()])
 
     @abstractmethod
     def is_local(self):
@@ -98,13 +98,13 @@ class Executor(ABC):
         >>> executor = LinearExecutor()
         >>> f = executor.submit(add, 1, 2)
         >>> executor.gather(f)
-        3
+        <<< 3
         >>> executor.gather([f, [f], f])  # 支持列表
-        [3, [3], 3]
+        <<< [3, [3], 3]
         >>> executor.gather({'First': f, 'Second': [f, [f]]})  # 支持字典
-        {'First': 3, 'Second': [3, [3]]}
+        <<< {'First': 3, 'Second': [3, [3]]}
         """
-        with self.event_thread_if_necessary():
+        with self.monitor_events():
             return self._gather(futures)
 
     def gather_single(self, future):
@@ -120,8 +120,12 @@ class Executor(ABC):
         ret
             future的结果
         """
-        with self.event_thread_if_necessary():
+        with self.monitor_events():
             return self._gather_single(future)
+
+    def submit_and_gather(self, func, *args, worker=None, workers=None, **kwargs):
+        fut = self.submit(func, *args, worker=worker, workers=workers, **kwargs)
+        return self.gather(fut)
 
     def _gather(self, futures):
         """收集futures的结果的实现逻辑
@@ -178,15 +182,43 @@ class Executor(ABC):
         return data
 
     @abstractmethod
-    def get_worker_context(self) -> 'WorkerContext':
+    def get_worker_context(self) -> WorkerContext:
+        """获取当前Executor绑定的WorkerContext实例
+
+        Returns
+        -------
+        context
+            返回当前Executor绑定的WorkerContext实例，如果没有，则创建
+
+        Notes
+        -----
+        一般情况下，所有事件共享一个WorkerContext实例，发布消息时由Executor完成消息分发
+        """
         pass
 
     @abstractmethod
     def receive_events(self, timeout):
         pass
 
-    def on(self, event, callback):
+    def on(self, event, callback) -> BoundWorkerContext:
+        """绑定子worker发出的消息事件回调。
+
+        Executor会在单独的监听线程中获取消息事件并调用回调函数。
+
+        Parameters
+        ----------
+        event
+            监听的事件标记
+        callback
+            事件回调函数
+
+        Returns
+        -------
+        context
+            返回绑定到该事件的WorkerContext
+        """
         self._event_handlers.setdefault(event, []).append(callback)
+        return self.get_worker_context().bind(event)
 
     def dispatch_event(self, event, msg):
         listeners = self._event_handlers.get(event, None)
@@ -217,15 +249,39 @@ class Executor(ABC):
         return len(self._event_handlers) > 0
 
     @contextlib.contextmanager
-    def event_thread_if_necessary(self):
+    def monitor_events(self):
+        """启动worker消息事件的监听线程
+
+        Notes
+        -----
+        `gather`和`gather_single`会自动调用该函数启动监听线程、
+        """
         try:
             self.start_event_monitoring(self.check_if_events_thread_are_required())
             yield
         finally:
             self.terminate_event_monitoring()
 
+    def __enter__(self):
+        return self
 
-class WorkerContext:
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
+class WorkerContext(ABC):
     @abstractmethod
     def fire(self, event, msg):
         pass
+
+    def bind(self, event):
+        return BoundWorkerContext(self, event)
+
+
+class BoundWorkerContext:
+    def __init__(self, context: WorkerContext, event):
+        self.context = context
+        self.event = event
+
+    def fire(self, msg):
+        self.context.fire(self.event, msg)

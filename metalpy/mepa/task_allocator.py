@@ -1,9 +1,14 @@
 import numpy as np
 
+from metalpy.utils.batch import Batch
+from .worker import Worker
+
 
 class SingleTaskAllocator:
-    def __init__(self, total, data):
+    def __init__(self, data, total=None):
         self.data = data
+        if total is None:
+            total = len(data)
         self.total = total
         self.base_index = 0
 
@@ -13,18 +18,25 @@ class SingleTaskAllocator:
         self.base_index = end
         return ret
 
-    def assign(self, worker):
+    def assign(self, worker: Worker):
         return self.slice(worker.get_weight())
+
+    @property
+    def finished(self):
+        return self.base_index >= len(self.data)
 
 
 class TaskAllocator:
-    def __init__(self, total, *data_list):
-        self.allocators = []
-        for data in data_list:
-            self.allocators.append(SingleTaskAllocator(total, data))
+    def __init__(self, *data_list, total=None):
+        allocators = [SingleTaskAllocator(data, total=total) for data in data_list]
+        self.allocators = Batch.of(allocators)
 
-    def assign(self, worker):
-        ret = []
-        for allocator in self.allocators:
-            ret.append(allocator.assign(worker))
-        return ret
+    def slice(self, n_slices=1):
+        return list(self.allocators.slice(n_slices))
+
+    def assign(self, worker: Worker):
+        return list(self.allocators.assign(worker))
+
+    @property
+    def finished(self):
+        return any(self.allocators.finished)

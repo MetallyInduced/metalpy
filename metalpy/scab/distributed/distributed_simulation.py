@@ -12,8 +12,8 @@ from properties.utils import undefined
 from metalpy.mepa import Executor
 from metalpy.mexin import LazyClassFactory, PatchContext
 from metalpy.mexin.injectors import is_or_is_replacement, reverted
-from metalpy.utils.type import pop_or_default, not_none_or_default, get_or_default
 from metalpy.scab.simpeg_patch_context import simpeg_patched
+from metalpy.utils.type import not_none_or_default
 from .policies import Distributable, NotDistributable
 from .utils import reget_class
 
@@ -205,7 +205,7 @@ class DistributedSimulation(LazyClassFactory, BaseSimulation):
             simulation_delegate, model = self.compress_model(simulation_delegate, model)
 
         futures = []
-        receiver_tasks = self.executor.arrange(*self.locations_list)
+        receiver_tasks = self.executor.arrange_many(*self.locations_list)
         for dest_worker in self.executor.get_workers():
             # 使用get_patch_policy来判断上下文中应用的patch哪些需要在worker中启用
             patches = [patch for patch in self.get_patches()

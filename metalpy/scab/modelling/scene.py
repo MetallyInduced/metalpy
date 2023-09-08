@@ -199,7 +199,7 @@ class Scene(OSMFormat, PTopoFormat):
                 executor = LinearExecutor(1)
 
             mesh_centers = np.asarray(mesh.cell_centers)
-            input_mesh = executor.arrange_single(mesh_centers)
+            input_mesh = executor.arrange(mesh_centers)
 
             futures = []
             for i, worker in enumerate(executor.get_workers()):
