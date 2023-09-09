@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Iterable, Callable
 
 
@@ -192,3 +193,13 @@ def is_numeric_array(obj):
             return False
 
     return True
+
+
+def notify_package(pkg_name, reason, install):
+    warnings.warn(
+        f'{reason}'
+        f'\nConsider install `{pkg_name}` with following command:'
+        f'\n'
+        f'\n    `{install}`'
+        f'\n'
+    )

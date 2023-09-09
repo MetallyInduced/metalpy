@@ -140,7 +140,7 @@ class Coordinates(FixedShapeNDArray):
     def warp(self,
              crs: CRSLike | None = None,
              query: CRSQuery | None = None,
-             inplace=False):
+             inplace=False) -> 'Coordinates':
         """将所有坐标转换到指定的另一坐标系下
 
         Parameters

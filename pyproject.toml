@@ -45,6 +45,9 @@ carto = [
     "rasterio",
     "affine",
 ]
+aero = [
+    "piexif",
+]
 scab = [
     "metalpy[mepa, mexin, utils]",
     # scientific
