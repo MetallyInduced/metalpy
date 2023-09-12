@@ -180,9 +180,16 @@ class Pavement:
     def make_tag(self):
         subprocess.check_call(['git', 'tag', '-a', f'{self.version_tag}', '-m', f'Release {self.version_tag}'])
 
-    def add_release_files(self):
-        subprocess.check_call(['git', 'add', f'{self.changelog_file}'])
-        subprocess.check_call(['git', 'add', f'{self.release_notes_file}'])
+    def add_release_files(self, command=('add',)):
+        subprocess.check_call(['git', *command, f'{self.changelog_file}'])
+        subprocess.check_call(['git', *command, f'{self.release_notes_file}'])
+
+    def checkout_release_files_from_stash(self):
+        self.add_release_files(command=(
+            'checkout',
+            'stash@{0}',
+            '--'
+        ))
 
     def generate_changelog(self):
         """依靠gitmoji-changelog生成changelog，需要额外安装npm和gitmoji-changelog
@@ -233,9 +240,10 @@ class Pavement:
         os.system(f'{sys.executable} -m build {self.repo_path}')
 
     def make_release_commit(self):
-        self.add_release_files()
-        subprocess.check_call(['git', 'commit', '-m', f':bookmark: 发布{self.version}'])
-        self.make_tag()
+        with self.git_stashed():
+            self.add_release_files()
+            subprocess.check_call(['git', 'commit', '-m', f':bookmark: 发布{self.version}'])
+            self.make_tag()
 
     def update_release_commit(self):
         # 需要当前的HEAD就是release commit才能update
@@ -248,10 +256,12 @@ class Pavement:
             return False
 
         try:
-            self.add_release_files()
-            self.delete_tag()
-            subprocess.check_call(['git', 'commit', '--amend', '--no-edit'])
-            self.make_tag()
+            with self.git_stashed():
+                self.checkout_release_files_from_stash()  # 从stash中checkout出release commit文件
+                self.add_release_files()
+                self.delete_tag()
+                subprocess.check_call(['git', 'commit', '--amend', '--no-edit'])
+                self.make_tag()
         except subprocess.CalledProcessError:
             return False
 
@@ -268,8 +278,9 @@ class Pavement:
             print("HEAD does not match the version being releasing, skip withdrawing.")
             return False
 
-        self.delete_tag()
-        subprocess.check_call(['git', 'reset', '--mixed', 'HEAD~1'])
+        with self.git_stashed():
+            self.delete_tag()
+            subprocess.check_call(['git', 'reset', '--mixed', 'HEAD~1'])
 
         return True
 
