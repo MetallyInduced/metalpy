@@ -44,8 +44,8 @@ class LinearExecutor(Executor):
 
 
 class LinearWorkerContext(WorkerContext):
-    def __init__(self, liner_client: LinearExecutor):
-        self.liner_client = liner_client
+    def __init__(self, linear_client: LinearExecutor):
+        self.linear_client = linear_client
 
-    def fire(self, event, msg):
-        self.liner_client.dispatch_event(event, msg)
+    def fire(self, event, *args, **kwargs):
+        self.linear_client.dispatch_event(event, args, kwargs)

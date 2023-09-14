@@ -1,10 +1,5 @@
-import uuid
-
-import distributed
-from distributed import Client
-
-from .executor import Executor, WorkerContext
-from .dask_helper import configure_dask_client
+from .executor import Executor, check_workers
+from .queue_like_worker_context import QueueLikeWorkerContext
 from .worker import Worker
 
 
@@ -23,6 +18,10 @@ class DaskExecutor(Executor):
         upload_modules
             指定是否自动搜索代码并上传到集群
         """
+        import uuid
+        from distributed import Client
+        from .dask_helper import configure_dask_client
+
         super().__init__()
         self.client = Client(scheduler_addr)
         if upload_modules:
@@ -59,21 +58,26 @@ class DaskExecutor(Executor):
 
     @property
     def sub(self):
+        import distributed
+
         if self._sub is None:
             self._sub = distributed.Sub(self.client_id)
 
         return self._sub
 
+    @property
+    def has_sub(self):
+        return self._sub is not None
+
+    def map(self, func, *iterables, worker=None, workers=None, chunksize=None):
+        kwargs = _extract_workers(None, workers)
+        return self.gather(self.client.map(func, *iterables, **kwargs, batch_size=chunksize))
+
     def do_submit(self, func, *args, workers=None, **kwargs):
-        if isinstance(workers, Worker):
-            workers = [workers]
+        option_kwargs = _extract_workers(None, workers)
+        option_kwargs.update(kwargs)
 
-        if workers is not None:
-            targets = [worker.get_name() for worker in workers]
-            kwargs['workers'] = targets
-            kwargs.setdefault('allow_other_workers', True)
-
-        return self.client.submit(func, *args, **kwargs)
+        return self.client.submit(func, *args, **option_kwargs)
 
     def get_workers(self):
         return self.workers
@@ -100,18 +104,42 @@ class DaskExecutor(Executor):
             except asyncio.exceptions.TimeoutError:
                 yield None, None
 
+    def check_if_events_thread_are_required(self):
+        return (self.has_sub
+                and super().check_if_events_thread_are_required())
 
-class DaskWorkerContext(WorkerContext):
+    def shutdown(self, wait=True):
+        # TODO: 实现wait，参考 distributed.cfexecutor.ClientExecutor.shutdown
+        self.client.shutdown()
+
+
+class DaskWorkerContext(QueueLikeWorkerContext):
     def __init__(self, client_id):
+        super().__init__()
         self.client_id = client_id
         self._pub = None
 
     @property
-    def pub(self):
+    def queue(self):
+        import distributed
+
         if self._pub is None:
             self._pub = distributed.Pub(self.client_id)
 
         return self._pub
 
-    def fire(self, event, msg):
-        self.pub.put((event, msg))
+    @queue.setter
+    def queue(self, _):
+        pass
+
+
+def _extract_workers(worker, workers):
+    workers = check_workers(worker, workers)
+
+    kwargs = {}
+    if workers is not None:
+        targets = [worker.get_name() for worker in workers]
+        kwargs['workers'] = targets
+        kwargs['allow_other_workers'] = True
+
+    return kwargs

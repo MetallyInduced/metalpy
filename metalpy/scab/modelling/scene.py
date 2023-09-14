@@ -9,17 +9,17 @@ import tqdm
 from discretize import TensorMesh
 
 from metalpy.mepa import LinearExecutor
+from metalpy.scab.utils.hash import dhash_discretize_mesh
 from metalpy.utils.bounds import Bounds
 from metalpy.utils.dhash import dhash
 from metalpy.utils.file import ensure_dir, make_cache_directory
 from metalpy.utils.model import as_pyvista_array
-from metalpy.scab.utils.hash import dhash_discretize_mesh
 from .formats.osm import OSMFormat
 from .formats.ptopo import PTopoFormat
 from .layer import Layer
 from .mix_modes import MixMode, Mixer
-from .object import Object
 from .modelled_mesh import ModelledMesh
+from .object import Object
 from .shapes import Shape3D
 from .shapes.full_space import FullSpace
 from .shapes.shape3d import bounding_box_of
@@ -198,26 +198,48 @@ class Scene(OSMFormat, PTopoFormat):
             if executor is None:
                 executor = LinearExecutor(1)
 
+            layers = tuple(self.layers)
+            n_workers = executor.get_n_workers()
+
+            if progress:
+                n_tasks = sum((obj.n_tasks for layer in layers for obj in layer))
+                progress = tqdm.tqdm(
+                    total=n_tasks * n_workers,
+                    ncols=80
+                )
+                ctx = executor.on('update', lambda d: progress.update(d))
+                ctx.update = ctx.fire  # 戴上面具（指伪装成tqdm的progress bar）
+            else:
+                ctx = None
+
             mesh_centers = np.asarray(mesh.cell_centers)
-            input_mesh = executor.arrange(mesh_centers)
+
+            shuffle = n_workers > 1
+            mesh_alloc = executor.arrange(mesh_centers, shuffle=shuffle)
 
             futures = []
             for i, worker in enumerate(executor.get_workers()):
                 futures.append(executor.submit(
-                    self._build_mesh_worker, tuple(self.layers), input_mesh.assign(worker),
-                    show_modeling_progress=i == 0 if progress else False,
+                    self._build_mesh_worker,
+                    layers,
+                    mesh_alloc.assign(worker),
+                    progress=ctx,
                     worker=worker
                 ))
             executor.gather(futures)
 
             models_dict = {}
             for key in futures[0].result().keys():
-                models_dict[key] = np.concatenate([future.result()[key] for future in futures])
+                arr = np.concatenate([future.result()[key] for future in futures])
+                models_dict[key] = mesh_alloc.inverse_shuffle(arr)  # 需要还原被打乱的数据
 
             if cache_filepath is not None:
                 import pickle
                 with open(cache_filepath, 'wb') as f:
                     pickle.dump(models_dict, f)
+
+        if isinstance(progress, tqdm.tqdm):
+            progress.close()
 
         return ModelledMesh(mesh, models_dict)
 
@@ -523,22 +545,12 @@ class Scene(OSMFormat, PTopoFormat):
         return models
 
     @staticmethod
-    def _build_mesh_worker(layers: list[Layer], mesh, show_modeling_progress):
+    def _build_mesh_worker(layers: list[Layer], mesh, progress):
         models = {}
-
-        if show_modeling_progress:
-            layers = list(layers)
-            progress = tqdm.tqdm(total=sum((obj.n_tasks for layer in layers for obj in layer)),
-                                 position=0, leave=False, ncols=80)
-        else:
-            progress = None
 
         for layer in layers:
             layer_models = Scene._build_layer(layer, mesh, progress)
             Scene._merge_models(models, layer_models.items(), None, layer.mixer)
-
-        if progress is not None:
-            progress.close()
 
         return models
 

@@ -6,9 +6,10 @@ from abc import ABC, abstractmethod
 from collections.abc import Collection
 from typing import Callable
 
-from . import Worker
-from .task_allocator import TaskAllocator, SingleTaskAllocator
+from .task_allocator import BoundedTaskAllocator, ShuffleChoice
 from .utils import structured_traverse
+from .worker import Worker
+from .worker_context import WorkerContext, BoundWorkerContext
 
 
 class Executor(ABC):
@@ -18,11 +19,26 @@ class Executor(ABC):
         self._event_monitor_thread = None
         self._event_handlers: dict[str, list[callable]] = {}
 
-    def submit(self, func, *args,
-               worker=None, workers=None, **kwargs):
-        if workers is None and worker is not None:
-            workers = [worker]
+        self._anonymous_event_counter = 0
+
+    def submit(self, func, *args, worker=None, workers=None, **kwargs):
+        workers = check_workers(worker, workers)
         return self.do_submit(func, workers=workers, *args, **kwargs)
+
+    def map(self, func, *iterables, worker=None, workers=None, chunksize=None):
+        workers = check_workers(worker, workers)
+
+        futures = []
+        n_workers = len(workers)
+
+        for i, task in enumerate(zip(*iterables)):
+            if workers is not None:
+                w = [workers[(i // chunksize) % n_workers]]
+            else:
+                w = None
+            futures.append(self.do_submit(func, *task, workers=w))
+
+        return futures
 
     def extract_by_name(self, pat: str | re.Pattern | Callable):
         """筛选符合条件的worker构成子执行器
@@ -54,11 +70,58 @@ class Executor(ABC):
     def do_submit(self, func, *args, workers=None, **kwargs):
         pass
 
-    def arrange(self, data):
-        return SingleTaskAllocator(data, total=self.get_total_weights())
+    def arrange(self, data, shuffle: ShuffleChoice = False) -> BoundedTaskAllocator:
+        """将给定序列数据按当前worker的权重分割
 
-    def arrange_many(self, *data_list):
-        return TaskAllocator(*data_list, total=self.get_total_weights())
+        Parameters
+        ----------
+        data
+            序列数据
+        shuffle
+            指示是否打乱数据
+
+        Returns
+        -------
+        allocator
+            数据分配器，遍历即可得到按权重分配的数据
+        """
+        return BoundedTaskAllocator.arrange(
+            data,
+            weights=self.get_workers(),
+            shuffle=shuffle
+        )
+
+    def arrange_many(self, *data_list, shuffle: ShuffleChoice = False) -> BoundedTaskAllocator:
+        """将给定多个序列数据按当前worker的权重分割，并类似zip(*)进行组合
+
+        Parameters
+        ----------
+        data_list
+            多个序列数据
+        shuffle
+            指示是否打乱数据
+
+        Returns
+        -------
+        allocator
+            数据组分配器，遍历即可得到按权重分配的数据组
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from metalpy.mepa import ThreadExecutor
+        >>> executor = ThreadExecutor(3)
+        >>> tasks = executor.arrange_many(np.arange(7), np.arange(7, 14))
+        >>> print(list(tasks))
+        <<< [(array([0, 1, 2]), array([7, 8, 9])),
+        <<<  (array([3, 4, 5]), array([10, 11, 12])),
+        <<<  (array([6]), array([13]))]
+        """
+        return BoundedTaskAllocator.arrange_many(
+            *data_list,
+            weights=self.get_workers(),
+            shuffle=shuffle
+        )
 
     @abstractmethod
     def get_workers(self) -> Collection[Worker]:
@@ -94,7 +157,7 @@ class Executor(ABC):
         Examples
         --------
         >>> from operator import add
-        >>> from metalpy.mepa.linear_executor import LinearExecutor
+        >>> from metalpy.mepa import LinearExecutor
         >>> executor = LinearExecutor()
         >>> f = executor.submit(add, 1, 2)
         >>> executor.gather(f)
@@ -208,29 +271,53 @@ class Executor(ABC):
         Parameters
         ----------
         event
-            监听的事件标记
+            监听的事件标记或事件回调函数
         callback
             事件回调函数
 
         Returns
         -------
         context
-            返回绑定到该事件的WorkerContext
+            返回绑定到该事件的WorkerContext，可以直接通过fire调用到该回调函数，不需要指定事件
         """
         self._event_handlers.setdefault(event, []).append(callback)
         return self.get_worker_context().bind(event)
 
-    def dispatch_event(self, event, msg):
+    def register(self, callback) -> BoundWorkerContext:
+        """绑定一个匿名消息的事件回调。
+
+        Parameters
+        ----------
+        callback
+            事件回调函数
+
+        Returns
+        -------
+        context
+            返回绑定到该事件的WorkerContext，可以直接通过fire调用到该回调函数，不需要指定事件
+
+        See Also
+        --------
+        Executor.on : 会自动生成一个专有名字然后通过on绑定
+        """
+        event = _Anonymous(self._anonymous_event_counter)
+        self._anonymous_event_counter += 1
+
+        return self.on(event, callback)
+
+    def dispatch_event(self, event, args, kwargs):
         listeners = self._event_handlers.get(event, None)
-        for listener in listeners:
-            listener(msg)
+        if listeners is not None:
+            for listener in listeners:
+                listener(*args, **kwargs)
 
     def monitor(self):
         for event, msg in self.receive_events(self.event_interval):
             if event is None:
                 pass
             else:
-                self.dispatch_event(event, msg)
+                args, kwargs = msg
+                self.dispatch_event(event, args, kwargs)
 
             if not self._running:
                 return
@@ -256,32 +343,48 @@ class Executor(ABC):
         -----
         `gather`和`gather_single`会自动调用该函数启动监听线程、
         """
-        try:
-            self.start_event_monitoring(self.check_if_events_thread_are_required())
-            yield
-        finally:
-            self.terminate_event_monitoring()
+        if not self._running:
+            try:
+                self.start_event_monitoring(self.check_if_events_thread_are_required())
+                yield
+            finally:
+                self.terminate_event_monitoring()
+        else:
+            try:
+                yield
+            finally:
+                pass
+
+    def shutdown(self, wait=True):
+        pass
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        self.shutdown(wait=True)
 
 
-class WorkerContext(ABC):
-    @abstractmethod
-    def fire(self, event, msg):
-        pass
+class _Anonymous:
+    __slots__ = ['i']
 
-    def bind(self, event):
-        return BoundWorkerContext(self, event)
+    def __init__(self, i):
+        self.i = i
+
+    def __hash__(self):
+        return hash(f'__A{self.i}')
+
+    def __eq__(self, other):
+        return isinstance(other, _Anonymous) and self.i == other.i
 
 
-class BoundWorkerContext:
-    def __init__(self, context: WorkerContext, event):
-        self.context = context
-        self.event = event
+def check_workers(worker, workers):
+    if workers is None:
+        if worker is None:
+            workers = None
+        else:
+            workers = [worker]
+    else:
+        workers = list(workers)
 
-    def fire(self, msg):
-        self.context.fire(self.event, msg)
+    return workers

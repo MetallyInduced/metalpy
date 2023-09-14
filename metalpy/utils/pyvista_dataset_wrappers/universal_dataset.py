@@ -8,8 +8,7 @@ import imageio
 import pyvista as pv
 import tqdm
 
-from metalpy.mepa import LinearExecutor
-from metalpy.mepa.executor import BoundWorkerContext, Executor
+from metalpy.mepa import LinearExecutor, BoundWorkerContext, Executor
 from metalpy.utils.dhash import dhash
 from metalpy.utils.file import make_cache_file_path, PathLike
 from metalpy.utils.model import convert_model_dict_to_multiblock, pv_ufunc_apply, DataSetLike

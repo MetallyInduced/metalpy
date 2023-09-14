@@ -1,9 +1,8 @@
-from pyproj import CRS, Transformer
-from pyproj.aoi import AreaOfInterest
-from pyproj.database import query_utm_crs_info
-
-
 def query_utm_crs_from_bound(bounds):
+    from pyproj import CRS
+    from pyproj.aoi import AreaOfInterest
+    from pyproj.database import query_utm_crs_info
+
     utm_crs_list = query_utm_crs_info(
         datum_name='WGS 84',
         area_of_interest=AreaOfInterest(
@@ -20,6 +19,8 @@ def query_utm_crs_from_bound(bounds):
 
 
 def query_utm_transform_from_bounds(bounds):
+    from pyproj import CRS, Transformer
+
     wgs84_crs = CRS.from_string('WGS 84')
     utm_crs = query_utm_crs_from_bound(bounds)
     to_utm = Transformer.from_crs(wgs84_crs, utm_crs, always_xy=True)

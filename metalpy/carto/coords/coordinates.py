@@ -2,13 +2,9 @@ from __future__ import annotations
 
 import re
 import warnings
-from typing import Union, Callable
+from typing import Union, Callable, TYPE_CHECKING
 
 import numpy as np
-from pyproj import CRS, Transformer
-from pyproj.aoi import AreaOfInterest
-from pyproj.database import query_utm_crs_info, query_crs_info
-from pyproj.exceptions import CRSError
 
 from metalpy.carto.utils.crs import check_crs, CRSLike
 from metalpy.utils.bounds import Bounds
@@ -16,6 +12,9 @@ from metalpy.utils.numpy import FixedShapeNDArray
 from metalpy.utils.string import format_string_list
 
 CRSQuery = Union[str, re.Pattern, Callable]
+
+if TYPE_CHECKING:
+    from pyproj import CRS, Transformer
 
 
 class Coordinates(FixedShapeNDArray):
@@ -28,7 +27,7 @@ class Coordinates(FixedShapeNDArray):
     Coordinates([[ 380702.31913457, 3949190.73587477],
                 [ 381622.08225664, 3950287.81606255]], crs='WGS 84 / UTM zone 54N')
     """
-    WGS_84 = CRS.from_string('WGS 84')
+    WGS_84 = 'WGS 84'
     SearchUTM = '__SearchUTM'
 
     def __new__(cls, arr, crs: CRSLike = WGS_84):
@@ -63,7 +62,7 @@ class Coordinates(FixedShapeNDArray):
         assert self.ndim in (1, 2) and self.shape[-1] in (2, 3), 'Coordinates supports only 2D or 3D points array.'
 
     @property
-    def crs(self) -> CRS:
+    def crs(self) -> 'CRS':
         return getattr(self, '_crs', None)
 
     @crs.setter
@@ -169,11 +168,15 @@ class Coordinates(FixedShapeNDArray):
 
         * 指定函数`lambda crs: crs.code == 3857`以搜索匹配的坐标系
         """
+        from pyproj import CRS, Transformer
+
         if isinstance(query, CRS):
             crs = query
             query = None
 
         if crs is not None:
+            from pyproj.exceptions import CRSError
+
             try:
                 crs = check_crs(crs)
             except CRSError:
@@ -183,6 +186,9 @@ class Coordinates(FixedShapeNDArray):
                 crs = None
 
         if crs is None:
+            from pyproj.aoi import AreaOfInterest
+            from pyproj.database import query_utm_crs_info, query_crs_info
+
             assert query is not None, 'Either `crs` or `query` must be specified.'
 
             bounds = self.bounds

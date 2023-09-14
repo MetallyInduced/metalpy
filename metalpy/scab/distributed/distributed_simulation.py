@@ -208,8 +208,9 @@ class DistributedSimulation(LazyClassFactory, BaseSimulation):
         receiver_tasks = self.executor.arrange_many(*self.locations_list)
         for dest_worker in self.executor.get_workers():
             # 使用get_patch_policy来判断上下文中应用的patch哪些需要在worker中启用
-            patches = [patch for patch in self.get_patches()
-                       if self.get_patch_policy(patch).should_distribute_to(dest_worker)]
+            patches = [self.get_patch_policy(patch).distribute_to(self.executor, dest_worker)
+                       for patch in self.get_patches()]
+            patches = [patch for patch in patches if patch is not None]
 
             future = self.executor.submit(
                 self.linear_operator_worker, worker=dest_worker,

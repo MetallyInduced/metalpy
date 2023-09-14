@@ -81,9 +81,6 @@ class TiedSimulation3DIntegralMixin(TiedMixin):
         receivers = [Receiver(rx.locations, rx.components) for rx in self.survey.source_field.receiver_list]
 
         progress = self.mixins.get(Progress)
-        if progress is not None:
-            progress.set_manual_update(True)
-            progress = progress.progressbar
 
         kernel = TaichiSimulation3DIntegral(
             receivers=receivers,

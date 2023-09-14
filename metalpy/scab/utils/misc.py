@@ -11,7 +11,7 @@ class Field:
 
     @property
     def strength(self):
-        warnings.warn("strength is deprecated and will be removed, please use intensity instead.", DeprecationWarning)
+        warnings.warn("strength is deprecated and will be removed, please use `intensity` instead.", DeprecationWarning)
         return self.definition[0]
 
     @property
@@ -32,6 +32,10 @@ class Field:
             self.inclination,
             self.declination,
         ).squeeze()
+
+    @property
+    def vector(self):
+        return self.unit_vector * self.intensity
 
     def __iter__(self):
         for v in self.definition:

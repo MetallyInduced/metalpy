@@ -3,7 +3,7 @@ import numbers
 import numpy as np
 
 
-def check_random_state(seed):
+def check_random_state(seed) -> np.random.RandomState:
     """Turn seed into a np.random.RandomState instance.
 
     Parameters

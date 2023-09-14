@@ -1,4 +1,4 @@
-from typing import TypeVar, Sequence, Generic
+from typing import TypeVar, Sequence, Generic, Iterator
 
 T = TypeVar('T')
 
@@ -43,7 +43,7 @@ class Batch(Generic[T]):
     def __len__(self):
         return len(self.batch_items)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[T]:
         yield from self.batch_items
 
     def __call__(self, *args, **kwargs):
