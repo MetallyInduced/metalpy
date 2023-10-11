@@ -1,20 +1,21 @@
 from functools import partial
 
 import numpy as np
+import psutil
 import pyamg
-import scipy.sparse as sp
 import taichi as ti
 from discretize.base import BaseTensorMesh
 from discretize.utils import mkvc
 
 from metalpy.scab.utils.misc import Field
-from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_cfg, ti_ndarray, ti_test_snode_support
+from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_cfg, ti_ndarray, ti_test_snode_support, \
+    ti_func, copy_from
 
 
 class Demagnetization:
     def __init__(self, mesh: BaseTensorMesh, source_field: Field, active_ind=None):
         """
-        通过BiCGSTAB求解计算退磁作用下的磁化强度
+        通过CG或BiCGSTAB求解计算退磁作用下的磁化强度
 
         Parameters
         ----------
@@ -66,6 +67,8 @@ class Demagnetization:
         nC = self.Xn.shape[0]
         H0 = self.source_field.unit_vector
         H0 = np.tile(H0[None, :], nC).ravel()
+        X = np.tile(model, 3).ravel()
+        b = X * H0
 
         base_cell_sizes = np.r_[
             self.mesh.h[0].min(),
@@ -73,39 +76,36 @@ class Demagnetization:
             self.mesh.h[2].min(),
         ]
 
-        A = forward(self.receiver_locations, self.Xn, self.Yn, self.Zn, base_cell_sizes, model)
-        X = np.tile(model, 3).ravel()
-        X = sp.diags(X)
-
-        b = X @ H0
-
-        m, info = pyamg.krylov.bicgstab(A, b)
-
+        m = _predict(b, self.receiver_locations, self.Xn, self.Yn, self.Zn, base_cell_sizes, model)
         return m.reshape(-1, 3)
 
 
-def forward(receiver_locations: np.ndarray,
-            xn: np.ndarray,
-            yn: np.ndarray,
-            zn: np.ndarray,
-            base_cell_sizes: np.ndarray,
-            susc_model: np.ndarray, ):
+def _predict(
+        magnetization: np.ndarray,
+        receiver_locations: np.ndarray,
+        xn: np.ndarray,
+        yn: np.ndarray,
+        zn: np.ndarray,
+        base_cell_sizes: np.ndarray,
+        susc_model: np.ndarray
+):
     mat_size = receiver_locations.shape[0] * 3 * xn.shape[0] * 3
-
+    is_cpu = ti_cfg().arch == ti.cpu
     if mat_size > np.iinfo(np.int32).max:
-        method = partial(forward_seperated, direct_to_host=False)
-    elif ti_cfg().arch == ti.cpu:
+        method = partial(forward_seperated, direct_to_host=False, is_cpu=is_cpu)
+    elif is_cpu:
         method = partial(forward_integrated, is_cpu=True)
     elif ti_test_snode_support():
-        method = partial(forward_seperated, direct_to_host=True)
+        method = partial(forward_seperated, direct_to_host=True, is_cpu=is_cpu)
     else:
         print("Current GPU doesn't support SNode, fall back to legacy implementation.")
         method = partial(forward_integrated, is_cpu=False)
 
-    return method(receiver_locations, xn, yn, zn, base_cell_sizes, susc_model)
+    return method(magnetization, receiver_locations, xn, yn, zn, base_cell_sizes, susc_model)
 
 
 def forward_integrated(
+        magnetization: np.ndarray,
         receiver_locations: np.ndarray,
         xn: np.ndarray,
         yn: np.ndarray,
@@ -118,6 +118,8 @@ def forward_integrated(
 
     Parameters
     ----------
+    magnetization
+        磁化强度
     receiver_locations
         观测点
     xn, yn, zn
@@ -149,12 +151,15 @@ def forward_integrated(
                           *[0] * 9, A, True)
 
     if is_cpu:
-        return A
+        Amat = A
     else:
-        return A.to_numpy()
+        Amat = A.to_numpy()
+
+    return solve_Ax_b(Amat, magnetization)
 
 
 def forward_seperated(
+        magnetization: np.ndarray,
         receiver_locations: np.ndarray,
         xn: np.ndarray,
         yn: np.ndarray,
@@ -162,11 +167,14 @@ def forward_seperated(
         base_cell_sizes: np.ndarray,
         susc_model: np.ndarray,
         direct_to_host: bool,
+        is_cpu: bool
 ):
     """该函数将矩阵分为9个部分，计算后再拼接，从而实现一些优化
 
     Parameters
     ----------
+    magnetization
+        磁化强度
     receiver_locations
         观测点
     xn, yn, zn
@@ -177,6 +185,8 @@ def forward_seperated(
         磁化率模型
     direct_to_host
         是否通过kernel将结果直接zero-copy地复制到待返回的numpy数组
+    is_cpu
+        是否是CPU架构，如果是，才会在内存可用时合并核矩阵然后求解
 
     Notes
     -----
@@ -192,11 +202,12 @@ def forward_seperated(
     with ti_FieldsBuilder() as builder:
         nC = xn.shape[0]
         nObs = receiver_locations.shape[0]
-        A = np.empty((3 * nObs, 3 * nC), dtype=np.float64)
+
+        # Txx, Txy, Txz, Tyx, Tyy, Tyz, Tzx, Tzy, Tzz
         Tmat = [
             ti_field(ti.f64)
             for _ in range(3 * 3)
-        ]  # Txx, Txy, Txz, Tyx, Tyy, Tyz, Tzx, Tzy, Tzz
+        ]
         for m in Tmat:
             builder.dense(ti.ij, (nObs, nC)).place(m)
         builder.finalize()
@@ -204,15 +215,62 @@ def forward_seperated(
         kernel_matrix_forward(receiver_locations, xn, yn, zn, base_cell_sizes, susc_model,
                               *Tmat, np.empty(0), False)
 
-        for i in range(3):
-            for j in range(3):
-                if direct_to_host:
-                    tensor_to_ext_arr(Tmat[i * 3 + j], A, i, 3, j, 3)
-                else:
-                    a = Tmat[i * 3 + j].to_numpy()
-                    A[i::3, j::3] = a
+        if is_cpu and psutil.virtual_memory().percent < 45:
+            # TODO: 进一步考虑模型大小来选择求解方案，模型较大时也应该使用 `solve_Tx_b`
+            return solve_Ax_b(merge_Tmat_as_A(Tmat, direct_to_host=direct_to_host), magnetization)
+        else:
+            return solve_Tx_b(Tmat, magnetization)
 
-    return A
+
+def solve_Ax_b(A, m):
+    x, _ = pyamg.krylov.bicgstab(A, m)
+    return x
+
+
+def solve_Tx_b(Ts, m):
+    with ti_FieldsBuilder() as builder:
+        x = builder.place_dense_like(m[:, None])
+        b = builder.place_dense_like(m[:, None])
+
+        builder.finalize()
+
+        copy_from(b, m[:, None])
+
+        @ti_func
+        def mul(Ax, x, i: ti.template(), j: ti.template(), augment: ti.template() = True):
+            multiply_with_stride(
+                Ax, Ts[i * 3 + j], x, i, 3, j, 3, augment
+            )
+
+        @ti_kernel
+        def linear(x: ti.template(), Ax: ti.template()):
+            mul(Ax, x, 0, 0, False)
+            mul(Ax, x, 1, 0, False)
+            mul(Ax, x, 2, 0, False)
+            mul(Ax, x, 0, 1)
+            mul(Ax, x, 0, 2)
+            mul(Ax, x, 1, 1)
+            mul(Ax, x, 1, 2)
+            mul(Ax, x, 2, 1)
+            mul(Ax, x, 2, 2)
+
+        ti.linalg.taichi_cg_solver(ti.linalg.LinearOperator(linear), b, x)
+
+        return x.to_numpy()
+
+
+def merge_Tmat_as_A(Ts, direct_to_host=True):
+    nObs, nC = Ts[0].shape
+    Amat = np.empty((3 * nObs, 3 * nC), dtype=np.float64)
+    for i in range(3):
+        for j in range(3):
+            if direct_to_host:
+                tensor_to_ext_arr(Ts[i * 3 + j], Amat, i, 3, j, 3)
+            else:
+                a = Ts[i * 3 + j].to_numpy()
+                Amat[i::3, j::3] = a
+
+    return Amat
 
 
 @ti_kernel
@@ -223,15 +281,15 @@ def kernel_matrix_forward(
         zn: ti.types.ndarray(),
         base_cell_sizes: ti.types.ndarray(),
         susc_model: ti.types.ndarray(),
-        Txx: ti.types.template(),
-        Txy: ti.types.template(),
-        Txz: ti.types.template(),
-        Tyx: ti.types.template(),
-        Tyy: ti.types.template(),
-        Tyz: ti.types.template(),
-        Tzx: ti.types.template(),
-        Tzy: ti.types.template(),
-        Tzz: ti.types.template(),
+        Txx: ti.template(),
+        Txy: ti.template(),
+        Txz: ti.template(),
+        Tyx: ti.template(),
+        Tyy: ti.template(),
+        Tyz: ti.template(),
+        Tzx: ti.template(),
+        Tzy: ti.template(),
+        Tzz: ti.template(),
         mat: ti.types.ndarray(),
         write_to_mat: ti.template(),
 ):
@@ -492,8 +550,29 @@ def kernel_matrix_forward(
 
 
 @ti_kernel
-def tensor_to_ext_arr(tensor: ti.types.template(), arr: ti.types.ndarray(),
-                      x0: ti.types.template(), xstride: ti.types.template(),
-                      y0: ti.types.template(), ystride: ti.types.template()):
+def tensor_to_ext_arr(tensor: ti.template(), arr: ti.types.ndarray(),
+                      x0: ti.template(), xstride: ti.template(),
+                      y0: ti.template(), ystride: ti.template()):
     for I in ti.grouped(tensor):
         arr[I[0] * xstride + x0, I[1] * ystride + y0] = tensor[I]
+
+
+@ti_func
+def multiply_with_stride(
+        out: ti.template(), A: ti.template(), v: ti.template(),
+        row0: ti.template(), row_stride: ti.template(),
+        col0: ti.template(), col_stride: ti.template(),
+        augment: ti.template() = True
+):
+    for r in range(A.shape[0]):
+        row = r * row_stride + row0
+
+        summed = A[r, 0] * v[col0, 0]
+        if ti.static(augment):
+            summed += out[row, 0]
+
+        for c in range(1, A.shape[1]):
+            col = c * col_stride + col0
+            summed += A[r, c] * v[col, 0]
+
+        out[row, 0] = summed

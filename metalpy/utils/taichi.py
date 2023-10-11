@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import functools
 import inspect
@@ -165,10 +167,16 @@ class WrappedFieldsBuilder:
         else:
             return arr_types
 
+    def place_dense_like(self, arr, *, dtype=None, axes=None):
+        if dtype is None:
+            dtype = arr.dtype
+
+        return self.place_dense(arr.shape, to_taichi_type(dtype), axes=axes)
+
     def __getattr__(self, name):
         return getattr(self.fields_builder, name)
 
-    def __enter__(self):
+    def __enter__(self) -> 'WrappedFieldsBuilder' | ti.FieldsBuilder:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -217,7 +225,7 @@ def ti_test_snode_support() -> bool:
     return ret
 
 
-def ti_ndarray_from(arr, sdim=0):
+def ti_ndarray_from(arr, sdim=0, dtype=None, field=False):
     """从其他数组类型创建Taichi ndarray
 
     Parameters
@@ -226,15 +234,52 @@ def ti_ndarray_from(arr, sdim=0):
         外部数组
     sdim
         结构维度，0代表Scalar，1代表Vector，2代表Matrix
+    dtype
+        指定taichi数组的数据类型，支持使用taichi或numpy的dtype标识
+    field
+        指示是否构建ti.field实例，若为False则构建ti.ndarray实例
+
+    Returns
+    -------
+    ret
+        返回结构维度为sdim的Taichi ndarray，且内容与arr相同
+    """
+    container = ti_ndarray_like(arr, sdim=sdim, dtype=dtype, field=field)
+    copy_from(container, arr)
+    return container
+
+
+def ti_ndarray_like(arr, sdim=0, dtype=None, field=False, builder: ti.FieldsBuilder = None):
+    """从其他数组类型创建相同尺寸的Taichi ndarray
+
+    Parameters
+    ----------
+    arr
+        外部数组
+    sdim
+        结构维度，0代表Scalar，1代表Vector，2代表Matrix
+    dtype
+        指定taichi数组的数据类型，支持使用taichi或numpy的dtype标识
+    field
+        指示是否构建ti.field实例，若为False则构建ti.ndarray实例
+    builder
+        指定用于分配数据的builder
 
     Returns
     -------
     ret
         返回结构维度为sdim的Taichi ndarray
+
+    Notes
+    -----
+    field和ndarray区别参见：https://docs.taichi-lang.cn/docs/ndarray/
     """
     ti_init_once()
 
-    dt = to_taichi_type(arr.dtype)
+    if dtype is None:
+        dtype = arr.dtype
+
+    dt = to_taichi_type(dtype)
     if sdim == 0:
         shape = arr.shape
     elif sdim == 1:
@@ -246,11 +291,23 @@ def ti_ndarray_from(arr, sdim=0):
     else:
         raise ValueError(f"Unsupported structure dim: {sdim}")
 
-    container = ti.ndarray(dtype=dt, shape=shape)
-    typeinfo = type(arr)
+    if builder is None:
+        if field:
+            container = ti.field(dtype=dt, shape=shape)
+        else:
+            container = ti.ndarray(dtype=dt, shape=shape)
+    else:
+        container = ti.field(dt)
+        builder.dense(ti.axes(*range(len(shape))), shape).place(container)
+
+    return container
+
+
+def copy_from(ti_arr, ext_arr):
+    typeinfo = type(ext_arr)
     typename = typeinfo.__name__
     if typename == 'ndarray':
-        container.from_numpy(arr)
+        ti_arr.from_numpy(ext_arr)
     else:
         raise ValueError(f"Unsupported array type: {typename}")
     # taichi暂未为ndarray实现这些来源
@@ -258,36 +315,6 @@ def ti_ndarray_from(arr, sdim=0):
     #     container.from_torch(arr)
     # elif typeinfo.__module__ == 'paddle':
     #     container.from_paddle(arr)
-    return container
-
-
-@ti_func
-def ti_index(i, j, stype: ti.template(), struct_size, array_size):
-    """对struct array的索引，返回对应的1d index
-
-    Parameters
-    ----------
-    i
-        第i个struct
-    j
-        struct的第j个元素
-    stype
-        struct的内存布局类型
-    struct_size
-        struct的大小
-    array_size
-        array的大小
-
-    Returns
-    -------
-    ret
-        1d索引
-    """
-
-    if ti.static(stype == ti.Layout.AOS):
-        return i * struct_size + j  # [x, y, z, x, y, z, ..., x, y, z]
-    else:
-        return j * array_size + i  # [x, x, ..., x, y, y, ..., y, z, z, ..., z]
 
 
 def ti_get_raw_function(kernel):

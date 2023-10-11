@@ -64,6 +64,7 @@ class SimulationBuilder:
 
     def patched(self, *patches: Patch):
         self._patches.extend(patches)
+        return self
 
     def build(self):
         with simpeg_patched(*self._patches):

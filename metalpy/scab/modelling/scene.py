@@ -37,7 +37,9 @@ class Scene(OSMFormat, PTopoFormat):
 
     @staticmethod
     def of(*shapes: Shape3D | Iterable[Shape3D],
-           models: Union[Any, dict, list[Any], None] = None) -> 'Scene':
+           models: Union[Any, dict, list[Any], None] = None,
+           skip_checking=False
+           ) -> 'Scene':
         """从一组Shape3D实例创建场景，并赋予相同的模型值`models`
 
         Parameters
@@ -46,6 +48,8 @@ class Scene(OSMFormat, PTopoFormat):
             一组Shape3D实例
         models
             三维几何体的参数
+        skip_checking
+            指示是否跳过对shapes的类型检查
 
         Returns
         -------
@@ -68,11 +72,12 @@ class Scene(OSMFormat, PTopoFormat):
         """
         ret = Scene()
 
-        if len(shapes) == 1 and not isinstance(shapes[0], Shape3D):
-            # 假设传入的为Shape3D实例数组，而非以变长参数形式传递
-            shapes = shapes[0]
+        if not skip_checking:
+            if len(shapes) == 1 and not isinstance(shapes[0], Shape3D):
+                # 假设传入的为Shape3D实例数组，而非以变长参数形式传递
+                shapes = shapes[0]
 
-        assert all([isinstance(s, Shape3D) for s in shapes]), '`scene` accepts only `Shape3D` instances.'
+            assert all([isinstance(s, Shape3D) for s in shapes]), '`Scene` accepts only `Shape3D` instances.'
 
         if (
             models is None

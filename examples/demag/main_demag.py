@@ -1,26 +1,26 @@
+import matplotlib as mpl
 import numpy as np
 import taichi as ti
-from SimPEG import maps
 from SimPEG.potential_fields import magnetics
 from SimPEG.utils import plot2Ddata
 from discretize.utils import mkvc
-import matplotlib as mpl
 from matplotlib import pyplot as plt
 
 from metalpy.mepa import LinearExecutor
-from metalpy.scab import simpeg_patched, Progressed, Tied
+from metalpy.scab import Progressed, Tied
+from metalpy.scab.builder import SimulationBuilder
+from metalpy.scab.builder.potential_fields.magnetics import Simulation3DIntegralBuilder
 from metalpy.scab.demag import Demagnetization
 from metalpy.scab.demag.factored_demagnetization import FactoredDemagnetization
 from metalpy.scab.demag.utils import get_prolate_spheroid_demag_factor
-from metalpy.scab.modelling import Scene
 from metalpy.scab.modelling.shapes import Ellipsoid
+from metalpy.scab.tied.potential_fields.magnetics.simulation import TiedSimulation3DIntegralMixin
 from metalpy.scab.utils.misc import define_inducing_field
-
 from metalpy.utils.taichi import ti_prepare, ti_config
 from metalpy.utils.time import Timer
 
 
-def main(grid_size, gpu=False):
+def main(cell_size, gpu=False):
     if gpu:
         ti_prepare(arch=ti.gpu, device_memory_fraction=0.8)
 
@@ -28,8 +28,7 @@ def main(grid_size, gpu=False):
     timer = Timer()
 
     with timer:
-        spheroid = Ellipsoid.spheroid(a, c, polar_axis=0)
-        model_mesh = Scene.of(spheroid, models=80).build(cell_size=grid_size, executor=LinearExecutor(1))
+        model_mesh = Ellipsoid.spheroid(a, c, polar_axis=0).to_scene(model=80).build(cell_size=cell_size)
         active_cells = model_mesh.active_cells
         model = model_mesh.get_active_model()
         mesh = model_mesh.mesh
@@ -55,33 +54,23 @@ def main(grid_size, gpu=False):
     print(f"Solving: {timer}")
     print("MagModel MAPE(%): ", (abs(demaged_model2 - demaged_model) / abs(demaged_model)).mean() * 100)
 
-    with simpeg_patched(Tied(), Progressed()):
-        obsx = np.arange(-c, c + 1, 1) * 2
-        obsy = np.arange(-c, c + 1, 1) * 2
-        obsx, obsy = np.meshgrid(obsx, obsy)
-        obsx, obsy = mkvc(obsx), mkvc(obsy)
-        obsz = np.ones_like(obsy) * 50
+    obsx = np.linspace(-2048, 2048, 128 + 1)
+    obsy = np.linspace(-2048, 2048, 128 + 1)
+    obsx, obsy = np.meshgrid(obsx, obsy)
+    obsx, obsy = mkvc(obsx), mkvc(obsy)
+    obsz = np.full_like(obsy, 80)
+    receiver_points = np.c_[obsx, obsy, obsz]
 
-        receiver_points = np.c_[obsx, obsy, obsz]
-
-        nC = int(np.sum(active_cells))
-        components = ('tmi',)
-        receiver_list = magnetics.receivers.Point(receiver_points, components=components)
-        receiver_list = [receiver_list]
-
-        inducing_field = magnetics.sources.SourceField(
-            receiver_list=receiver_list, parameters=source_field
-        )
-        survey = magnetics.survey.Survey(inducing_field)
-        model_map = maps.IdentityMap(nP=3 * nC)
-        simulation = magnetics.simulation.Simulation3DIntegral(
-            survey=survey,
-            mesh=mesh,
-            model_type="vector",
-            chiMap=model_map,
-            ind_active=active_cells,
-            store_sensitivities="ram",
-        )
+    # 手动引入来帮助Dask定位并上传到worker
+    _ = TiedSimulation3DIntegralMixin, Simulation3DIntegralBuilder
+    builder = SimulationBuilder.of(magnetics.simulation.Simulation3DIntegral)
+    builder.patched(Tied(arch='gpu' if gpu else 'cpu'), Progressed())
+    builder.source_field(*source_field)
+    builder.receivers(receiver_points)
+    builder.active_mesh(model_mesh)
+    builder.model_type(vector=True)
+    builder.store_sensitivities(False)
+    simulation = builder.build()
 
     pred = simulation.dpred(mkvc(demaged_model))
     pred2 = simulation.dpred(mkvc(demaged_model2))
@@ -92,19 +81,21 @@ def main(grid_size, gpu=False):
 if __name__ == '__main__':
     executor = LinearExecutor(1)
 
-    workers = [w for w in executor.get_workers() if 'large-mem' in w.group]
+    workers = [w for w in executor.get_workers() if 'large-mem' in w.group][:1]
     if len(workers) == 1:
-        f = executor.submit(main, [1.2, 1.2, 0.6], workers=workers)
+        f = executor.submit(main, [1, 1, 0.5], workers=workers)
     else:
+        ti_prepare(device_memory_fraction=0.9)
         gpu = False
         if executor.is_local():
             gpu = True
-        f = executor.submit(main, [2.3, 2.3, 0.9], gpu=gpu)
+        f = executor.submit(main, [1.6, 1.6, 1], gpu=gpu)
 
-    demaged_model, pred, demaged_model2, pred2, receiver_points = executor.gather([f])[0]
+    demaged_model, pred, demaged_model2, pred2, receiver_points = executor.gather(f)
 
     print('Model MAPE (%):', (abs(demaged_model2 - demaged_model) / abs(demaged_model)).mean() * 100)
-    print('TMI MAPE (%):', (abs(pred - pred2) / abs(pred)).mean() * 100)
+    ape = abs((pred - pred2) / pred)
+    print('TMI MAPE (%):', ape[abs(pred) > 1e-2].mean() * 100)
 
     fig = plt.figure(figsize=(17, 4))
 

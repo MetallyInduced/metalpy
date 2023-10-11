@@ -142,9 +142,9 @@ class Shape3D(ABC):
         """
         raise NotImplementedError()
 
-    def to_scene(self):
+    def to_scene(self, model=None):
         from metalpy.scab.modelling import Scene
-        return Scene.of(self)
+        return Scene.of(self, models=(model,), skip_checking=True)
 
     def build(self, *args, **kwargs):
         return self.to_scene().build(*args, **kwargs)

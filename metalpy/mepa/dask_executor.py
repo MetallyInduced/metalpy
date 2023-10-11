@@ -17,6 +17,11 @@ class DaskExecutor(Executor):
             需要排除不自动搜索并上传代码到集群的模块路径
         upload_modules
             指定是否自动搜索代码并上传到集群
+
+        Notes
+        -----
+        在启用自动上传模式时，有时会导致worker中存在多个相同的类，
+        形似 `Scene.of` 一样使用 `isinstance` 的语句有时会出现无法识别的问题，
         """
         import uuid
         from distributed import Client
@@ -103,10 +108,6 @@ class DaskExecutor(Executor):
                 yield event, msg
             except asyncio.exceptions.TimeoutError:
                 yield None, None
-
-    def check_if_events_thread_are_required(self):
-        return (self.has_sub
-                and super().check_if_events_thread_are_required())
 
     def shutdown(self, wait=True):
         # TODO: 实现wait，参考 distributed.cfexecutor.ClientExecutor.shutdown

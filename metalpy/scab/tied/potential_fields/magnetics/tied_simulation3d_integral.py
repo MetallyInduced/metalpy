@@ -10,10 +10,10 @@ from metalpy.utils.taichi import (
     ti_ndarray,
     ti_func,
     ti_data_oriented,
-    ti_index,
     ti_ndarray_from,
     ensure_contiguous
 )
+from metalpy.utils.taichi_kernels import ti_index
 from metalpy.utils.type import ensure_as_iterable, not_none_or_default
 
 from ...value_observer import ValueObserver
@@ -74,7 +74,6 @@ class TaichiSimulation3DIntegral:
         magnetization
             磁化矩阵，array(n_cells, 3)，默认为全1
         """
-        n_cells = xn.shape[0]
         receivers: list[Receiver] = ensure_as_iterable(receivers)
 
         if tmi_projection is None:
@@ -163,8 +162,12 @@ class TaichiSimulation3DIntegral:
 
         # TODO: 由于Taichi目前采用i32作为索引类型，数组元素总数不能超过int32的上限，否则行为未定义
         #  如果后续Taichi支持i64索引类型，则可以去掉这个限制
-        assert n_rows * n_cols < np.iinfo(np.int32).max, \
-            "Taichi doesn't support arrays with more than INT32_MAX elements."
+        assert n_rows * n_cols < np.iinfo(np.int32).max, (
+            "Kernel matrix with more than INT32_MAX elements has exceeded limits of Taichi."
+            "\nConsider set `store_sensitivities='forward_only'`"
+            " or `builder.store_sensitivities(False)` if using `SimulationBuilder`."
+            "\nSee also `https://github.com/taichi-dev/taichi/issues/8161`."
+        )
 
         monitor = None
         if progress is not None:

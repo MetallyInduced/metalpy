@@ -14,16 +14,19 @@ class Timer:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.stop()
+        self.check()
 
     def start(self):
         self.started = time.perf_counter_ns()
 
-    def stop(self):
+    def check(self):
         self.stopped = time.perf_counter_ns()
         self.elapsed = self.stopped - self.started
 
     def __str__(self):
+        if self.stopped == -1:
+            self.check()
+
         elapsed_mins, elapsed_secs, elapsed_milis, elapsed_micros = \
             perf_ns_epoch_time(self.started, self.stopped)
         if elapsed_mins > 0:

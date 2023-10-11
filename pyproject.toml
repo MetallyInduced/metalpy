@@ -63,7 +63,7 @@ scab = [
     "matplotlib",
     "colour",
     # computational
-    "taichi >= 1.3.0",
+    "taichi >= 1.6.0",
     # utils
     "properties",
     "pympler",
