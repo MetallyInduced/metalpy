@@ -75,7 +75,7 @@ class BarFramework(Composition):
 
         # Shape3D层面保证所有place的结果为正值，所以Min和Max可以分别作为交集和并集使用
         super().__init__(
-            mix_mode=MixMode.Min
+            mix_mode=Composition.Intersects
         )
 
     def with_(self, bar_spec=None, n_rooms=None, outer_bars_only=False):
@@ -135,7 +135,7 @@ class BarFramework(Composition):
         return self.n_rooms(axis) + 1
 
     def axis_span(self, axis):
-        return self.framework_bounds[axis * 2], self.framework_bounds[axis * 2 + 1]
+        return self.framework_local_bounds[axis * 2], self.framework_local_bounds[axis * 2 + 1]
 
     def centers(self, axis):
         a0, a1 = self.axis_span(axis)
@@ -154,15 +154,13 @@ class BarFramework(Composition):
         for ax, bx in product(self.centers(a), self.centers(b)):
             origin = np.r_[ax - ra, bx - rb, c0][axes]
             end = np.r_[ax + ra, bx + rb, c1][axes]
-            yield Cuboid(corner=origin, corner2=end)
+            yield Cuboid(origin=origin, end=end)
 
     @cached_property
-    def framework_bounds(self):
+    def framework_local_bounds(self):
+        """获取框架部分在局部坐标系下的边界，框架部分会拷贝轮廓outline的transform信息
+        """
         return self.outline.local_bounds
-
-    @property
-    def local_bounds(self):
-        return self.framework_bounds & self.outline.local_bounds
 
     @cached_property
     def bars(self):
@@ -170,7 +168,7 @@ class BarFramework(Composition):
             *self._create_bars(0),
             *self._create_bars(1),
             *self._create_bars(2),
-            mix_mode=MixMode.Max
+            mix_mode=Composition.Union
         )
         ret.transforms = self.outline.transforms.clone()
 
@@ -179,9 +177,6 @@ class BarFramework(Composition):
     @cached_property
     def shapes(self):
         return [
-            self.outline,
-            self.bars
+            self.bars,
+            self.outline
         ]
-
-    def to_local_polydata(self):
-        return self.bars.to_polydata()

@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, overload, Literal
 from xml import sax
 
 import numpy as np
 
 from metalpy.scab.modelling.shapes import Prism
-from metalpy.scab.utils.proj import query_utm_transform_from_bounds
+from metalpy.scab.utils.proj import query_utm_transform_from_bounds, query_utm_crs_from_bound
 from metalpy.utils.file import PathLike
 from metalpy.utils.type import not_none_or_default
+
+if TYPE_CHECKING:
+    from metalpy.scab.modelling import Scene
 
 
 class OSMHandler(sax.ContentHandler):
@@ -20,6 +24,10 @@ class OSMHandler(sax.ContentHandler):
         self.current = None
         self.current_way = None
         self.bounds = np.zeros(4, dtype=np.float64)
+
+    @property
+    def utm_crs(self):
+        return query_utm_crs_from_bound(self.bounds)
 
     def startElement(self, tag, attributes):
         if tag == 'bounds':
@@ -51,7 +59,7 @@ class OSMHandler(sax.ContentHandler):
 def load_osm(path: PathLike,
              level=0,
              default_height=10,
-             height_map: dict[int, float] = None):
+             height_map: dict[int, float] = None) -> tuple[list[Prism], OSMHandler]:
     """从OSM格式xml文件生成Scene实例
 
     Parameters
@@ -97,13 +105,50 @@ def load_osm(path: PathLike,
 
 class OSMFormat:
     @staticmethod
+    @overload
     def from_osm(
         path: PathLike,
+        *,
+        level=0,
+        default_height=10,
+        height_map: dict[int, float] = None,
+        extras: Literal[True]
+    ) -> tuple[Scene, OSMHandler]:
+        ...
+
+    @staticmethod
+    @overload
+    def from_osm(
+        path: PathLike,
+        *,
+        level=0,
+        default_height=10,
+        height_map: dict[int, float] = None,
+        extras: Literal[False] = False
+    ) -> Scene:
+        ...
+
+    @staticmethod
+    @overload
+    def from_osm(
+        path: PathLike,
+        *,
+        level=0,
+        default_height=10,
+        height_map: dict[int, float] = None,
+        extras: bool
+    ) -> tuple[Scene, OSMHandler] | Scene:
+        ...
+
+    @staticmethod
+    def from_osm(
+        path: PathLike,
+        *,
         level=0,
         default_height=10,
         height_map: dict[int, float] = None,
         extras=False
-    ):
+    ) -> tuple[Scene, OSMHandler] | Scene:
         buildings, extra = load_osm(
             path=path,
             level=level,

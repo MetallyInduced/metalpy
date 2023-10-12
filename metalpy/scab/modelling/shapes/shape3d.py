@@ -2,14 +2,18 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from functools import reduce
-from typing import Iterable
+from typing import Iterable, TYPE_CHECKING
 
 import numpy as np
+import tqdm
 
 from metalpy.utils.dhash import dhash
 from metalpy.utils.bounds import Bounds, union
 from ..transform import CompositeTransform, Transform, Translation, Rotation
 from ..utils.mesh import is_inside_bounds
+
+if TYPE_CHECKING:
+    from metalpy.scab.modelling import Scene
 
 
 class Shape3D(ABC):
@@ -22,7 +26,7 @@ class Shape3D(ABC):
         """
         return True
 
-    def place(self, mesh_cell_centers, progress):
+    def place(self, mesh_cell_centers, progress=False):
         """计算模型体所占用的网格
 
         Parameters
@@ -37,7 +41,13 @@ class Shape3D(ABC):
         ret
             布尔数组或浮点数组，浮点数组原则上来说取值范围应为[0, 1]，
             指示对应网格位置是否有效或有效的程度， 0 代表非活动网格
+
+        Notes
+        -----
+        内部同时负责对坐标点进行变换并进行裁剪，保证`do_place`内部只需要按局部坐标系计算
         """
+        progress = self._check_progress(progress)
+
         mesh_cell_centers = self.before_place(mesh_cell_centers, progress)
 
         indices = None
@@ -54,12 +64,37 @@ class Shape3D(ABC):
 
         return indices
 
+    def compute_implicit_distance(self, mesh_cell_centers, progress=False):
+        """计算模型体到空间中任一点的有向距离，且小于0代表在模型内
+
+        Parameters
+        ----------
+        mesh_cell_centers
+            3维网格中心点坐标
+        progress
+            进度条实例或None，当子类的n_task属性不为1时，需自行更新进度条
+
+        Returns
+        -------
+        ret
+            浮点数组，指示空间中任意一点到模型体表面的有向距离，且小于0代表在模型内
+
+        Notes
+        -----
+        内部同时负责对坐标点进行变换，保证`do_compute_implicit_distance`内部只需要按局部坐标系计算
+        """
+        progress = self._check_progress(progress)
+
+        mesh_cell_centers = self.before_place(mesh_cell_centers, progress)
+        return self.do_compute_implicit_distance(mesh_cell_centers, progress)
+
     def before_place(self, mesh_cell_centers, progress):
         return self.transforms.inverse_transform(mesh_cell_centers)
 
-    @abstractmethod
     def do_place(self, mesh_cell_centers, progress):
-        """计算模型体所占用的网格的实现函数，所有Shape3D的子类需要重写该函数
+        """计算模型体所占用的网格的实现函数，所有Shape3D的子类应当重写该函数
+
+        默认实现依赖to_local_polydata()，基于PyVista的select_enclosed_points，存在性能问题
 
         Parameters
         ----------
@@ -76,11 +111,55 @@ class Shape3D(ABC):
 
         Notes
         -----
-            注意：调用者会占用tqdm的position=0位置，如果继承的do_place方法内有自己定义的进度条，需要特别指定position为其他位置
+        在Scene.build_mesh_worker中假定了0代表非活动网格，不参与模型间重叠部分的计算，请避免将0作为一个有意义的值输出
 
-            在Scene.build_mesh_worker中假定了0代表非活动网格，不参与模型间重叠部分的计算，请避免将0作为一个有意义的值输出
+        外部`place`通过`before_place`对坐标点进行了逆变换，只需要按局部坐标系计算即可
         """
-        raise NotImplementedError()
+        import pyvista as pv
+
+        mesh = pv.PolyData(mesh_cell_centers).cast_to_unstructured_grid()
+        surface = self.to_local_polydata().extract_surface()
+
+        selection = mesh.select_enclosed_points(surface, tolerance=0.0, check_surface=True)
+
+        if progress and self.progress_manually:
+            progress.update(self.n_tasks)
+
+        return selection['SelectedPoints'].view(bool, np.ndarray)
+
+    def do_compute_implicit_distance(self, mesh_cell_centers, progress):
+        """计算模型体到空间中任一点的有向距离的具体实现
+
+        默认实现依赖to_local_polydata()，基于PyVista的compute_implicit_distance，
+        需要进一步优化可以重载此函数
+
+        Parameters
+        ----------
+        mesh_cell_centers
+            3维网格中心点坐标
+        progress
+            进度条实例或None，当子类的n_task属性不为1时，需自行更新进度条
+
+        Returns
+        -------
+        ret
+            浮点数组，指示空间中任意一点到模型体表面的有向距离，且小于0代表在模型内
+
+        Notes
+        -----
+        外部`compute_implicit_distance`通过`before_place`对坐标点进行了逆变换，只需要按局部坐标系计算即可
+        """
+        import pyvista as pv
+
+        poly = pv.PolyData(mesh_cell_centers)
+        surface = self.to_local_polydata().extract_surface()
+
+        poly = poly.compute_implicit_distance(surface, inplace=True)
+
+        if progress and self.progress_manually:
+            progress.update(self.n_tasks)
+
+        return poly['implicit_distance'].view(np.ndarray)
 
     def __hash__(self):
         return dhash(self).digest()
@@ -113,18 +192,15 @@ class Shape3D(ABC):
             因此继承类应当实现 to_local_polydata
         """
         import pyvista as pv
+        from metalpy.utils.model import pv_ufunc_apply
 
-        ret: pv.PolyData = self.to_local_polydata()
+        ret: pv.PolyData | pv.MultiBlock = self.to_local_polydata()
 
         if ret is not None:
-            if isinstance(ret, pv.MultiBlock):
-                models = ret
-            else:
-                models = [ret]
-
-            for model in models:
+            def transform(model):
                 pts = self.transforms.transform(model.points)
                 model.points = pts
+            pv_ufunc_apply(ret, transform, inplace=True)
 
         return ret
 
@@ -142,12 +218,60 @@ class Shape3D(ABC):
         """
         raise NotImplementedError()
 
-    def to_scene(self, model=None):
+    def to_scene(self, model=True) -> 'Scene':
+        """直接基于当前Shape3D实例构建场景
+
+        Parameters
+        ----------
+        model
+            模型值，默认为True，代表有效
+
+        Returns
+        -------
+        scene
+            仅包含当前Shape3D实例的场景Scene
+
+        See Also
+        --------
+        :class:`metalpy.scab.modelling.Scene` : 用于建模的场景对象
+        """
         from metalpy.scab.modelling import Scene
         return Scene.of(self, models=(model,), skip_checking=True)
 
-    def build(self, *args, **kwargs):
-        return self.to_scene().build(*args, **kwargs)
+    def build(self, model=True, **kwargs):
+        """直接基于当前Shape3D实例构建场景的网格和模型
+
+        Parameters
+        ----------
+        model
+            模型值，默认为True，代表有效
+        kwargs
+            其它适用于Scene.build的参数
+
+        Returns
+        -------
+        model_mesh
+            模型网格
+
+        See Also
+        --------
+            Scene.build : 构建场景的网格和模型
+        """
+        return self.to_scene(model=model).build(**kwargs)
+
+    def plot(self, *args, **kwargs):
+        """直接生成PyVista对象并调用plot在窗口中绘制
+
+        Parameters
+        ----------
+        kwargs
+            其它适用于pv.PolyData.plot的参数
+
+        See Also
+        --------
+            Shape3D.to_polydata : 生成PyVista对象
+        """
+        self.to_polydata().plot(*args, **kwargs)
 
     @property
     def center(self) -> np.ndarray:
@@ -220,25 +344,30 @@ class Shape3D(ABC):
     def local_bounds(self) -> Bounds:
         """获取Shape在局部坐标系下的长方体包围盒
 
-        子类需要至少实现local_oriented_bounds和local_bounds中的一个
+        默认实现基于to_local_polydata，存在性能问题，
+        子类应当实现local_oriented_bounds和local_bounds中的一个
 
         Returns
         -------
         ret : array(6)
             Shape在局部坐标系下的长方体包围盒[x0, x1, y0, y1, z0, z1]
         """
-        bounds = self.local_oriented_bounds
-        ret = np.zeros(6)
-        ret[::2] = np.min(bounds, axis=1)
-        ret[1::2] = np.max(bounds, axis=1)
+        if type(self).local_oriented_bounds is Shape3D.local_oriented_bounds:
+            return Bounds(self.to_local_polydata().bounds)
+        else:
+            bounds = self.local_oriented_bounds
+            ret = np.zeros(6)
+            ret[::2] = np.min(bounds, axis=1)
+            ret[1::2] = np.max(bounds, axis=1)
 
-        return Bounds(ret)
+            return Bounds(ret)
 
     @property
     def local_oriented_bounds(self) -> np.ndarray:
         """获取Shape在局部坐标系下的八点包围盒
 
-        子类需要至少实现local_oriented_bounds和local_bounds中的一个
+        默认实现基于to_local_polydata，存在性能问题，
+        子类应当实现local_oriented_bounds和local_bounds中的一个
 
         Returns
         -------
@@ -390,6 +519,12 @@ class Shape3D(ABC):
         """指示子类是否自行更新进度条
         """
         return self.n_tasks != 1
+
+    def _check_progress(self, progress):
+        if progress is True and self.progress_manually:
+            return tqdm.tqdm(total=self.n_tasks)
+        else:
+            return progress
 
 
 def bounding_box_of(shapes: Iterable[Shape3D]):

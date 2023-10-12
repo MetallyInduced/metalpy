@@ -9,6 +9,8 @@ from . import Shape3D
 
 class Cuboid(Shape3D):
     def __init__(self,
+                 origin: Iterable = None,
+                 end: Iterable = None,
                  corner: Iterable = None,
                  corner2: Iterable = None,
                  size: Union[Iterable, float] = None,
@@ -19,10 +21,10 @@ class Cuboid(Shape3D):
 
         Parameters
         ----------
-        corner
-            立方体的(-x, -y, -z)方向角点坐标
-        corner2
-            立方体的(+x, +y, +z)方向角点坐标
+        origin, end
+            立方体的角点坐标
+        corner, corner2
+            立方体的角点坐标，用于兼容，建议使用origin和end
         size
             立方体的长宽高
         center
@@ -34,16 +36,24 @@ class Cuboid(Shape3D):
         """
         super().__init__()
 
+        if origin is None:
+            origin = corner
+
+        if end is None:
+            end = corner2
+
         if bounds is None and np.r_[
-            corner is not None,
-            corner2 is not None,
+            origin is not None,
+            end is not None,
             center is not None,
             size is not None,
         ].sum() != 2:
-            raise ValueError("Bounds or exactly two of center, lengths, corner, corner2 must be specified.")
+            raise ValueError("Bounds or exactly two of"
+                             " `center`, `lengths`, `origin`, `end`"
+                             " must be specified.")
 
-        if corner is not None:
-            corner = np.array(corner)
+        if origin is not None:
+            origin = np.array(origin)
 
         if size is not None:
             size = np.array(size)
@@ -51,74 +61,98 @@ class Cuboid(Shape3D):
                 size = np.ones(3) * size
 
         if bounds is not None:
-            corner = np.array(bounds[::2])
-            size = np.array(bounds[1::2]) - corner
-        elif corner is not None:  # 和corner2或center，计算size
-            if corner2 is not None:
-                size = np.asarray(corner2) - np.asarray(corner)
+            origin = np.array(bounds[::2])
+            size = np.array(bounds[1::2]) - origin
+        elif origin is not None:  # 和end或center，计算size
+            if end is not None:
+                size = np.asarray(end) - np.asarray(origin)
             elif center is not None:
-                size = 2 * (np.asarray(center) - np.asarray(corner))
-        elif corner2 is not None:  # 和center或size，计算corner
+                size = 2 * (np.asarray(center) - np.asarray(origin))
+        elif end is not None:  # 和center或size，计算origin
             if center is not None:
-                size = 2 * (np.asarray(corner2) - np.asarray(center))
-                corner = np.asarray(corner2) - size
+                size = 2 * (np.asarray(end) - np.asarray(center))
+                origin = np.asarray(end) - size
             elif size is not None:
-                corner = np.asarray(corner2) - np.asarray(size)
-        elif size is not None:  # 和center，计算corner
+                origin = np.asarray(end) - np.asarray(size)
+        elif size is not None:  # 和center，计算origin
             if center is not None:
-                corner = np.asarray(center) - size / 2
+                origin = np.asarray(center) - size / 2
 
         if np.any(size < 0):
             if no_corner_adjust:
                 raise ValueError("Negative length detected.")
             # 纠正负数边长
-            corner[size < 0] += size[size < 0]
+            origin[size < 0] += size[size < 0]
             size = np.abs(size)
 
-        self.corner = corner
+        self.origin = origin
         self.lengths = size
+
+    def to_prism(self):
+        from .prism import Prism
+        return Prism(pts=self.pts, z0=self.z0, z1=self.z1)
 
     def do_place(self, mesh_cell_centers, progress):
         return np.full(len(mesh_cell_centers), True)
 
     @property
-    def x0(self): return self.corner[0]
+    def x0(self): return self.origin[0]
 
     @property
-    def x1(self): return self.corner[0] + self.lengths[0]
+    def x1(self): return self.origin[0] + self.lengths[0]
 
     @property
-    def y0(self): return self.corner[1]
+    def y0(self): return self.origin[1]
 
     @property
-    def y1(self): return self.corner[1] + self.lengths[1]
+    def y1(self): return self.origin[1] + self.lengths[1]
 
     @property
-    def z0(self): return self.corner[2]
+    def z0(self): return self.origin[2]
 
     @property
-    def z1(self): return self.corner[2] + self.lengths[2]
+    def z1(self): return self.origin[2] + self.lengths[2]
+
+    @property
+    def corner(self): return self.origin
+
+    @property
+    def end(self): return self.origin + self.lengths
+
+    @property
+    def pts(self):
+        """兼容Prism接口"""
+        return np.asarray([
+            [self.x0, self.y0],
+            [self.x0, self.y1],
+            [self.x1, self.y1],
+            [self.x1, self.y0],
+        ])
 
     @property
     def direction(self):
         """
         获取横梁最长轴方向
-        :return: 0, 1, 2代表x, y, z
+
+        Returns
+        -------
+        axis
+            0, 1, 2代表x, y, z
         """
         return np.argmax(self.lengths)
 
     def __dhash__(self):
-        return dhash(super().__dhash__(), *self.corner, *self.lengths)
+        return dhash(super().__dhash__(), *self.origin, *self.lengths)
 
     def do_clone(self, deep=True):
         return Cuboid(
-            corner=self.corner.copy(),
+            origin=self.origin.copy(),
             size=self.lengths.copy()
         )
 
     @property
     def local_bounds(self):
-        return Bounds(np.c_[self.corner, self.corner + self.lengths].ravel())
+        return Bounds(np.c_[self.origin, self.origin + self.lengths].ravel())
 
     def to_local_polydata(self):
         import pyvista as pv

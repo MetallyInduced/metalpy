@@ -396,6 +396,20 @@ class Scene(OSMFormat, PTopoFormat):
 
         return ret
 
+    def plot(self, *args, **kwargs):
+        """直接生成PyVista对象并调用plot在窗口中绘制
+
+        Parameters
+        ----------
+        kwargs
+            其它适用于pv.MultiBlock.plot的参数
+
+        See Also
+        --------
+            Scene.to_multiblock : 生成PyVista对象
+        """
+        self.to_multiblock().plot(*args, **kwargs)
+
     @staticmethod
     def mesh_to_polydata(mesh, models: Union[np.ndarray, dict[str, np.ndarray]]):
         """将给定网格转换为对应的PyVista网格实例，并绑定模型值

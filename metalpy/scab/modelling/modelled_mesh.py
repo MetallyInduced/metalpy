@@ -337,7 +337,24 @@ class ModelledMesh:
 
     def __contains__(self, item):
         return item in self._models
-    
+
+    def plot(self, *, scalars=True, prune=True, **kwargs):
+        fill = None
+        if prune:
+            fill = np.nan
+
+        if scalars is True:
+            active_scalars = self.default_key
+            if active_scalars is not None:
+                scalars = active_scalars
+
+        poly = self.to_polydata(scalars=scalars, fill_inactive=fill)
+
+        if prune:
+            poly = poly.threshold()
+
+        poly.plot(**kwargs)
+
     def to_polydata(self,
                     scalars: str | Iterable[str] | ArrayLike | bool = True,
                     extra_models: dict[str, ArrayLike] | None = None,

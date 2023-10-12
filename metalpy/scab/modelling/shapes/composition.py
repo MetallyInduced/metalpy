@@ -1,13 +1,17 @@
-from functools import cached_property
+from functools import cached_property, reduce
 
+from metalpy.utils.bounds import union, intersects
 from metalpy.utils.dhash import dhash
 from . import Shape3D
-from .shape3d import bounding_box_of
 from ..mix_modes import Mixer, MixMode, dhashable_mixer
 
 
 class Composition(Shape3D):
-    def __init__(self, *shapes: Shape3D, mix_mode: Mixer = MixMode.Max):
+    # Composition中只考虑正数意义，因此Max和Min分别为并和交
+    Union = MixMode.Max
+    Intersects = MixMode.Min
+
+    def __init__(self, *shapes: Shape3D, mix_mode: Mixer = Union):
         super().__init__()
         if len(shapes) > 0:
             self.shapes = list(shapes)
@@ -30,13 +34,33 @@ class Composition(Shape3D):
         return True
 
     def do_place(self, mesh_cell_centers, progress):
+        mixer = self.mixer
         ret = None
         for shape in self.shapes:
             indices = shape.place(mesh_cell_centers, progress)
             if ret is None:
                 ret = indices
             else:
-                ret = self.mixer(ret, indices)
+                ret = mixer(ret, indices)
+
+            if progress is not None and not shape.progress_manually:
+                progress.update(shape.n_tasks)
+
+        return ret
+
+    def do_compute_implicit_distance(self, mesh_cell_centers, progress):
+        if self.mix_mode == Composition.Intersects:
+            mixer = MixMode.max
+        else:
+            mixer = MixMode.min
+
+        ret = None
+        for shape in self.shapes:
+            distances = shape.compute_implicit_distance(mesh_cell_centers, progress)
+            if ret is None:
+                ret = distances
+            else:
+                ret = mixer(ret, distances)
 
             if progress is not None and not shape.progress_manually:
                 progress.update(shape.n_tasks)
@@ -63,12 +87,16 @@ class Composition(Shape3D):
 
     @property
     def local_bounds(self):
-        return bounding_box_of(self)
+        if self.mix_mode == Composition.Intersects:
+            reducer = intersects
+        else:
+            reducer = union
+        return reduce(reducer, (shape.bounds for shape in self))
 
     def to_local_polydata(self):
+        # TODO: 基于模型布尔操作实现常见混合模式下的对象合并处理
         import pyvista as pv
-        ret = pv.MultiBlock()
-        for shape in self:
-            ret.append(shape.to_polydata())
+        shapes = [shape.to_polydata() for shape in self]
+        shape = pv.MultiBlock(shapes)
 
-        return ret
+        return shape

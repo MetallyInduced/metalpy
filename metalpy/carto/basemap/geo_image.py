@@ -153,7 +153,24 @@ class GeoImage:
     def to_polydata(self,
                     dest_crs: CRSLike | None = None,
                     query_dest_crs: CRSQuery | None = None,
-                    return_crs=False):
+                    return_crs=False
+                    ):
+        """将GeoImage实例转换为PyVista对象
+
+        Parameters
+        ----------
+        dest_crs
+            需要转换到的目标坐标系
+        query_dest_crs
+            需要转换到的目标坐标系（但通过查询获取），用于搜索UTM等分区坐标系
+        return_crs
+            指示是否返回转换后得到的坐标系
+
+        Returns
+        -------
+        image_obj
+            转换后得到的PyVista对象，为UnstructuredGrid
+        """
         import pyvista as pv
 
         bounds = self.edge_geo_bounds
