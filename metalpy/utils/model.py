@@ -208,7 +208,7 @@ class ModelTranslation:
         return pv_ufunc_apply(mesh, self._translate, inplace=self.inplace)
 
     def _translate(self, x):
-        return x.translate(self.offset, inplace=self.inplace)
+        return x.translate(self.offset, inplace=True)
 
 
 def pv_ufunc_apply(obj: DataSetLike, fn, *, inplace=True):

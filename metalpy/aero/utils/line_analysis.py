@@ -278,9 +278,20 @@ def analyze_lines_details(x, y, segments):
 
 def remove_aux_flights(x, y, segments, stable_threshold: float = 6):
     directions = analyze_directions(x, y, segments, robust=True)
-    directions = np.rad2deg(directions)
+    analyze_directions(x, y, [segments[-1]], robust=True)
     weights = [s[1] - s[0] for s in segments]
 
+    aux_removed_idx = remove_aux_flights_by_directions(directions, weights, stable_threshold=stable_threshold)
+
+    aux_removed = []
+    for idx in aux_removed_idx:
+        aux_removed.append(segments[idx])
+
+    return aux_removed
+
+
+def remove_aux_flights_by_directions(directions, weights, stable_threshold: float = 6):
+    directions = np.rad2deg(directions)
     d_dir = directions - directions[0]
     d_dir = regulate_delta_directions(d_dir, inplace=True)
 
@@ -293,6 +304,6 @@ def remove_aux_flights(x, y, segments, stable_threshold: float = 6):
     aux_removed = []
 
     for idx in np.where(condition)[0]:
-        aux_removed.append(segments[idx])
+        aux_removed.append(idx)
 
     return aux_removed

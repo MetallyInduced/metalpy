@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import copy
 import warnings
 from typing import TypeVar, TYPE_CHECKING, Sequence
 
 import numpy as np
 from numpy.typing import ArrayLike
 
+from metalpy.aero.utils.line_analysis import split_lines
 from metalpy.carto.coords import Coordinates
 from metalpy.utils import array_ops
+from metalpy.utils.matplotlib import check_axis
+from metalpy.utils.pandas import drop_by_indices
 from metalpy.utils.type import is_numeric_array, notify_package
-from metalpy.aero.utils.line_analysis import split_lines, remove_aux_flights, analyze_lines
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -89,10 +92,15 @@ class AerialSurvey:
 
     @property
     def length(self):
-        diffs = np.diff(self.position, axis=0)
-        dist = np.linalg.norm(diffs, axis=1)
+        dist = self.point_distances
         dist = dist[dist < 50]
         return dist.sum()
+
+    @property
+    def point_distances(self):
+        diffs = np.diff(self.position, axis=0)
+        dist = np.linalg.norm(diffs, axis=1)
+        return dist
 
     @property
     def area(self):
@@ -146,7 +154,7 @@ class AerialSurvey:
             self.slice_data(slice0, *slices),
         )
 
-    def slice_lines(self, segments):
+    def slice_lines(self, segments) -> 'AerialSurveyLines':
         from . import AerialSurveyLines
 
         return AerialSurveyLines([self.slice_line(seg) for seg in segments])
@@ -186,9 +194,19 @@ class AerialSurvey:
         -------
         lines
             分析提取的各条测线
-        """
-        from . import AerialSurveyLines
 
+        Notes
+        -----
+        航段整体上可以分为三类：工作区间，辅助区间和非平稳区间
+            1. 工作区间为正常平稳飞行，测量数据使用的飞行区间
+
+            2. 辅助区间为平稳飞行的区间，但并不进行数据测量，例如飞机起飞降落、转向等动作
+
+            3. 非平稳区间，飞行状态切换之间的状态，例如高速转向、悬停等状态下，会被判定为非平稳区间
+
+        `extract_lines` 实现了排除 `非平稳区间` ，并提取切分 `工作区间` 和 `辅助区间` ，
+        然后通过 `remove_auxiliary_lines` 判断并移除 `辅助区间` 。
+        """
         xs, ys = np.asarray(self.position).T
         segments = split_lines(
             xs, ys,
@@ -201,65 +219,201 @@ class AerialSurvey:
 
         assert len(segments) > 0, 'Failed to pre-analyze flight lines by heading direction.'
 
+        lines = self.slice_lines(segments)
         if auto_clear:
-            aux_removed = remove_aux_flights(
-                xs, ys,
-                segments,
-                stable_threshold=stable_direction_tol * 2
-            )
-        else:
-            aux_removed = segments
-
+            lines.remove_auxiliary(inplace=True)
         if merge:
-            slopes, intercepts = analyze_lines(
-                xs - np.percentile(xs, 50),
-                ys - np.percentile(ys, 50),
-                aux_removed
-            )
-            slope = np.mean(slopes)
-            cos_theta = 1 / np.sqrt(1 + slope ** 2)
-
-            di = abs(np.diff(intercepts)) * cos_theta
-            criteria = np.percentile(di, 40) / 2
-
-            merged_lines = [[0]]
-            for i, merged in enumerate(di < criteria):
-                if merged:
-                    merged_lines[-1].append(i + 1)
-                else:
-                    merged_lines.append([i + 1])
-        else:
-            merged_lines = [[i] for i in range(len(aux_removed))]
-
-        lines = self.slice_lines(aux_removed)
-        lines = AerialSurveyLines([lines[line_ids].merge() for line_ids in merged_lines])
+            lines.merge_neighbors(inplace=True)
 
         return lines
 
-    def plot(self, ax=None, show=True, **kwargs):
-        from matplotlib import pyplot as plt
+    def trim_auxiliary(
+            self,
+            keep_takeoff_and_landing=False,
+            interval_threshold=None,
+            ref_lines: 'AerialSurveyLines' | None = None,
+            aux_lines: 'AerialSurveyLines' | None = None,
+            inplace=False
+    ) -> 'AerialSurvey':
+        """基于`extract_lines`的测线划分结果，从原始测线数据中清理掉辅助轨迹，从而合并为一个单航次的数据
 
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(5, 5))
+        例如对于较大测区，需要分多航次进行测量时，清除掉中途的多次起飞降落的轨迹，结果可以视为一个航次内完成采集的数据
+
+        区别于`extract_lines`，转向过程等常规航次应有的轨迹会保留
+
+        Parameters
+        ----------
+        keep_takeoff_and_landing
+            指示是否保留起飞和降落轨迹，为False则只保留工作状态下的航线轨迹
+        interval_threshold
+            跳变点判定阈值，若不指定，则取为航线间距
+        ref_lines
+            用作参考的工作航线划分，若不指定，则使用默认参数进行航线划分
+        aux_lines
+            用作参考的辅助航线划分，若不指定，则使用默认参数进行航线划分
+        inplace
+            指示是否就地操作，默认为False，即返回修改后的实例，若否，则直接修改当前实例
+
+        Returns
+        -------
+        trimmed
+            移除掉辅助轨迹后的Survey实例
+
+        Notes
+        -----
+        如果外部给定`ref_lines`参数，则注意需要指定`auto_clear`和`merge`为False来保留识别到的辅助航段信息
+
+        >>> survey = AerialSurvey.from_array(...)
+        >>> lines = survey.extract_lines(
+        >>>     auto_clear=False,
+        >>>     merge=False
+        >>>     stable_direction_tol=2.5
+        >>> )
+        >>> survey.trim_auxiliary(ref_lines=lines)
+        """
+        import pandas as pd
+
+        assert hasattr(self.data, 'index'), \
+            ('`remove_auxiliary` requires indexed arrays,'
+             ' try using pd.DataFrame as array type.'
+             '\n'
+             '    AerialSurvey.from_array(pd.DataFrame(your_data))'
+             '\n')
+
+        if ref_lines is None:
+            ref_lines = self.extract_lines(
+                auto_clear=False,
+                merge=False,
+            )
+            aux_lines = ref_lines.pop_auxiliary()
+            ref_lines.merge_neighbors(inplace=True)
         else:
-            fig = None
+            ref_lines = copy.deepcopy(ref_lines)
 
-        plt.plot(*np.asarray(self.position).T, **kwargs)
+        specs = ref_lines.get_line_specs()
+        line_interval = np.max([s.line_interval for s in specs if not np.isnan(s.line_interval)])
+        aux_indices = []
 
-        if show and fig is not None:
-            fig.show()
+        if aux_lines is not None:
+            # 排除已经判定为辅助航线的部分
+            # 注意，拐弯部分也有可能会被判定为辅助航线，因此判断和`line_interval`航线间隔相差过大的为辅助航线而非拐弯
+            for line in aux_lines:
+                if max(line.position.index) <= min(ref_lines[0].position.index):
+                    continue  # 第一次起飞轨迹会在后方单独讨论
+                if min(line.position.index) >= max(ref_lines[-1].position.index):
+                    continue  # 最后一次降落轨迹会在后方单独讨论
+                if not (0.5 <= line.length / line_interval <= 2):
+                    aux_indices.append(line.position.index)
 
-    def to_polydata(self, *, z=None, data_col: str | int = None, points_only=False):
+        if not keep_takeoff_and_landing:
+            # 第一条测线之前和最后一条测线之后，分别对于第一次起飞和最后一次降落的轨迹
+            aux_indices.extend([
+                pd.RangeIndex(0, min(ref_lines[0].position.index)),
+                pd.RangeIndex(max(ref_lines[-1].position.index), max(self.data.index) + 1),
+            ])
+
+        for line in ref_lines:
+            # 所有已经判定为工作航线的区间，如果并非连续的数据点，则中间间断的部分也可能是辅助航线
+            ref = line.position.index
+            if not isinstance(ref, pd.RangeIndex):
+                interval_pos = np.where(np.diff(ref) > 1)[0]
+                for ip in interval_pos:
+                    aux_indices.append(pd.RangeIndex(ref[ip] + 1, ref[ip + 1]))
+
+        dropped_pos = drop_by_indices(self.position, aux_indices)
+        dropped_flight = AerialSurvey.from_array(dropped_pos)
+        pos = dropped_flight.position
+
+        # 检查移除相关航线后导致留下的间断航段
+        dist = np.linalg.norm(np.diff(pos, axis=0), axis=1)
+        normal = np.percentile(dist, 50)
+        if interval_threshold is None:
+            # 不给定间断阈值的话，采用航线间距作为判定阈值
+            interval_threshold = line_interval
+
+        threshold_pos = np.where(dist - normal > interval_threshold)[0]
+        threshold_pos = np.r_[-1, threshold_pos, len(pos) - 1]
+        windows = np.lib.stride_tricks.sliding_window_view(threshold_pos, 2) + 1
+        segments = AerialSurvey(pos).slice_lines(windows)
+
+        # 依据间断距离分割的各个大航段，如果存在工作航线属于该航段，则保留
+        # 若不存在，则可能为之前未清理干净的辅助轨迹，需要移除
+        idling_indices = []
+        i = 0
+        for segment in segments:
+            contains_line = False
+
+            seg_index = segment.position.index
+            smin, smax = min(seg_index), max(seg_index)
+
+            while i < len(ref_lines):
+                ref = ref_lines[i]
+                ref_ind = ref.position.index
+                if min(ref_ind) < smin:
+                    # 工作航线在航段之前
+                    i += 1
+                elif max(ref_ind) < smax:
+                    # 工作航线包含在航段之中
+                    contains_line = True
+                    i += 1
+                    break
+                else:
+                    # 工作航线在航段之后
+                    break
+
+            if not contains_line:
+                idling_indices.append(seg_index)
+
+        dropped_pos = drop_by_indices(dropped_pos, idling_indices)
+        if self.data is not None:
+            dropped_data = drop_by_indices(self.data, aux_indices + idling_indices)
+        else:
+            dropped_data = None
+
+        if inplace:
+            self.position = dropped_pos
+            self.data = dropped_data
+            ret = self
+        else:
+            ret = AerialSurvey(dropped_pos, dropped_data)
+
+        return ret
+
+    def plot(self, ax=None, show=True, **kwargs):
+        with check_axis(ax, show=show, figsize=(5, 5)) as ax:
+            ax.plot(*np.asarray(self.position).T, **kwargs)
+
+    def scatter(self, ax=None, show=True, color=True, **kwargs):
+        with check_axis(ax, show=show, figsize=(5, 5)) as ax:
+            if 's' not in kwargs:
+                kwargs['s'] = 0.05  # 默认的点尺寸太大，会互相重叠
+
+            if color and 'c' not in kwargs:
+                kwargs['c'] = range(len(self.position))
+
+            ax.scatter(*np.asarray(self.position).T, **kwargs)
+
+    def to_polydata(
+            self,
+            *,
+            z=None,
+            data_col: str | int = None,
+            points_only=False,
+            color=True
+    ):
         """导出航空数据为PyVista模型
 
         Parameters
         ----------
         z
-            指定z值
+            指定z值，或者通过字符串指定z值所在列。
+            如果给定为单个数值类型，则同时用作所有数据点的高度值。
         data_col
             指定作为z值的数据列，支持索引或列名
         points_only
             指示返回值是否只包含点坐标模型，不包含连接线
+        color
+            指示返回值是否包含顺序信息，默认为True，则PointData内绑定数据下标，渲染时自动着色
 
         Returns
         -------
@@ -267,6 +421,10 @@ class AerialSurvey:
             生成的PyVista模型
         """
         import pyvista as pv
+
+        if isinstance(z, str):
+            data_col = z
+            z = None
 
         if data_col is not None:
             z = array_ops.get_column(self.data, data_col)
@@ -280,12 +438,24 @@ class AerialSurvey:
         n_pts = pos.shape[0]
 
         ret = pv.PolyData(pos)
-        ret.verts = np.c_[np.ones(n_pts), range(n_pts)].ravel()
 
         if not points_only:
             ret.lines = np.r_[n_pts, range(n_pts)]
 
+        if color:
+            ret.point_data['index'] = range(n_pts)
+
         return ret
+
+    def to_planar(self):
+        from metalpy.aero.routes import FlightPlanar
+        planar = FlightPlanar(np.percentile(self.point_distances, 50))
+        planar.add_path(self.position)
+
+        return planar
+
+    def __len__(self):
+        return len(self.position)
 
 
 POSITION_KEYWORDS = [

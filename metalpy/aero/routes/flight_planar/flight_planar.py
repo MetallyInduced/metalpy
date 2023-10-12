@@ -9,6 +9,7 @@ from scipy.spatial.transform import Rotation
 
 from metalpy.carto.coords import Coordinates
 from metalpy.utils.file import PathLike
+from metalpy.utils.matplotlib import check_axis
 
 if TYPE_CHECKING:
     from matplotlib.colors import Colormap
@@ -227,55 +228,50 @@ class FlightPlanar:
         center = min_xy + extent / 2
 
         # TODO: change fig_size according to extent
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(5, 5))
-        else:
-            fig = None
-            ax = ax
-
-        if not color:
-            ax.plot(*route.T, zorder=0)
-        else:
-            if color is True:
-                cmap = plt.get_cmap('tab10')
+        with check_axis(ax, show=False, figure=True, figsize=(5, 5)) as (fig, ax):
+            if not color:
+                ax.plot(*route.T, zorder=0)
             else:
-                cmap = color
-
-            if not isinstance(alpha, Sequence):
-                alpha = [alpha]
-
-            n_colors = len(cmap.colors)
-            n_alphas = len(alpha)
-            for i, path_i in enumerate(self.paths):
-                ax.plot(
-                    *path_i.T,
-                    zorder=0,
-                    color=cmap(i % n_colors),
-                    alpha=alpha[i % n_alphas]
-                )
-
-        if arrows:
-            n_pts = route.shape[0]
-            if arrows is True:
-                arrows = min(max(n_pts - 3, 1), 5)
-            plot_arrows(ax, route, n_arrows=arrows, width=half * 0.01, zorder=1)
-
-        ax.set_xlim(center[0] - half, center[0] + half)
-        ax.set_ylim(center[1] - half, center[1] + half)
-
-        if fig:
-            if screenshot:
-                if screenshot is True:
-                    import time
-                    screenshot = Path(f'./{time.time_ns()}.png').absolute()
+                if color is True:
+                    cmap = plt.get_cmap('tab10')
                 else:
-                    screenshot = Path(screenshot).absolute()
-                fig.savefig(screenshot, bbox_inches='tight')
+                    cmap = color
 
-            if not off_screen:
-                fig.show()
+                if not isinstance(alpha, Sequence):
+                    alpha = [alpha]
 
-            plt.close(fig)
+                n_colors = len(cmap.colors)
+                n_alphas = len(alpha)
+                for i, path_i in enumerate(self.paths):
+                    ax.plot(
+                        *path_i.T,
+                        zorder=0,
+                        color=cmap(i % n_colors),
+                        alpha=alpha[i % n_alphas]
+                    )
+
+            if arrows:
+                n_pts = route.shape[0]
+                if arrows is True:
+                    arrows = min(max(n_pts - 3, 1), 5)
+                plot_arrows(ax, route, n_arrows=arrows, width=half * 0.01, zorder=1)
+
+            ax.set_xlim(center[0] - half, center[0] + half)
+            ax.set_ylim(center[1] - half, center[1] + half)
+
+            if fig:
+                if screenshot:
+                    if screenshot is True:
+                        import time
+                        screenshot = Path(f'./{time.time_ns()}.png').absolute()
+                    else:
+                        screenshot = Path(screenshot).absolute()
+                    fig.savefig(screenshot, bbox_inches='tight')
+
+                if not off_screen:
+                    fig.show()
+
+                plt.close(fig)
 
     def plot2d_segments(self, path, **kwargs):
         for _ in self.plot2d_segments_customized(path=path, **kwargs):

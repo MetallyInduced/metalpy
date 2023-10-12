@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import copy
 from collections import namedtuple
-from typing import Sequence, Generator
+from typing import Sequence, Generator, overload, Any
 
 import numpy as np
 
-from metalpy.aero.utils.line_analysis import diff_directions
+from metalpy.aero.utils.line_analysis import diff_directions, remove_aux_flights_by_directions
 from metalpy.carto.coords import Coordinates
 from metalpy.utils.batch import Batch
+from metalpy.utils.matplotlib import check_axis
 from .aerial_survey import AerialSurvey
 from .aerial_survey_line import AerialSurveyLine
 
@@ -25,8 +27,82 @@ class AerialSurveyLines:
         """
         self.lines = np.asarray(lines)
 
-    def __getitem__(self, item):
-        return AerialSurveyLines(self.lines[item])
+    @property
+    def length(self):
+        return sum(line.length for line in self)
+
+    def pop_auxiliary(self, direction_threshold: float = 6):
+        factors = [line.get_line_spec(check_std=False)[:2] for line in self]
+        directions = [np.arctan2(-a, b) for a, b in factors]
+        weights = [len(line) for line in self]
+
+        kept_idx = remove_aux_flights_by_directions(directions, weights, stable_threshold=direction_threshold)
+        ptr = 0
+
+        kept = []
+        popped = []
+        for i in range(len(self)):
+            line_i = self.lines[i]
+            if i != kept_idx[ptr]:
+                popped.append(line_i)
+            else:
+                kept.append(line_i)
+                ptr += 1
+
+                if ptr >= len(kept_idx):
+                    # 剩下的全部被视为辅助航线，加入排除列表
+                    for j in range(i + 1, len(self)):
+                        popped.append(self.lines[j])
+                    break
+
+        self.lines = kept
+        return AerialSurveyLines(popped)
+
+    def remove_auxiliary(self, direction_threshold: float = 6, inplace=False):
+        if inplace:
+            ret = self
+        else:
+            ret = copy.copy(self)
+
+        ret.pop_auxiliary(direction_threshold=direction_threshold)
+        return ret
+
+    def merge_neighbors(self, inplace=False):
+        directions, intercepts, cos_thetas = self.get_detailed_line_specs()
+
+        di = abs(np.diff(intercepts)) * cos_thetas[:-1]
+        criteria = np.percentile(di, 40) / 2
+
+        merged_lines = [[self.lines[0]]]
+        for i, merged in enumerate(di < criteria):
+            line = self.lines[i + 1]
+            if merged:
+                merged_lines[-1].append(line)
+            else:
+                merged_lines.append([line])
+
+        merged_lines = [AerialSurveyLine.concat(lines) for lines in merged_lines]
+
+        if inplace:
+            self.lines = merged_lines
+            ret = self
+        else:
+            ret = AerialSurveyLines(merged_lines)
+
+        return ret
+
+    @overload
+    def __getitem__(self, item: int) -> AerialSurveyLine: ...
+
+    @overload
+    def __getitem__(self, item: Any) -> AerialSurveyLines: ...
+
+    def __getitem__(self, item) -> AerialSurveyLine | AerialSurveyLines:
+        ret = self.lines[item]
+        if np.ndim(ret) == 0:
+            return ret
+        else:
+            return AerialSurveyLines(ret)
 
     def __len__(self):
         return len(self.lines)
@@ -96,17 +172,11 @@ class AerialSurveyLines:
         return directions, intercepts, cos_thetas
 
     def plot(self, ax=None, show=True, fontsize=10, **kwargs):
-        from matplotlib import pyplot as plt
+        with check_axis(ax, show=show, figsize=(5, 5)) as ax:
+            for i, line in enumerate(self.lines):
+                pos = np.asarray(line.position)
+                ax.plot(*pos.T, **kwargs)
+                ax.text(*Coordinates(pos).bounds.center, str(i), fontsize=fontsize)
 
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(5, 5))
-        else:
-            fig = None
-
-        for i, line in enumerate(self.lines):
-            pos = np.asarray(line.position)
-            ax.plot(*pos.T, **kwargs)
-            ax.text(*Coordinates(pos).bounds.center, str(i), fontsize=fontsize)
-
-        if show and fig is not None:
-            fig.show()
+    def __copy__(self):
+        return AerialSurveyLines(self.lines)
