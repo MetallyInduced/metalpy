@@ -203,23 +203,27 @@ def forward_seperated(
         nC = xn.shape[0]
         nObs = receiver_locations.shape[0]
 
-        # Txx, Txy, Txz, Tyx, Tyy, Tyz, Tzx, Tzy, Tzz
-        Tmat = [
-            ti_field(ti.f64)
-            for _ in range(3 * 3)
+        # [[Txx, Txy, Txz], [Tyx, Tyy, Tyz], [Tzx, Tzy, Tzz]]
+        Tmat33 = [
+            [ti_field(ti.f64) for _ in range(3)]
+            for _ in range(3)
         ]
-        for m in Tmat:
-            builder.dense(ti.ij, (nObs, nC)).place(m)
+        Tmat9 = [t for ts in Tmat33 for t in ts]
+
+        # 保证 Tx[xyz]，Ty[xyz]，Tz[xyz] 分别在空间上连续，提高空间近邻性
+        for m in Tmat33:
+            builder.dense(ti.ij, (nObs, nC)).place(*m)
+
         builder.finalize()
 
         kernel_matrix_forward(receiver_locations, xn, yn, zn, base_cell_sizes, susc_model,
-                              *Tmat, np.empty(0), False)
+                              *Tmat9, np.empty(0), False)
 
         if is_cpu and psutil.virtual_memory().percent < 45:
             # TODO: 进一步考虑模型大小来选择求解方案，模型较大时也应该使用 `solve_Tx_b`
-            return solve_Ax_b(merge_Tmat_as_A(Tmat, direct_to_host=direct_to_host), magnetization)
+            return solve_Ax_b(merge_Tmat_as_A(Tmat33, direct_to_host=direct_to_host), magnetization)
         else:
-            return solve_Tx_b(Tmat, magnetization)
+            return solve_Tx_b(Tmat33, magnetization)
 
 
 def solve_Ax_b(A, m):
@@ -227,7 +231,7 @@ def solve_Ax_b(A, m):
     return x
 
 
-def solve_Tx_b(Ts, m):
+def solve_Tx_b(Tmat33, m):
     with ti_FieldsBuilder() as builder:
         x = builder.place_dense_like(m[:, None])
         b = builder.place_dense_like(m[:, None])
@@ -237,38 +241,31 @@ def solve_Tx_b(Ts, m):
         copy_from(b, m[:, None])
 
         @ti_func
-        def mul(Ax, x, i: ti.template(), j: ti.template(), augment: ti.template() = True):
-            multiply_with_stride(
-                Ax, Ts[i * 3 + j], x, i, 3, j, 3, augment
+        def mul3(Ax, x, i: ti.template()):
+            multiply_with_row_stride_3(
+                Ax, *Tmat33[i], x, i, 3
             )
 
         @ti_kernel
         def linear(x: ti.template(), Ax: ti.template()):
-            mul(Ax, x, 0, 0, False)
-            mul(Ax, x, 1, 0, False)
-            mul(Ax, x, 2, 0, False)
-            mul(Ax, x, 0, 1)
-            mul(Ax, x, 0, 2)
-            mul(Ax, x, 1, 1)
-            mul(Ax, x, 1, 2)
-            mul(Ax, x, 2, 1)
-            mul(Ax, x, 2, 2)
+            mul3(Ax, x, 0)
+            mul3(Ax, x, 1)
+            mul3(Ax, x, 2)
 
         ti.linalg.taichi_cg_solver(ti.linalg.LinearOperator(linear), b, x)
 
         return x.to_numpy()
 
 
-def merge_Tmat_as_A(Ts, direct_to_host=True):
-    nObs, nC = Ts[0].shape
+def merge_Tmat_as_A(Tmat33, direct_to_host=True):
+    nObs, nC = Tmat33[0][0].shape
     Amat = np.empty((3 * nObs, 3 * nC), dtype=np.float64)
     for i in range(3):
         for j in range(3):
             if direct_to_host:
-                tensor_to_ext_arr(Ts[i * 3 + j], Amat, i, 3, j, 3)
+                tensor_to_ext_arr(Tmat33[i][j], Amat, i, 3, j, 3)
             else:
-                a = Ts[i * 3 + j].to_numpy()
-                Amat[i::3, j::3] = a
+                Amat[i::3, j::3] = Tmat33[i][j].to_numpy()
 
     return Amat
 
@@ -558,21 +555,29 @@ def tensor_to_ext_arr(tensor: ti.template(), arr: ti.types.ndarray(),
 
 
 @ti_func
-def multiply_with_stride(
-        out: ti.template(), A: ti.template(), v: ti.template(),
-        row0: ti.template(), row_stride: ti.template(),
-        col0: ti.template(), col_stride: ti.template(),
-        augment: ti.template() = True
+def multiply_with_row_stride_3(
+        out: ti.template(),
+        A: ti.template(),
+        B: ti.template(),
+        C: ti.template(),
+        v: ti.template(),
+        row0: ti.template(), row_stride: ti.template()
 ):
     for r in range(A.shape[0]):
         row = r * row_stride + row0
 
-        summed = A[r, 0] * v[col0, 0]
-        if ti.static(augment):
-            summed += out[row, 0]
+        summed = (
+                A[r, 0] * v[0, 0]
+                + B[r, 0] * v[1, 0]
+                + C[r, 0] * v[2, 0]
+        )
 
         for c in range(1, A.shape[1]):
-            col = c * col_stride + col0
-            summed += A[r, c] * v[col, 0]
+            col = c * 3
+            summed += (
+                    A[r, c] * v[col + 0, 0]
+                    + B[r, c] * v[col + 1, 0]
+                    + C[r, c] * v[col + 2, 0]
+            )
 
         out[row, 0] = summed
