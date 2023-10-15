@@ -5,6 +5,7 @@ import taichi as ti
 import tqdm
 
 from metalpy.utils.taichi import (
+    ti_size_max,
     ti_kernel,
     ti_cfg,
     ti_ndarray,
@@ -15,7 +16,6 @@ from metalpy.utils.taichi import (
 )
 from metalpy.utils.taichi_kernels import ti_index
 from metalpy.utils.type import ensure_as_iterable, not_none_or_default
-
 from ...value_observer import ValueObserver
 
 
@@ -162,7 +162,7 @@ class TaichiSimulation3DIntegral:
 
         # TODO: 由于Taichi目前采用i32作为索引类型，数组元素总数不能超过int32的上限，否则行为未定义
         #  如果后续Taichi支持i64索引类型，则可以去掉这个限制
-        assert n_rows * n_cols < np.iinfo(np.int32).max, (
+        assert n_rows * n_cols < ti_size_max, (
             "Kernel matrix with more than INT32_MAX elements has exceeded limits of Taichi."
             "\nConsider set `store_sensitivities='forward_only'`"
             " or `builder.store_sensitivities(False)` if using `SimulationBuilder`."
@@ -202,7 +202,7 @@ class TaichiSimulation3DIntegral:
             # 注：该分块依据是ti.ndrange循环的下标，且只对forward_only有效，核矩阵的大小仍然会收到这个限制
             # TODO: 对于GPU版，可能需要基于GPU显存大小进行批次划分
             n_rx_rows = receiver.n_rows
-            n_batches = int(np.ceil((n_rx_rows * self.n_cells) / np.iinfo(np.int32).max))
+            n_batches = int(np.ceil((n_rx_rows * self.n_cells) / ti_size_max))
 
             all_components = np.asarray(['tmi', 'bx', 'by', 'bz', 'bxx', 'bxy', 'bxz', 'byy', 'byz', 'bzz'])
             components_indices = {f'i{c}': -1 for c in all_components}

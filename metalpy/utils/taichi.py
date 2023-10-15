@@ -7,9 +7,10 @@ import os
 import warnings
 from typing import Sized
 
+import numpy as np
 import taichi as ti
 from taichi.lang.kernel_impl import _kernel_impl
-from taichi.lang.util import to_taichi_type
+from taichi.lang.util import to_taichi_type, to_numpy_type
 
 from .file import make_cache_directory, make_cache_file
 
@@ -22,6 +23,10 @@ ti_default_args = {
 }
 ti_args = copy.deepcopy(ti_default_args)
 ti_inited = False
+
+ti_size_t = ti.i32
+ti_size_dtype = to_numpy_type(ti_size_t)
+ti_size_max = np.iinfo(ti_size_dtype).max
 
 
 def ti_prepare(**kwargs):
@@ -136,6 +141,7 @@ def ti_field(dtype,
              needs_grad=False,
              needs_dual=False):
     ti_init_once()
+    dtype = to_taichi_type(dtype)
     return ti.field(dtype, shape, order, name, offset, needs_grad, needs_dual)
 
 
