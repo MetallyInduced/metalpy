@@ -36,8 +36,13 @@ def ti_prepare(**kwargs):
 def ti_init_once():
     global ti_inited
     if not ti_inited:
-        ti.init(**ti_args)
-        ti_inited = True
+        ti_reinit()
+
+
+def ti_reinit():
+    global ti_inited
+    ti.init(**ti_args)
+    ti_inited = True
 
 
 def ti_reset():
@@ -58,6 +63,7 @@ def ti_reset():
 
 class WrappedTaichiContext:
     def __init__(self, **kwargs):
+        self.backup = ti_args.copy()
         self.kwargs = kwargs
 
     def __enter__(self):
@@ -65,7 +71,7 @@ class WrappedTaichiContext:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        ti_reset()
+        ti_prepare(**self.backup)
 
 
 def ti_config(**kwargs):

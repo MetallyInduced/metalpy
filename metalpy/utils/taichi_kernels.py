@@ -8,6 +8,11 @@ from .taichi import ti_func
 
 
 @ti_func
+def ti_use(_):
+    pass
+
+
+@ti_func
 def ti_index(i, j, stype: ti.template(), struct_size, array_size):
     """对struct array的索引，返回对应的1d index
 

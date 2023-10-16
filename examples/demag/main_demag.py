@@ -45,10 +45,18 @@ def main(cell_size, gpu=False):
 
         # numerical demagnetization factor
         with ti_config(arch=ti.gpu if gpu else ti.cpu):
+            compression = {}
+            if gpu:
+                compression['method'] = Demagnetization.Compressed
+                compression['compressed_size'] = 400000
+
             demag2 = Demagnetization(
                 source_field=source_field,
                 mesh=mesh,
-                active_ind=active_cells)
+                active_ind=active_cells,
+                verbose=True,
+                **compression
+            )
             demaged_model2 = demag2.dpred(model)
 
     print(f"Solving: {timer}")
