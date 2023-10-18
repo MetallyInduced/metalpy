@@ -57,7 +57,6 @@ scab = [
     "pandas",
     "scipy",
     "scikit-learn",
-    "pyamg",
     # visualization
     "pyvista",
     "matplotlib",

@@ -195,11 +195,14 @@ def is_numeric_array(obj):
     return True
 
 
-def notify_package(pkg_name, reason, install):
+def notify_package(pkg_name, reason, install=None):
+    if install is None:
+        install = f'pip install {pkg_name}'
+
     warnings.warn(
         f'{reason}'
         f'\nConsider install `{pkg_name}` with following command:'
         f'\n'
-        f'\n    `{install}`'
+        f'\n  >>> {install}'
         f'\n'
     )

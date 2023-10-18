@@ -1,65 +1,83 @@
 import numpy as np
-import taichi as ti
 
-from metalpy.utils.taichi import ti_ndarray
+from metalpy.scab.utils.misc import Field
+from metalpy.utils.taichi import ti_FieldsBuilder
+from metalpy.utils.type import notify_package
 from .kernel import kernel_matrix_forward
+from .solver import DemagnetizationSolver
 
 
-def forward_integrated(
-        magnetization: np.ndarray,
-        receiver_locations: np.ndarray,
-        xn: np.ndarray,
-        yn: np.ndarray,
-        zn: np.ndarray,
-        base_cell_sizes: np.ndarray,
-        susc_model: np.ndarray,
-        is_cpu: bool
-):
-    """该函数直接计算核矩阵
+class IntegratedSolver(DemagnetizationSolver):
+    def __init__(
+            self,
+            receiver_locations: np.ndarray,
+            xn: np.ndarray,
+            yn: np.ndarray,
+            zn: np.ndarray,
+            base_cell_sizes: np.ndarray,
+            source_field: Field,
+            is_cpu: bool
+    ):
+        """该函数直接计算核矩阵
 
-    Parameters
-    ----------
-    magnetization
-        磁化强度
-    receiver_locations
-        观测点
-    xn, yn, zn
-        网格边界
-    base_cell_sizes
-        网格最小单元大小
-    susc_model
-        磁化率模型
-    is_cpu
-        是否是CPU架构，否则需要在对应设备上分配返回值矩阵
+        Parameters
+        ----------
+        receiver_locations
+            观测点
+        xn, yn, zn
+            网格边界
+        base_cell_sizes
+            网格最小单元大小
+        is_cpu
+            是否是CPU架构，否则需要在对应设备上分配返回值矩阵
 
-    Notes
-    -----
-        优势：
-        1. 简单直观
+        Notes
+        -----
+            优势：
+            1. 简单直观
 
-        缺陷：
-        1. 存在taichi的int32索引限制
-    """
-    nC = xn.shape[0]
-    nObs = receiver_locations.shape[0]
+            缺陷：
+            1. 存在taichi的int32索引限制
+        """
+        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field)
+        self.is_cpu = is_cpu
 
-    if is_cpu:
-        A = np.empty((3 * nObs, 3 * nC), dtype=np.float64)
-    else:
-        A = ti_ndarray(dtype=ti.f64, shape=(3 * nObs, 3 * nC))
+        nC = xn.shape[0]
+        nObs = receiver_locations.shape[0]
 
-    kernel_matrix_forward(receiver_locations, xn, yn, zn, base_cell_sizes, susc_model,
-                          *[0] * 9, A, write_to_mat=True, compressed=False)
+        if is_cpu:
+            self.builder = None
+            self.A = np.empty((3 * nObs, 3 * nC), dtype=self.kernel_type)
+        else:
+            self.builder = builder = ti_FieldsBuilder()
+            self.A = builder.place_dense((3 * nObs, 3 * nC), self.kernel_type)
 
-    if is_cpu:
-        Amat = A
-    else:
-        Amat = A.to_numpy()
+    def build_kernel(self, model):
+        kernel_matrix_forward(
+            self.receiver_locations,
+            self.xn, self.yn, self.zn,
+            self.base_cell_sizes, model,
+            *[0] * 9, self.A,
+            write_to_mat=True, compressed=False
+        )
 
-    return solve_Ax_b(Amat, magnetization)
+    def solve(self, magnetization):
+        if self.is_cpu:
+            Amat = self.A
+        else:
+            Amat = self.A.to_numpy()
+        return solve_Ax_b(Amat, magnetization)
 
 
 def solve_Ax_b(A, m):
-    import pyamg
-    x, _ = pyamg.krylov.bicgstab(A, m)
+    try:
+        import pyamg
+        x, _ = pyamg.krylov.bicgstab(A, m)
+    except ModuleNotFoundError:
+        notify_package(
+            pkg_name='pyamg',
+            reason='`pyamg` not found, falling back to slower version `np.linalg.solve`.'
+        )
+        x = np.linalg.solve(A, m)
+
     return x

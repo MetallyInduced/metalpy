@@ -54,7 +54,7 @@ def main(cell_size, gpu=False):
                 source_field=source_field,
                 mesh=mesh,
                 active_ind=active_cells,
-                verbose=True,
+                progress=True,
                 **compression
             )
             demaged_model2 = demag2.dpred(model)

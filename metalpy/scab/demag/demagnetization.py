@@ -1,5 +1,4 @@
 import warnings
-from functools import partial
 from typing import Union
 
 import numpy as np
@@ -11,9 +10,10 @@ from discretize.utils import mkvc
 from metalpy.scab.utils.misc import Field
 from metalpy.utils.string import format_string_list
 from metalpy.utils.taichi import ti_cfg, ti_test_snode_support, ti_size_max
-from .solvers.compressed import forward_compressed
-from .solvers.integrated import forward_integrated
-from .solvers.seperated import forward_seperated
+from .solvers.compressed import CompressedSolver
+from .solvers.integrated import IntegratedSolver
+from .solvers.seperated import SeperatedSolver
+from .solvers.solver import DemagnetizationSolver
 
 
 class Demagnetization:
@@ -34,7 +34,7 @@ class Demagnetization:
             method=None,
             compressed_size: Union[int, float, None] = None,
             deterministic: Union[bool, str] = True,
-            verbose=False
+            progress=False
     ):
         """
         通过CG或BiCGSTAB求解计算退磁作用下的磁化强度
@@ -57,8 +57,8 @@ class Demagnetization:
             采用确定性模式并行哈希，默认为True，确保核矩阵正确，但会牺牲一定计算效率和空间。
             False则会抛弃确定性约束，牺牲一定精度获取更优的时空间效率。
             指定为CompressedForward.Optimal时直接采用unique函数计算理想压缩结果
-        verbose
-            是否输出额外信息，对于某些求解器，可以输出一些辅助信息，例如输出taichi线性求解器的进度
+        progress
+            是否输出求解进度条，默认为False不输出
 
         Notes
         -----
@@ -85,7 +85,7 @@ class Demagnetization:
         self.method = method
         self.compressed_size = compressed_size
         self.deterministic = deterministic
-        self.verbose = verbose
+        self.progress = progress
 
         cell_centers = mesh.cell_centers
         if active_ind is not None:
@@ -105,6 +105,19 @@ class Demagnetization:
         self.Yn = np.c_[mkvc(yn1), mkvc(yn2)]
         self.Zn = np.c_[mkvc(zn1), mkvc(zn2)]
 
+        base_cell_sizes = np.r_[
+            self.mesh.h[0].min(),
+            self.mesh.h[1].min(),
+            self.mesh.h[2].min(),
+        ]
+
+        self.solver = dispatch_solver(
+            self.receiver_locations, self.Xn, self.Yn, self.Zn, base_cell_sizes,
+            source_field=self.source_field, method=self.method,
+            compressed_size=self.compressed_size, deterministic=self.deterministic,
+            progress=self.progress
+        )
+
     def dpred(self, model):
         """计算退磁效应下的等效磁化率
 
@@ -118,40 +131,31 @@ class Demagnetization:
         ret : array(nC, 3)
             三轴等效磁化率矩阵
         """
-        nC = self.Xn.shape[0]
-        H0 = self.source_field.unit_vector
-        H0 = np.tile(H0[None, :], nC).ravel()
-        X = np.tile(model, 3).ravel()
-        b = X * H0
-
-        base_cell_sizes = np.r_[
-            self.mesh.h[0].min(),
-            self.mesh.h[1].min(),
-            self.mesh.h[2].min(),
-        ]
-
-        m = _predict(b, self.receiver_locations, self.Xn, self.Yn, self.Zn, base_cell_sizes, model,
-                     method=self.method,
-                     compressed_size=self.compressed_size,
-                     deterministic=self.deterministic,
-                     verbose=self.verbose
-                     )
-        return m.reshape(-1, 3)
+        # CPU后端可以直接判断内存是否足够
+        # 但CUDA后端不能在没有额外依赖的情况下查询内存，并且内存不足时会抛出异常，无法通过再次ti.init还原
+        # 因此留一个错误信息以供参考
+        try:
+            return self.solver.dpred(model).reshape(-1, 3)
+        except RuntimeError as _:
+            raise RuntimeError(f'Failed to build kernel matrix.'
+                               f' This may be resulted by insufficient memory.'
+                               f' Try specify `method={Demagnetization.__name__}.Compressed`'
+                               f' and adjust `compressed_size`'
+                               f' to reduce memory consumption.')
 
 
-def _predict(
-        magnetization: np.ndarray,
+def dispatch_solver(
         receiver_locations: np.ndarray,
         xn: np.ndarray,
         yn: np.ndarray,
         zn: np.ndarray,
         base_cell_sizes: np.ndarray,
-        susc_model: np.ndarray,
+        source_field,
         method=None,
         compressed_size: Union[int, float, None] = None,
         deterministic: Union[bool, str] = True,
-        verbose=False
-):
+        progress=False
+) -> DemagnetizationSolver:
     is_cpu = ti_cfg().arch == ti.cpu
 
     mat_size = receiver_locations.shape[0] * 3 * xn.shape[0] * 3
@@ -163,47 +167,47 @@ def _predict(
         # TODO: 看taichi什么时候能出一个查询剩余显存/内存的接口
         available_memory = None
 
-    kw_int = {'is_cpu': is_cpu}
-    kw_sep = {'is_cpu': is_cpu, 'verbose': verbose}
-    kw_com = {'compressed_size': compressed_size, 'deterministic': deterministic, 'verbose': verbose}
+    common_kwargs = {
+        'receiver_locations': receiver_locations,
+        'xn': xn,
+        'yn': yn,
+        'zn': zn,
+        'base_cell_sizes': base_cell_sizes,
+        'source_field': source_field
+    }
+    kw_int = {'is_cpu': is_cpu, **common_kwargs}
+    kw_sep = {'is_cpu': is_cpu, 'progress': progress, **common_kwargs}
+    kw_com = {
+        'compressed_size': compressed_size,
+        'deterministic': deterministic,
+        'progress': progress,
+        **common_kwargs
+    }
 
     if method is not None:
         if method == Demagnetization.Compressed:
-            candidate = partial(forward_compressed, **kw_com)
+            candidate = CompressedSolver(**kw_com)
         elif method == Demagnetization.Seperated:
-            candidate = partial(forward_seperated, direct_to_host=False, **kw_sep)
+            candidate = SeperatedSolver(direct_to_host=False, **kw_sep)
         elif method == Demagnetization.Integrated:
             if mat_size > ti_size_max:
                 warnings.warn(f'`Integrated` method does not support'
                               f' kernel size ({mat_size}) > ti_size_max ({ti_size_max}),'
                               f' which may lead to unexpected result.')
-            candidate = partial(forward_integrated, **kw_int)
+            candidate = IntegratedSolver(**kw_int)
         else:
             warnings.warn('Unrecognized solver. Falling back to `Seperated` method.')
-            candidate = partial(forward_seperated, direct_to_host=False, **kw_sep)
+            candidate = SeperatedSolver(direct_to_host=False, **kw_sep)
     elif available_memory is not None and kernel_size > available_memory * 0.8:
-        candidate = partial(forward_compressed, **kw_com)
+        candidate = CompressedSolver(**kw_com)
     elif mat_size > ti_size_max:
-        candidate = partial(forward_seperated, direct_to_host=False, **kw_sep)
+        candidate = SeperatedSolver(direct_to_host=False, **kw_sep)
     elif is_cpu:
-        candidate = partial(forward_integrated, **kw_int)
+        candidate = IntegratedSolver(**kw_int)
     elif ti_test_snode_support():
-        candidate = partial(forward_seperated, direct_to_host=True, **kw_sep)
+        candidate = SeperatedSolver(direct_to_host=True, **kw_sep)
     else:
         print("Current GPU doesn't support SNode, fall back to legacy implementation.")
-        candidate = partial(forward_integrated, **kw_int)
+        candidate = IntegratedSolver(**kw_int)
 
-    if is_cpu or candidate.func == forward_compressed:
-        return candidate(magnetization, receiver_locations, xn, yn, zn, base_cell_sizes, susc_model)
-    else:
-        # CPU后端可以直接判断内存是否足够
-        # 但CUDA后端不能在没有额外依赖的情况下查询内存，并且内存不足时会抛出异常，无法通过再次ti.init还原
-        # 因此留一个错误信息以供参考
-        try:
-            return candidate(magnetization, receiver_locations, xn, yn, zn, base_cell_sizes, susc_model)
-        except RuntimeError as _:
-            raise RuntimeError(f'Failed to build kernel matrix.'
-                               f' This may be resulted by insufficient memory.'
-                               f' Try specify `method={Demagnetization.__name__}.Compressed`'
-                               f' and adjust `compressed_size`'
-                               f' to reduce memory consumption.')
+    return candidate

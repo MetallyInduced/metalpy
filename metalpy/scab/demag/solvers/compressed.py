@@ -5,97 +5,111 @@ import numpy as np
 import taichi as ti
 from taichi.lang.util import to_taichi_type
 
+from metalpy.scab.utils.misc import Field
 from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, copy_from, ti_size_t, ti_size_dtype
 from .kernel import kernel_matrix_forward
+from .matrix_free import conjugate_gradient
+from .solver import DemagnetizationSolver
 
 
-class CompressedSolver:
+class CompressedSolver(DemagnetizationSolver):
     Optimal = 'optimal'
 
+    def __init__(
+            self,
+            receiver_locations: np.ndarray,
+            xn: np.ndarray,
+            yn: np.ndarray,
+            zn: np.ndarray,
+            base_cell_sizes: np.ndarray,
+            source_field: Field,
+            compressed_size: Union[int, float, None],
+            deterministic: Union[bool, str] = True,
+            progress: bool = False
+    ):
+        """该函数将核矩阵通过哈希表进行压缩，以计算效率为代价换取大幅降低内存需求量
 
-def forward_compressed(
-        magnetization: np.ndarray,
-        receiver_locations: np.ndarray,
-        xn: np.ndarray,
-        yn: np.ndarray,
-        zn: np.ndarray,
-        base_cell_sizes: np.ndarray,
-        susc_model: np.ndarray,
-        compressed_size: Union[int, float, None],
-        deterministic: Union[bool, str] = True,
-        verbose: bool = False
-):
-    """该函数将核矩阵通过哈希表进行压缩，以计算效率为代价换取大幅降低内存需求量
+        Parameters
+        ----------
+        receiver_locations
+            观测点
+        xn, yn, zn
+            网格边界
+        base_cell_sizes
+            网格最小单元大小
+        compressed_size
+            压缩表尺寸，
+            如果为整数，则用于指定尺寸大小，
+            如果为浮点数则设置为核矩阵大小的对应比例，
+            默认None则为1 / 32
+        deterministic
+            采用确定性模式并行哈希，默认为True，确保核矩阵正确，但会牺牲一定计算效率和空间。
+            False则会抛弃确定性约束，牺牲一定精度获取更优的时空间效率。
+            指定为CompressedForward.Optimal时直接采用unique函数计算理想压缩结果
+        progress
+            是否输出求解进度条，默认为False不输出
 
-    Parameters
-    ----------
-    magnetization
-        磁化强度
-    receiver_locations
-        观测点
-    xn, yn, zn
-        网格边界
-    base_cell_sizes
-        网格最小单元大小
-    susc_model
-        磁化率模型
-    compressed_size
-        压缩表尺寸，
-        如果为整数，则用于指定尺寸大小，
-        如果为浮点数则设置为核矩阵大小的对应比例，
-        默认None则为1 / 32
-    deterministic
-        采用确定性模式并行哈希，默认为True，确保核矩阵正确，但会牺牲一定计算效率和空间。
-        False则会抛弃确定性约束，牺牲一定精度获取更优的时空间效率。
-        指定为CompressedForward.Optimal时直接采用unique函数计算理想压缩结果
-    verbose
-        是否输出额外的日志信息，例如taichi的线性求解器的进度信息，True则输出
+        Notes
+        -----
+        优势：
+        1. 可以大幅降低内存需求量，对规则网格效果尤其明显，可以将内存需求降低上千倍
 
-    Notes
-    -----
-    优势：
-    1. 可以大幅降低内存需求量，对规则网格效果尤其明显，可以将内存需求降低上千倍
+        缺陷：
+        1. 网格规模仍然受到taichi的int32索引限制
+        2. 对计算效率有较大影响
+        3. 考虑性能使用了并发哈希，可能会导致核矩阵中极小部分数据被覆盖导致丢失
+        """
+        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field)
+        self.deterministic = deterministic
+        self.progress = progress
 
-    缺陷：
-    1. 网格规模仍然受到taichi的int32索引限制
-    2. 对计算效率有较大影响
-    3. 考虑性能使用了并发哈希，可能会导致核矩阵中极小部分数据被覆盖导致丢失
-    """
-    with ti_FieldsBuilder() as builder:
         nC = xn.shape[0]
         nObs = receiver_locations.shape[0]
 
         if compressed_size is None:
-            compressed_size = 1 / 32
+            compressed_size = 100000
 
         if np.issubdtype(type(compressed_size), np.floating):
             compressed_size = int(nC * nObs * compressed_size)
 
+        self.compressed_size = compressed_size
+        self.used, self.overflow = 0, False
+
+        self.builder = builder = ti_FieldsBuilder()
         # [[Txx, Txy, Txz], [Tyx, Tyy, Tyz], [Tzx, Tzy, Tzz]]
-        Tmat33 = [
-            [ti_field(ti.f64) for _ in range(3)]
+        self.Tmat33 = [
+            [ti_field(self.kernel_type) for _ in range(3)]
             for _ in range(3)
         ]
-        Tmat9 = [t for ts in Tmat33 for t in ts]
-        indices_mat = ti_field(ti_size_t)  # TODO: taichi当前的索引类型
+        self.Tmat9 = [t for ts in self.Tmat33 for t in ts]
+        self.indices_mat = ti_field(ti_size_t)  # TODO: taichi当前的索引类型
 
         # 保证 Tx[xyz]，Ty[xyz]，Tz[xyz] 分别在空间上连续，提高空间近邻性
-        for m in Tmat33:
+        for m in self.Tmat33:
             builder.dense(ti.i, compressed_size).place(*m)
-        builder.dense(ti.ij, (nObs, nC)).place(indices_mat)
+        builder.dense(ti.ij, (nObs, nC)).place(self.indices_mat)
+
         builder.finalize()
 
-        compress_kernel(
-            Tmat33,
-            receiver_locations, xn, yn, zn,
-            indices_mat,
-            deterministic=deterministic
+    def build_kernel(self, model):
+        self.used, self.overflow = compress_kernel(
+            self.Tmat33,
+            self.receiver_locations,
+            self.xn, self.yn, self.zn,
+            self.indices_mat,
+            deterministic=self.deterministic
         )
 
-        kernel_matrix_forward(receiver_locations, xn, yn, zn, base_cell_sizes, susc_model,
-                              *Tmat9, np.empty(0), write_to_mat=False, compressed=True)
+        kernel_matrix_forward(
+            self.receiver_locations,
+            self.xn, self.yn, self.zn,
+            self.base_cell_sizes, model,
+            *self.Tmat9, np.empty(0),
+            write_to_mat=False, compressed=True
+        )
 
-        return solve_Tx_b_compressed(Tmat33, indices_mat, magnetization, quiet=not verbose)
+    def solve(self, magnetization):
+        return solve_Tx_b_compressed(self.Tmat33, self.indices_mat, magnetization, progress=self.progress)
 
 
 def search_prime(value):
@@ -232,12 +246,14 @@ def compress_kernel(
         # 一个特点是，尤其是对于规则六边形网格
         # 随着网格数增加，不同网格关系数的增速比核矩阵的增速慢
         # 即随着网格数增加，压缩比会越来越低
-        warnings.warn(f'Low memory efficiency detected ({memory_efficiency:.2%}),'
-                      f' consider set `compressed_size` to'
+        warnings.warn(f'Low memory efficiency detected ({memory_efficiency:.2%}).'
+                      f' Consider setting `compressed_size` to'
                       f' `{int(used / 0.95)}`'
                       f' or'
                       f' `1 / {int(1 / (used / 0.95 / kernel_size))}`'
                       f'.')
+
+    return used, overflow > 0
 
 
 @ti_kernel
@@ -265,7 +281,7 @@ def hash_unique(
     nC = xn.shape[0]
     nObs = receiver_locations.shape[0]
     table_size = Txx.shape[0]
-    overflow[0] = 0
+    overflow[0] = ti.i8(0)
     qb = total_bits // 4  # quarter bits
 
     for iobs, icell in ti.ndrange(nObs, nC):
@@ -334,7 +350,7 @@ def hash_unique(
 
             if a == a0:
                 # 无法解决冲突，认为哈希表已经溢出
-                overflow[0] = 1
+                overflow[0] = ti.i8(1)
                 break
 
         # 容量超了的话，其实已经不需要管下面数据错误的问题了
@@ -357,7 +373,7 @@ def cshift(key, b):
     return (key << b) | (key >> b)
 
 
-def solve_Tx_b_compressed(Tmat33, indices_mat, m, quiet: bool = True):
+def solve_Tx_b_compressed(Tmat33, indices_mat, m, progress: bool = False):
     with ti_FieldsBuilder() as builder:
         x = builder.place_dense_like(m[:, None])
         b = builder.place_dense_like(m[:, None])
@@ -378,8 +394,7 @@ def solve_Tx_b_compressed(Tmat33, indices_mat, m, quiet: bool = True):
             mul3(Ax, x, 1)
             mul3(Ax, x, 2)
 
-        # TODO: 添加求解进度条
-        ti.linalg.taichi_cg_solver(ti.linalg.LinearOperator(linear), b, x, quiet=quiet)
+        conjugate_gradient(ti.linalg.LinearOperator(linear), b, x, progress=progress)
 
         return x.to_numpy()
 
