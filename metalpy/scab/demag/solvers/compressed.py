@@ -5,8 +5,12 @@ import numpy as np
 import taichi as ti
 from taichi.lang.util import to_taichi_type
 
-from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, copy_from, ti_size_t
+from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, copy_from, ti_size_t, ti_size_dtype
 from .kernel import kernel_matrix_forward
+
+
+class CompressedSolver:
+    Optimal = 'optimal'
 
 
 def forward_compressed(
@@ -18,7 +22,8 @@ def forward_compressed(
         base_cell_sizes: np.ndarray,
         susc_model: np.ndarray,
         compressed_size: Union[int, float, None],
-        verbose: bool
+        deterministic: Union[bool, str] = True,
+        verbose: bool = False
 ):
     """该函数将核矩阵通过哈希表进行压缩，以计算效率为代价换取大幅降低内存需求量
 
@@ -39,6 +44,10 @@ def forward_compressed(
         如果为整数，则用于指定尺寸大小，
         如果为浮点数则设置为核矩阵大小的对应比例，
         默认None则为1 / 32
+    deterministic
+        采用确定性模式并行哈希，默认为True，确保核矩阵正确，但会牺牲一定计算效率和空间。
+        False则会抛弃确定性约束，牺牲一定精度获取更优的时空间效率。
+        指定为CompressedForward.Optimal时直接采用unique函数计算理想压缩结果
     verbose
         是否输出额外的日志信息，例如taichi的线性求解器的进度信息，True则输出
 
@@ -76,7 +85,12 @@ def forward_compressed(
         builder.dense(ti.ij, (nObs, nC)).place(indices_mat)
         builder.finalize()
 
-        compress_kernel(Tmat33, receiver_locations, xn, yn, zn, indices_mat)
+        compress_kernel(
+            Tmat33,
+            receiver_locations, xn, yn, zn,
+            indices_mat,
+            deterministic=deterministic
+        )
 
         kernel_matrix_forward(receiver_locations, xn, yn, zn, base_cell_sizes, susc_model,
                               *Tmat9, np.empty(0), write_to_mat=False, compressed=True)
@@ -151,36 +165,68 @@ def compress_kernel(
         xn: np.ndarray,
         yn: np.ndarray,
         zn: np.ndarray,
-        indices_mat
+        indices_mat,
+        deterministic
 ):
-    # TODO: 等taichi更新获取变量类型的泛型操作后可以简化
-    val_type = np.result_type(receiver_locations, xn)
-    assert np.issubdtype(val_type, np.floating)
-    val_type = getattr(np, str(val_type).replace('float', 'uint'))
-    total_bits = np.iinfo(val_type).bits
+    if deterministic not in [True, False]:
+        assert deterministic == CompressedSolver.Optimal
 
-    overflow = ti_field(ti.i8, 1)
+    mats = [*Tmat33[0], *Tmat33[1]]
+    n_param = len(mats)
     table_size = Tmat33[0][0].shape[0]
     kernel_size = np.prod(indices_mat.shape)
-    prime = search_prime(table_size)
 
-    hash_unique(
-        receiver_locations,
-        xn, yn, zn,
-        *Tmat33[0], *Tmat33[1],
-        indices_mat,
-        to_taichi_type(val_type),
-        total_bits,
-        overflow,
-        prime
-    )
+    if deterministic == CompressedSolver.Optimal:
+        table = np.c_[xn, yn, zn][:, None, :] - np.repeat(receiver_locations, 2, axis=1)[None, :, :]
+        compressed, inverse = np.unique(table.reshape(-1, n_param), axis=0, return_inverse=True)
 
-    overflow = overflow.to_numpy()[0]
+        used = compressed.shape[0]
+        overflow = used > table_size
+
+        if not overflow:
+            for i in range(n_param):
+                copy_col_vector_from_matrix(mats[i], compressed, i)
+            indices_mat.from_numpy(inverse.reshape(table.shape[:2]).astype(ti_size_dtype))
+    else:
+        # TODO: 等taichi更新获取变量类型的泛型操作后可以简化
+        val_type = np.result_type(receiver_locations, xn)
+        assert np.issubdtype(val_type, np.floating)
+        val_type = getattr(np, str(val_type).replace('float', 'uint'))
+        total_bits = np.iinfo(val_type).bits
+
+        overflow = ti_field(ti.i8, 1)
+        prime = search_prime(table_size)
+
+        if deterministic:
+            # 使用原子操作来防止哈希表的单个条目被多个线程操作，确保核矩阵参数正确
+            # 但会导致额外的计算和存储开销，实际压缩后尺寸会大于等于理想压缩结果
+            #   GPU下原子操作可能会导致相同参数被存在多个条目下，一般结果大于理想压缩结果
+            #   CPU下原子操作没有问题，一般结果等于理想压缩结果
+            invalid_value_for_dx1 = 2 * (np.max(receiver_locations[:, 0]) - np.min(xn[:, 0]))
+        else:
+            # 小于0时hash_unique会取消采用原子操作，允许并行访问操作哈希表
+            # 导致核矩阵部分参数产生偏差，实际压缩后尺寸会小于理想压缩结果
+            invalid_value_for_dx1 = -1
+
+        hash_unique(
+            receiver_locations,
+            xn, yn, zn,
+            *mats,
+            indices_mat,
+            to_taichi_type(val_type),
+            total_bits,
+            overflow,
+            prime,
+            invalid_value_for_dx1
+        )
+
+        overflow = overflow.to_numpy()[0]
+        used = np.count_nonzero(Tmat33[0][0].to_numpy() < invalid_value_for_dx1)
+
     if overflow:
         raise RuntimeError(f'Compression hash table overflowed.'
                            f' Consider using a larger `compressed_size` (currently {table_size}).')
 
-    used = np.count_nonzero(~np.isinf(Tmat33[0][0].to_numpy()))
     memory_efficiency = used / table_size
     if memory_efficiency < 0.95:
         # 一个特点是，尤其是对于规则六边形网格
@@ -210,7 +256,8 @@ def hash_unique(
         hash_type: ti.template(),
         total_bits: ti.template(),
         overflow: ti.template(),
-        prime: ti.template()
+        prime: ti.template(),
+        invalid_value_for_dx1: ti.template()
 ):
     for I in ti.grouped(Txx):
         Txx[I] = ti.math.inf
@@ -255,7 +302,20 @@ def hash_unique(
         # 预设了网格数大于并行线程数，因此同时查询的键几乎不会重复
         # 访问冲突的概率只取决于哈希函数的碰撞率
         a = a0
-        while not ti.math.isinf(Txx[a]):
+        while True:
+            if ti.static(invalid_value_for_dx1 > 0):
+                # 严格模式，严格防止数据竞争
+                # 1. 有可能导致相同参数占用多个哈希条目，导致额外内存开销
+                # 2. 依赖原子操作，产生额外计算开销
+                # TODO: 替换为ti.atomic_cas
+                #   https://github.com/taichi-dev/taichi/issues/1805
+                if ti.math.isinf(ti.atomic_min(Txx[a], invalid_value_for_dx1)):
+                    break
+            else:
+                # 非严格模式，有可能因并发修改哈希表条目，导致少量网格参数覆盖
+                if ti.math.isinf(Txx[a]):
+                    break
+
             if (
                 Txx[a] == dx1
                 and Txy[a] == dx2
@@ -284,13 +344,12 @@ def hash_unique(
 
         indices_mat[iobs, icell] = a
 
-        if ti.math.isinf(Txx[a]):
-            Txx[a] = dx1
-            Txy[a] = dx2
-            Txz[a] = dy1
-            Tyx[a] = dy2
-            Tyy[a] = dz1
-            Tyz[a] = dz2
+        Txx[a] = dx1
+        Txy[a] = dx2
+        Txz[a] = dy1
+        Tyx[a] = dy2
+        Tyy[a] = dz1
+        Tyz[a] = dz2
 
 
 @ti_func
@@ -364,3 +423,13 @@ def multiply_with_row_stride_3_compressed(
             )
 
         out[row, 0] = summed
+
+
+@ti_kernel
+def copy_col_vector_from_matrix(
+        dst: ti.template(), src: ti.types.ndarray(),
+        col: ti.template()
+):
+    size = ti.min(dst.shape[0], src.shape[0])
+    for i in range(size):
+        dst[i] = src[i, col]
