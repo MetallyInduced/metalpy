@@ -1,3 +1,5 @@
+import copy
+
 import matplotlib as mpl
 import numpy as np
 import taichi as ti
@@ -7,17 +9,15 @@ from discretize.utils import mkvc
 from matplotlib import pyplot as plt
 
 from metalpy.mepa import LinearExecutor
-from metalpy.scab import Progressed, Tied
+from metalpy.scab import Progressed, Tied, Demaged
 from metalpy.scab.builder import SimulationBuilder
 from metalpy.scab.builder.potential_fields.magnetics import Simulation3DIntegralBuilder
 from metalpy.scab.demag import Demagnetization
-from metalpy.scab.demag.factored_demagnetization import FactoredDemagnetization
 from metalpy.scab.demag.utils import get_prolate_spheroid_demag_factor
 from metalpy.scab.modelling.shapes import Ellipsoid
 from metalpy.scab.tied.potential_fields.magnetics.simulation import TiedSimulation3DIntegralMixin
 from metalpy.scab.utils.misc import define_inducing_field
-from metalpy.utils.taichi import ti_prepare, ti_config
-from metalpy.utils.time import Timer
+from metalpy.utils.taichi import ti_prepare
 
 
 def main(cell_size, gpu=False):
@@ -25,42 +25,9 @@ def main(cell_size, gpu=False):
         ti_prepare(arch=ti.gpu, device_memory_fraction=0.8)
 
     a, c = 10, 40
-    timer = Timer()
 
-    with timer:
-        model_mesh = Ellipsoid.spheroid(a, c, polar_axis=0).to_scene(model=80).build(cell_size=cell_size)
-        active_cells = model_mesh.active_cells
-        model = model_mesh.get_active_model()
-        mesh = model_mesh.mesh
-
-        source_field = define_inducing_field(50000, 45, 20)
-
-    print(f"Modelling: {timer}")
-
-    with timer:
-        # analytical demagnetization factor
-        N = get_prolate_spheroid_demag_factor(c / a, polar_axis=0)
-        demag = FactoredDemagnetization(n=N)
-        demaged_model = demag.dpred(model, source_field=source_field)
-
-        # numerical demagnetization factor
-        with ti_config(arch=ti.gpu if gpu else ti.cpu):
-            compression = {}
-            if gpu:
-                compression['method'] = Demagnetization.Compressed
-                compression['compressed_size'] = 400000
-
-            demag2 = Demagnetization(
-                source_field=source_field,
-                mesh=mesh,
-                active_ind=active_cells,
-                progress=True,
-                **compression
-            )
-            demaged_model2 = demag2.dpred(model)
-
-    print(f"Solving: {timer}")
-    print("MagModel MAPE(%): ", (abs(demaged_model2 - demaged_model) / abs(demaged_model)).mean() * 100)
+    model_mesh = Ellipsoid.spheroid(a, c, polar_axis=0).to_scene(model=80).build(cell_size=cell_size)
+    source_field = define_inducing_field(50000, 45, 20)
 
     obsx = np.linspace(-2048, 2048, 128 + 1)
     obsy = np.linspace(-2048, 2048, 128 + 1)
@@ -76,12 +43,27 @@ def main(cell_size, gpu=False):
     builder.source_field(*source_field)
     builder.receivers(receiver_points)
     builder.active_mesh(model_mesh)
-    builder.model_type(vector=True)
+    builder.model_type(scalar=True)
     builder.store_sensitivities(False)
-    simulation = builder.build()
 
-    pred = simulation.dpred(mkvc(demaged_model))
-    pred2 = simulation.dpred(mkvc(demaged_model2))
+    # 基于椭球体退磁因子计算
+    sim_factored = copy.deepcopy(builder)
+    factor = get_prolate_spheroid_demag_factor(c / a, polar_axis=0)
+    sim_factored.patched(Demaged(factor=factor))
+    simulation = sim_factored.build()
+    pred = simulation.dpred(model_mesh.model)
+    demaged_model = simulation.chi
+
+    # 基于积分方程法求解退磁效应
+    sim_numeric = copy.deepcopy(builder)
+    sim_numeric.patched(Demaged(
+        method=Demagnetization.Compressed if gpu else None,
+        compressed_size=400000,
+        progress=True
+    ))
+    simulation = sim_numeric.build()
+    pred2 = simulation.dpred(model_mesh.model)
+    demaged_model2 = simulation.chi
 
     return demaged_model, pred, demaged_model2, pred2, receiver_points
 

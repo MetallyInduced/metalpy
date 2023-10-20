@@ -29,8 +29,25 @@ ti_size_dtype = to_numpy_type(ti_size_t)
 ti_size_max = np.iinfo(ti_size_dtype).max
 
 
-def ti_prepare(**kwargs):
-    ti_args.update(kwargs)
+def ti_prepare(**kwargs) -> bool:
+    """修改用于初始化taichi上下文的配置参数
+
+    Parameters
+    ----------
+    kwargs
+        需要修改的参数，以关键字参数形式指定
+
+    Returns
+    -------
+    conflicted
+        指示新的配置是否与已有配置冲突
+    """
+    conflicts = False
+    for k, v in kwargs.items():
+        if k not in ti_args or ti_args[k] != v:
+            conflicts = True
+        ti_args[k] = v
+    return conflicts
 
 
 def ti_init_once():

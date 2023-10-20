@@ -2,12 +2,18 @@ import warnings
 from typing import Union, Iterable
 
 import numpy as np
+from SimPEG.potential_fields.magnetics import UniformBackgroundField
 from SimPEG.utils import mat_utils
 
 
 class Field:
-    def __init__(self, intensity, inclination, declination):
-        self.definition = (intensity, inclination, declination)
+    def __init__(self, intensity, inclination=90, declination=0):
+        if isinstance(intensity, UniformBackgroundField):
+            self.definition = (intensity.amplitude, intensity.inclination, intensity.declination)
+        elif isinstance(intensity, Iterable):
+            self.definition = (*intensity,)
+        else:
+            self.definition = (intensity, inclination, declination)
 
     @property
     def strength(self):
@@ -46,6 +52,9 @@ class Field:
 
     def __len__(self):
         return 3
+
+    def __eq__(self, rhv):
+        return self.definition == Field(rhv).definition
 
     def with_strength(self, strength):
         warnings.warn("strength is deprecated and will be removed, please use intensity instead.", DeprecationWarning)

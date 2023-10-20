@@ -23,7 +23,7 @@ class CompressedSolver(DemagnetizationSolver):
             zn: np.ndarray,
             base_cell_sizes: np.ndarray,
             source_field: Field,
-            compressed_size: Union[int, float, None],
+            compressed_size: Union[int, float, None] = None,
             deterministic: Union[bool, str] = True,
             progress: bool = False
     ):

@@ -53,6 +53,7 @@ class IntegratedSolver(DemagnetizationSolver):
             self.A = builder.place_dense((3 * nObs, 3 * nC), self.kernel_type)
 
     def build_kernel(self, model):
+        # TODO: 实现进度条
         kernel_matrix_forward(
             self.receiver_locations,
             self.xn, self.yn, self.zn,

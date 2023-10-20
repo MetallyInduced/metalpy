@@ -1,27 +1,34 @@
 """
 Notes
 -----
-    为了防止多余的import占用运行时间，因此保持只在必要时import相关类型，
-    但是缺陷是每次添加新的Builder时，需要进行如下三步操作：
+为了防止多余的import占用运行时间，因此保持只在必要时import相关类型，
+但是缺陷是每次添加新的Builder时，需要进行如下三步操作：
 
-    - `TYPE_CHECKING`中引入类型
-    - `SimulationBuilder`中定义`of`的重载
-    - 使用__register_builder注册实际类型
+- `TYPE_CHECKING` 中引入类型
+- `SimulationBuilder` 中定义 `of` 的重载
+- 使用__register_builder注册实际类型
 
-    其中前两步用于明确`SimulationBuilder.of`的返回值，第三步为实际注册对应Simulation的builder类。
+其中前两步用于注解`SimulationBuilder.of`的返回值，帮助ide提示和类型检查，
+第三步为实际注册对应Simulation的builder类。
 
-    `supplier`为builder系统中用于指定参数值的方法，
-    实现方式为使用`_supplies`注解，自动将返回值赋给注解中注册的参数。
+实现原理
+-------
+- `supplier` 用于直接绑定实参，多次调用会覆盖。
 
-    `assembler`为builder系统中用于从给定参数构造为给定参数的默认值的方法，
-    会在build时对所有未给定的必选参数调用对应的assembler。
-    实现方式为使用`_assembles`注解，将函数名注册到基类的_all_assemblers字典中，
-    __new__时根据注册的类型名和函数名，获取实例的成员函数构建实例的_assemblers字典。
+实现方式为使用 `_supplies` 注解，
+`_supplies` 注解的函数，会自动将返回值绑定到类构造函数的实参，
+
+- `assembler` 用于构造指定实参，在实际构造对象时，对于所有未绑定实参的必选参数，会搜索调用其对应的assembler构造实参。
+
+实现方式为使用 `_assembles` 注解，
+`_assembles` 会将函数注册为类构造函数指定形参的assembler以供搜索调用。
 """
 from __future__ import annotations
 
+import copy
 import functools
 import inspect
+import types
 import warnings
 from functools import lru_cache
 from typing import overload, TYPE_CHECKING, cast, Iterable
@@ -50,12 +57,18 @@ class SimulationBuilder:
     _all_suppliers = {}
 
     def __init__(self, sim_cls):
-        """用于构造正演仿真
+        """用于将任意对象的构建包装为builder模式，
+        并通过提供合理的默认值来简化对象创建流程
 
         Parameters
         ----------
         sim_cls
-            正演仿真计算的类
+            需要包装的类
+
+        Notes
+        -----
+        一般只用于包装已有的如第三方库中的类，
+        如果自己实现新的类的话，有必要的话直接实现成builder模式就好了，没必要再包装一层。
         """
         self.sim_cls = sim_cls
         self.args = ArgSpecs.from_class_mro(self.sim_cls)
@@ -222,6 +235,49 @@ class SimulationBuilder:
         return decorator
 
     @staticmethod
+    def supplier(
+        keyset: str | Iterable[str],
+        allow_vars=False
+    ):
+        """快速创建一个直接传递（passthrough）的supplier
+
+        Parameters
+        ----------
+        keyset
+            给定关键字，长度与返回值数匹配，可以是单个或者若干个参数名。
+        allow_vars
+            指示是否允许在目标函数固定参数中找不到对应参数时，将其绑定到目标的varkw上，默认为False，忽略该参数
+        """
+        @SimulationBuilder._supplies(keyset, allow_vars=allow_vars)
+        def supplier(_, arg):
+            return arg
+
+        return supplier
+
+    def bind_supplier(
+        self,
+        keyset: str | Iterable[str],
+        allow_vars=False
+    ):
+        """运行时创建supplier，并绑定到当前实例
+
+        Parameters
+        ----------
+        keyset
+            给定关键字，长度与返回值数匹配，可以是单个或者若干个参数名。
+        allow_vars
+            指示是否允许在目标函数固定参数中找不到对应参数时，将其绑定到目标的varkw上，默认为False，忽略该参数
+        """
+        if isinstance(keyset, str):
+            keyset = (keyset,)
+
+        for key in keyset:
+            setattr(self, key, types.MethodType(
+                SimulationBuilder.supplier(keyset, allow_vars=allow_vars),
+                self
+            ))
+
+    @staticmethod
     def _assembles(key0: str, *other_keys: str):
         """指示该函数为对应参数的组装器，在指定形参缺失时由Builder系统调用该方法构造实参。
 
@@ -269,6 +325,22 @@ class SimulationBuilder:
             suppliers.extend(SimulationBuilder._all_suppliers.get(cls_name, {}).get(name, tuple()))
 
         return suppliers
+
+    def __copy__(self):
+        cls = self.__class__
+        result = cls.__new__(cls, self.sim_cls)
+        result.__dict__.update(self.__dict__)
+        return result
+
+    def __deepcopy__(self, memo):
+        # ref:
+        # https://stackoverflow.com/questions/1500718/how-to-override-the-copy-deepcopy-operations-for-a-python-object
+        cls = self.__class__
+        result = cls.__new__(cls, self.sim_cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            setattr(result, k, copy.deepcopy(v, memo))
+        return result
 
 
 def __register_builder(key_cls_path):

@@ -23,30 +23,41 @@ class DemagnetizationSolver(abc.ABC):
         self.source_field = source_field
 
         self.model = None
+        self.last_source_field = None
 
     @property
     def kernel_type(self):
         return np.result_type(self.xn, self.receiver_locations)
 
-    def dpred(self, model):
+    def dpred(self, model, source_field=None):
         """计算退磁效应下每个网格的三轴等效磁化率
 
         Parameters
         ----------
         model
             磁化率模型
+        source_field
+            外部场源，覆盖求解器定义时给定的场源信息。
+            如果为None，则采用给定的默认场源信息
 
         Returns
         -------
         ret
             三轴等效磁化率矩阵
         """
+        if source_field is None:
+            source_field = self.source_field
+            assert source_field is not None, ('`source_field` must be specified'
+                                              ' either when initializing the solver(source_field=...)'
+                                              ' or when calling dpred(source_field=...).')
+
+        source_field = Field(source_field)
         if self.model is None or np.any(self.model != model):
             self.build_kernel(model)
-            self.model = model
+            self.model = np.copy(model)
 
         nC = self.xn.shape[0]
-        H0 = self.source_field.unit_vector
+        H0 = source_field.unit_vector
         H0 = np.tile(H0[None, :], nC).ravel()
         X = np.tile(model, 3).ravel()
         magnetization = X * H0

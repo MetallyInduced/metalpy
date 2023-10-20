@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import warnings
-from typing import Union
 
 import numpy as np
 import psutil
 import taichi as ti
-from discretize.base import BaseTensorMesh
+from discretize.base import BaseMesh
 from discretize.utils import mkvc
 
 from metalpy.scab.utils.misc import Field
@@ -28,23 +29,23 @@ class Demagnetization:
 
     def __init__(
             self,
-            mesh: BaseTensorMesh,
-            source_field: Field,
+            mesh: BaseMesh,
+            source_field: Field | None = None,
             active_ind=None,
             method=None,
-            compressed_size: Union[int, float, None] = None,
-            deterministic: Union[bool, str] = True,
+            compressed_size: int | float | None = None,
+            deterministic: bool | str = True,
             progress=False
     ):
         """
-        通过CG或BiCGSTAB求解计算退磁作用下的磁化强度
+        通过共轭梯度法求解计算退磁作用下的三轴等效磁化率
 
         Parameters
         ----------
         mesh
             模型网格
         source_field
-            外部场源
+            外部场源，也可以在dpred时指定，主要为保持和Simulation的一致性
         active_ind
             有效网格下标或掩码
         method
@@ -111,37 +112,40 @@ class Demagnetization:
             self.mesh.h[2].min(),
         ]
 
-        self.solver = dispatch_solver(
-            self.receiver_locations, self.Xn, self.Yn, self.Zn, base_cell_sizes,
-            source_field=self.source_field, method=self.method,
-            compressed_size=self.compressed_size, deterministic=self.deterministic,
-            progress=self.progress
-        )
-
-    def dpred(self, model):
-        """计算退磁效应下的等效磁化率
-
-        Parameters
-        ----------
-        model: array-like(nC,)
-            磁化率模型
-
-        Returns
-        -------
-        ret : array(nC, 3)
-            三轴等效磁化率矩阵
-        """
         # CPU后端可以直接判断内存是否足够
         # 但CUDA后端不能在没有额外依赖的情况下查询内存，并且内存不足时会抛出异常，无法通过再次ti.init还原
         # 因此留一个错误信息以供参考
         try:
-            return self.solver.dpred(model).reshape(-1, 3)
+            self.solver = dispatch_solver(
+                self.receiver_locations, self.Xn, self.Yn, self.Zn, base_cell_sizes,
+                source_field=self.source_field, method=self.method,
+                compressed_size=self.compressed_size, deterministic=self.deterministic,
+                progress=self.progress
+            )
         except RuntimeError as _:
             raise RuntimeError(f'Failed to build kernel matrix.'
                                f' This may be resulted by insufficient memory.'
                                f' Try specify `method={Demagnetization.__name__}.Compressed`'
                                f' and adjust `compressed_size`'
                                f' to reduce memory consumption.')
+
+    def dpred(self, model, source_field: Field | None = None):
+        """计算退磁效应下的等效磁化率
+
+        Parameters
+        ----------
+        model
+            array-like(nC,)，磁化率模型
+        source_field
+            外部场源，覆盖求解器定义时给定的场源信息。
+            如果为None，则采用给定的默认场源信息
+
+        Returns
+        -------
+        ret
+            array(nC, 3)，三轴等效磁化率矩阵
+        """
+        return self.solver.dpred(model, source_field=source_field).reshape(-1, 3)
 
 
 def dispatch_solver(
@@ -152,8 +156,8 @@ def dispatch_solver(
         base_cell_sizes: np.ndarray,
         source_field,
         method=None,
-        compressed_size: Union[int, float, None] = None,
-        deterministic: Union[bool, str] = True,
+        compressed_size: int | float | None = None,
+        deterministic: bool | str = True,
         progress=False
 ) -> DemagnetizationSolver:
     is_cpu = ti_cfg().arch == ti.cpu

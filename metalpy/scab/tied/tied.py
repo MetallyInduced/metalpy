@@ -29,7 +29,7 @@ class TaichiContext(Mixin):
         max_cpu_threads
             cpu arch下的最大线程数，taichi默认为cpu核心数
         """
-        from metalpy.utils.taichi import ti_prepare, ti_arch
+        from metalpy.utils.taichi import ti_prepare, ti_arch, ti_reset
 
         super().__init__(this)
 
@@ -52,7 +52,8 @@ class TaichiContext(Mixin):
                 max_cpu_threads = os.cpu_count() + max_cpu_threads
             params['cpu_max_num_threads'] = max_cpu_threads
 
-        ti_prepare(**params, **kwargs)
+        if ti_prepare(**params, **kwargs):
+            ti_reset()
 
     def post_apply(self, this):
         impl = TaichiContext._implementations.get(type(this))
@@ -66,10 +67,7 @@ class TaichiContext(Mixin):
 
 class Tied(Patch, Distributable):
     def __init__(self, arch=None, max_cpu_threads=None, **kwargs):
-        from metalpy.utils.taichi import ti_reset
-
         super().__init__()
-        ti_reset()
         self.params = get_params_dict(arch=arch, max_cpu_threads=max_cpu_threads, **kwargs)
 
     def apply(self):
