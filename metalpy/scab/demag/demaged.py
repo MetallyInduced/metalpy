@@ -123,6 +123,7 @@ class Demaged(Patch, Distributable):
             method=None,
             compressed_size: Union[int, float, None] = None,
             deterministic: Union[bool, str] = True,
+            quantized: bool = False,
             progress: bool = False,
             **kwargs
     ):
@@ -143,9 +144,12 @@ class Demaged(Patch, Distributable):
             浮点数代表按完整核矩阵大小的比例设置，整数代表直接设置尺寸。
             如果大小不足或过大内部会给出提示信息
         deterministic
-            采用确定性模式并行哈希，默认为True，确保核矩阵正确，但会牺牲一定计算效率和空间。
-            False则会抛弃确定性约束，牺牲一定精度获取更优的时空间效率。
+            采用确定性模式并行哈希，默认为True，牺牲一定计算效率和空间确保核矩阵正确。
             指定为CompressedForward.Optimal时直接采用unique函数计算理想压缩结果
+        quantized
+            采用量化模式压缩核矩阵，默认为False。
+            True则启用压缩，使用更小位宽来存储核矩阵，减少一定的空间需求，略微牺牲计算效率。
+            （可能会报要求尺寸为2的幂的性能警告）
         progress
             是否输出求解进度条，默认为False不输出
         """
@@ -155,6 +159,7 @@ class Demaged(Patch, Distributable):
             method=method,
             compressed_size=compressed_size,
             deterministic=deterministic,
+            quantized=quantized,
             progress=progress,
             **kwargs
         )

@@ -35,6 +35,7 @@ class Demagnetization:
             method=None,
             compressed_size: int | float | None = None,
             deterministic: bool | str = True,
+            quantized: bool = False,
             progress=False
     ):
         """
@@ -49,15 +50,22 @@ class Demagnetization:
         active_ind
             有效网格下标或掩码
         method
-            求解算法，参考`Demagnetization.methods`
+            采用的数值求解算法，参考 `Demagnetization.methods` 。默认为None，自动选择。
+            可选选项：
+                - Demagnetization.Compressed
+                - Demagnetization.Seperated
+                - Demagnetization.Integrated
         compressed_size
             压缩表尺寸，只针对`Demagnetization.Compressed`有效，用于指定压缩后的核矩阵哈希表最大大小，应尽可能小以满足内存要求。
             浮点数代表按完整核矩阵大小的比例设置，整数代表直接设置尺寸。
             如果大小不足或过大内部会给出提示信息
         deterministic
-            采用确定性模式并行哈希，默认为True，确保核矩阵正确，但会牺牲一定计算效率和空间。
-            False则会抛弃确定性约束，牺牲一定精度获取更优的时空间效率。
+            采用确定性模式并行哈希，默认为True，牺牲一定计算效率和空间确保核矩阵正确。
             指定为CompressedForward.Optimal时直接采用unique函数计算理想压缩结果
+        quantized
+            采用量化模式压缩核矩阵，默认为False。
+            True则启用压缩，使用更小位宽来存储核矩阵，减少一定的空间需求，略微牺牲计算效率。
+            （可能会报要求尺寸为2的幂的性能警告）
         progress
             是否输出求解进度条，默认为False不输出
 
@@ -66,11 +74,10 @@ class Demagnetization:
         compressed_size参考 `metalpy.scab.demag.solvers.compressed.forward_compressed` 定义
 
         三个方法具体为：
-            `Integrated` 采用朴素算法，直接求解完整核矩阵
 
-            `Seperated` 将核矩阵拆分为9份来一定程度上绕过taichi对矩阵大小的限制
-
-            `Compressed` 通过哈希表将核矩阵压缩，以计算效率为代价换取大幅降低内存需求量
+        - `Integrated` 采用朴素算法，直接求解完整核矩阵
+        - `Seperated` 将核矩阵拆分为9份来一定程度上绕过taichi对矩阵大小的限制
+        - `Compressed` 通过哈希表将核矩阵压缩，以计算效率为代价换取大幅降低内存需求量
 
         网格规模较小时 `Integrated` 计算效率最高，
         随着网格规模增加 `Integrated` 和 `Seperated` 计算耗时持平，
@@ -86,6 +93,7 @@ class Demagnetization:
         self.method = method
         self.compressed_size = compressed_size
         self.deterministic = deterministic
+        self.quantized = quantized
         self.progress = progress
 
         cell_centers = mesh.cell_centers
@@ -120,14 +128,19 @@ class Demagnetization:
                 self.receiver_locations, self.Xn, self.Yn, self.Zn, base_cell_sizes,
                 source_field=self.source_field, method=self.method,
                 compressed_size=self.compressed_size, deterministic=self.deterministic,
+                quantized=self.quantized,
                 progress=self.progress
             )
-        except RuntimeError as _:
-            raise RuntimeError(f'Failed to build kernel matrix.'
-                               f' This may be resulted by insufficient memory.'
-                               f' Try specify `method={Demagnetization.__name__}.Compressed`'
-                               f' and adjust `compressed_size`'
-                               f' to reduce memory consumption.')
+        except RuntimeError as e:
+            if ti_cfg().arch == ti.cuda and 'cuStreamSynchronize' in e.args[0]:
+                raise RuntimeError(f'Failed to build kernel matrix.'
+                                   f' This may be resulted by insufficient memory'
+                                   f' (please check log for detailed error info).'
+                                   f'\nMemory consumption can be reduced by'
+                                   f' specifying `method={Demagnetization.__name__}.Compressed`'
+                                   f' and tune the `compressed_size` and `quantized`.')
+            else:
+                raise e
 
     def dpred(self, model, source_field: Field | None = None):
         """计算退磁效应下的等效磁化率
@@ -158,6 +171,7 @@ def dispatch_solver(
         method=None,
         compressed_size: int | float | None = None,
         deterministic: bool | str = True,
+        quantized: bool = True,
         progress=False
 ) -> DemagnetizationSolver:
     is_cpu = ti_cfg().arch == ti.cpu
@@ -184,6 +198,7 @@ def dispatch_solver(
     kw_com = {
         'compressed_size': compressed_size,
         'deterministic': deterministic,
+        'quantized': quantized,
         'progress': progress,
         **common_kwargs
     }

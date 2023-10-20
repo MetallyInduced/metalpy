@@ -1,12 +1,16 @@
+import math
 import warnings
 from typing import Union
 
 import numpy as np
 import taichi as ti
+from taichi.lang.misc import is_extension_supported
 from taichi.lang.util import to_taichi_type
 
 from metalpy.scab.utils.misc import Field
-from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, copy_from, ti_size_t, ti_size_dtype
+from metalpy.utils.numeric import limit_significand
+from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, copy_from, ti_size_t, ti_size_dtype, \
+    ti_cfg
 from .kernel import kernel_matrix_forward
 from .matrix_free import conjugate_gradient
 from .solver import DemagnetizationSolver
@@ -25,6 +29,7 @@ class CompressedSolver(DemagnetizationSolver):
             source_field: Field,
             compressed_size: Union[int, float, None] = None,
             deterministic: Union[bool, str] = True,
+            quantized: bool = False,
             progress: bool = False
     ):
         """该函数将核矩阵通过哈希表进行压缩，以计算效率为代价换取大幅降低内存需求量
@@ -43,23 +48,56 @@ class CompressedSolver(DemagnetizationSolver):
             如果为浮点数则设置为核矩阵大小的对应比例，
             默认None则为1 / 32
         deterministic
-            采用确定性模式并行哈希，默认为True，确保核矩阵正确，但会牺牲一定计算效率和空间。
-            False则会抛弃确定性约束，牺牲一定精度获取更优的时空间效率。
+            采用确定性模式并行哈希，默认为True，牺牲一定计算效率和空间确保核矩阵正确。
             指定为CompressedForward.Optimal时直接采用unique函数计算理想压缩结果
+        quantized
+            采用量化模式压缩核矩阵，默认为False。
+            True则启用压缩，使用更小位宽来存储核矩阵，减少一定的空间需求，略微牺牲计算效率。
+            （可能会报要求尺寸为2的幂的性能警告）
         progress
             是否输出求解进度条，默认为False不输出
 
         Notes
         -----
         优势：
-        1. 可以大幅降低内存需求量，对规则网格效果尤其明显，可以将内存需求降低上千倍
+
+        - 可以大幅降低内存需求量，对规则网格效果尤其明显，规则网格上约可以将内存需求降低到千分之一
 
         缺陷：
-        1. 网格规模仍然受到taichi的int32索引限制
-        2. 对计算效率有较大影响
-        3. 考虑性能使用了并发哈希，可能会导致核矩阵中极小部分数据被覆盖导致丢失
+
+        - 网格规模仍然受到taichi的int32索引限制
+        - 对计算效率有较大影响
+
+        `deterministic` 指定是否采用确定性模式并行哈希，可选的取值为：
+
+        - `True` （默认值），确保核矩阵正确，但会牺牲一定计算效率和空间
+        - `False` 则会抛弃确定性约束，牺牲一定精度获取更优的时空间效率
+        - `CompressedForward.Optimal` 时直接采用unique函数计算理想压缩结果
+
+        `quantized` 指定是否对索引进行量化压缩，将一个整形拆分为多个值从而实现压缩，可选的取值为：
+
+        - `False` 不启用压缩（默认值），采用默认索引类型存储（ti_size_t）
+        - `True` 启用压缩，使用更小位宽来存储索引，从而在相同的空间中存储更多索引值，减少一定的空间需求
+
+            在当前64位位宽下，只支持最多压缩到21位，索引约200万项，
+            更宽则一个int64中只能存储2个索引，和32位相同，此时自动转为非压缩模式。
+
+        注意事项：
+
+        - 网格尺寸建议采用 `IEEE754` 可以精确表示的值，防止因计算误差干扰压缩效果
+        - 例如使用 0.375 或 0.4375 替代 0.4
+        - 可以使用 `metalpy.utils.numeric.limit_significand` 来搜索合适的网格尺寸
         """
         super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field)
+
+        # 检查二进制小数的稳定性，例如 `0.4` 无法使用二进制小数精确表示，因此在其上的加减法会引入误差
+        # 而CompressedSolver依赖数值的绝对相等来实现去重，对这种误差较为敏感，需要进行检查
+        check_binary_floats_stability(
+            receiver_locations - receiver_locations[0],
+            threshold=0.95,
+            axes_names='XYZ'
+        )
+
         self.deterministic = deterministic
         self.progress = progress
 
@@ -82,12 +120,48 @@ class CompressedSolver(DemagnetizationSolver):
             for _ in range(3)
         ]
         self.Tmat9 = [t for ts in self.Tmat33 for t in ts]
-        self.indices_mat = ti_field(ti_size_t)  # TODO: taichi当前的索引类型
 
         # 保证 Tx[xyz]，Ty[xyz]，Tz[xyz] 分别在空间上连续，提高空间近邻性
         for m in self.Tmat33:
             builder.dense(ti.i, compressed_size).place(*m)
-        builder.dense(ti.ij, (nObs, nC)).place(self.indices_mat)
+
+        indices_mat = None
+        while quantized:
+            arch = ti_cfg().arch
+            if not is_extension_supported(arch, ti.extension.quant):
+                warnings.warn(f'`{arch.name}` does not support quantized types.'
+                              f' Ignoring `quantized` and using {ti_size_dtype.__name__} instead.')
+                break
+
+            # TODO: 万一将来位宽变成128了？
+            primitive_bits = np.iinfo(np.int64).bits
+            quantized_bits = math.ceil(np.log2(compressed_size))
+            n_packed = primitive_bits // quantized_bits
+            if n_packed <= 2:
+                warnings.warn(f'A single `uint{primitive_bits}` can pack only'
+                              f' {n_packed} quantized index type `uint{quantized_bits}`.'
+                              f' Ignoring `quantized` and using `{ti_size_dtype.__name__}` instead.')
+                break
+
+            indices_type = ti.types.quant.int(
+                bits=quantized_bits,
+                signed=False,
+                compute=ti_size_t
+            )
+            indices_mat = ti_field(indices_type)
+            (
+                builder
+                .dense(ti.ij, (nObs, math.ceil(nC / n_packed)))
+                .quant_array(ti.j, n_packed, max_num_bits=primitive_bits)
+                .place(indices_mat)
+            )
+            break
+
+        if indices_mat is None:
+            indices_mat = ti_field(ti_size_t)
+            builder.dense(ti.ij, (nObs, nC)).place(indices_mat)
+
+        self.indices_mat = indices_mat
 
         builder.finalize()
 
@@ -186,56 +260,22 @@ def compress_kernel(
         assert deterministic == CompressedSolver.Optimal
 
     mats = [*Tmat33[0], *Tmat33[1]]
-    n_param = len(mats)
     table_size = Tmat33[0][0].shape[0]
     kernel_size = np.prod(indices_mat.shape)
 
     if deterministic == CompressedSolver.Optimal:
-        table = np.c_[xn, yn, zn][:, None, :] - np.repeat(receiver_locations, 2, axis=1)[None, :, :]
-        compressed, inverse = np.unique(table.reshape(-1, n_param), axis=0, return_inverse=True)
-
-        used = compressed.shape[0]
-        overflow = used > table_size
-
-        if not overflow:
-            for i in range(n_param):
-                copy_col_vector_from_matrix(mats[i], compressed, i)
-            indices_mat.from_numpy(inverse.reshape(table.shape[:2]).astype(ti_size_dtype))
-    else:
-        # TODO: 等taichi更新获取变量类型的泛型操作后可以简化
-        val_type = np.result_type(receiver_locations, xn)
-        assert np.issubdtype(val_type, np.floating)
-        val_type = getattr(np, str(val_type).replace('float', 'uint'))
-        total_bits = np.iinfo(val_type).bits
-
-        overflow = ti_field(ti.i8, 1)
-        prime = search_prime(table_size)
-
-        if deterministic:
-            # 使用原子操作来防止哈希表的单个条目被多个线程操作，确保核矩阵参数正确
-            # 但会导致额外的计算和存储开销，实际压缩后尺寸会大于等于理想压缩结果
-            #   GPU下原子操作可能会导致相同参数被存在多个条目下，一般结果大于理想压缩结果
-            #   CPU下原子操作没有问题，一般结果等于理想压缩结果
-            invalid_value_for_dx1 = 2 * (np.max(receiver_locations[:, 0]) - np.min(xn[:, 0]))
-        else:
-            # 小于0时hash_unique会取消采用原子操作，允许并行访问操作哈希表
-            # 导致核矩阵部分参数产生偏差，实际压缩后尺寸会小于理想压缩结果
-            invalid_value_for_dx1 = -1
-
-        hash_unique(
-            receiver_locations,
+        used, overflow = compress_kernel_optimal(
+            mats, receiver_locations,
             xn, yn, zn,
-            *mats,
-            indices_mat,
-            to_taichi_type(val_type),
-            total_bits,
-            overflow,
-            prime,
-            invalid_value_for_dx1
+            indices_mat
         )
-
-        overflow = overflow.to_numpy()[0]
-        used = np.count_nonzero(Tmat33[0][0].to_numpy() < invalid_value_for_dx1)
+    else:
+        used, overflow = compress_kernel_by_hash(
+            mats, receiver_locations,
+            xn, yn, zn,
+            indices_mat,
+            deterministic
+        )
 
     if overflow:
         raise RuntimeError(f'Compression hash table overflowed.'
@@ -252,6 +292,80 @@ def compress_kernel(
                       f' or'
                       f' `1 / {int(1 / (used / 0.95 / kernel_size))}`'
                       f'.')
+
+    return used, overflow > 0
+
+
+def compress_kernel_optimal(
+        mats,
+        receiver_locations: np.ndarray,
+        xn: np.ndarray,
+        yn: np.ndarray,
+        zn: np.ndarray,
+        indices_mat
+):
+    n_param = len(mats)
+    table_size = mats[0].shape[0]
+
+    table = np.c_[xn, yn, zn][:, None, :] - np.repeat(receiver_locations, 2, axis=1)[None, :, :]
+    compressed, inverse = np.unique(table.reshape(-1, n_param), axis=0, return_inverse=True)
+
+    used = compressed.shape[0]
+    overflow = used > table_size
+
+    if not overflow:
+        for i in range(n_param):
+            copy_col_vector_from_matrix(mats[i], compressed, i)
+        indices_mat.from_numpy(inverse.reshape(table.shape[:2]).astype(ti_size_dtype))
+
+    return used, overflow > 0
+
+
+def compress_kernel_by_hash(
+        mats,
+        receiver_locations: np.ndarray,
+        xn: np.ndarray,
+        yn: np.ndarray,
+        zn: np.ndarray,
+        indices_mat,
+        deterministic: bool
+):
+    table_size = mats[0].shape[0]
+
+    # TODO: 等taichi更新获取变量类型的泛型操作后可以简化
+    val_type = np.result_type(receiver_locations, xn)
+    assert np.issubdtype(val_type, np.floating)
+    val_type = getattr(np, str(val_type).replace('float', 'uint'))
+    total_bits = np.iinfo(val_type).bits
+
+    overflow = ti_field(ti.i8, 1)
+    prime = search_prime(table_size)
+
+    if deterministic:
+        # 使用原子操作来防止哈希表的单个条目被多个线程操作，确保核矩阵参数正确
+        # 但会导致额外的计算和存储开销，实际压缩后尺寸会大于等于理想压缩结果
+        #   GPU下原子操作可能会导致相同参数被存在多个条目下，一般结果大于理想压缩结果
+        #   CPU下原子操作没有问题，一般结果等于理想压缩结果
+        invalid_value_for_dx1 = 2 * (np.max(receiver_locations[:, 0]) - np.min(xn[:, 0]))
+    else:
+        # 小于0时hash_unique会取消采用原子操作，允许并行访问操作哈希表
+        # 导致核矩阵部分参数产生偏差，实际压缩后尺寸会小于理想压缩结果
+        invalid_value_for_dx1 = -1
+
+    hash_unique(
+        receiver_locations,
+        xn, yn, zn,
+        *mats,
+        indices_mat,
+        to_taichi_type(val_type),
+        total_bits,
+        overflow,
+        prime,
+        invalid_value_for_dx1
+    )
+
+    overflow = overflow.to_numpy()[0]
+    used = np.count_nonzero(mats[0].to_numpy() < invalid_value_for_dx1)
 
     return used, overflow > 0
 
@@ -411,8 +525,10 @@ def multiply_with_row_stride_3_compressed(
 ):
     identity = ti.Matrix([[0, 0, 0], [0, 0, 0]])
     identity[1, row0] = 1
+    n_obs = indices_mat.shape[0]
+    n_cells = v.shape[0] // 3  # 启用quant类型后，indices_mat中可能会有多余的列存在
 
-    for r in range(indices_mat.shape[0]):
+    for r in range(n_obs):
         row = r * row_stride + row0
 
         p = 0
@@ -425,7 +541,7 @@ def multiply_with_row_stride_3_compressed(
             + (C[ind] + identity[p, 2]) * v[2, 0]
         )
 
-        for c in range(1, indices_mat.shape[1]):
+        for c in range(1, n_cells):
             p = 0
             if r == c:
                 p = 1
@@ -448,3 +564,32 @@ def copy_col_vector_from_matrix(
     size = ti.min(dst.shape[0], src.shape[0])
     for i in range(size):
         dst[i] = src[i, col]
+
+
+def check_binary_floats_stability(matrix, threshold=0.95, axes_names=None):
+    """检查二进制小数的稳定性，例如 `0.4` 无法使用二进制小数精确表示，
+    因此在其上的运算会引入误差，误差累积后会导致结果发生细微的偏差
+
+    Parameters
+    ----------
+    matrix
+        需要检查稳定性的矩阵
+    threshold
+        稳定性阈值（0 ~ 1，列元素中稳定的元素数大于该比例则认为合格）
+    axes_names
+        用于输出的坐标轴名
+    """
+    stable_mask = np.equal(matrix, limit_significand(matrix))
+    axes_ratio = np.count_nonzero(stable_mask, axis=0) / stable_mask.shape[0]
+    for axis, rate in enumerate(axes_ratio):
+        if rate < threshold:
+            if axes_names is not None:
+                axis = axes_names[axis]
+            warnings.warn(f'Low numeric stability detected on axis {axis}'
+                          f' ({rate:.2%} < {threshold:.2%}),'
+                          f' which may severely affect compression rate.'
+                          f' Consider adjusting mesh cell sizes by'
+                          f' `limit_significand(your_cell_sizes)`.'
+                          f'\n'
+                          f' See `metalpy.utils.numeric.limit_significand`'
+                          f' for more details.')

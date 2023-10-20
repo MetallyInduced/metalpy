@@ -164,8 +164,13 @@ def ti_field(dtype,
              needs_grad=False,
              needs_dual=False):
     ti_init_once()
-    dtype = to_taichi_type(dtype)
-    return ti.field(dtype, shape, order, name, offset, needs_grad, needs_dual)
+    if 'Type' in type(dtype).__name__ and type(dtype).__module__.startswith('taichi'):
+        # 有可能是quant类型，此时不需要转换
+        dt = dtype
+    else:
+        dt = to_taichi_type(dtype)
+
+    return ti.field(dt, shape, order, name, offset, needs_grad, needs_dual)
 
 
 class WrappedFieldsBuilder:

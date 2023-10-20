@@ -17,6 +17,7 @@ from metalpy.scab.demag.utils import get_prolate_spheroid_demag_factor
 from metalpy.scab.modelling.shapes import Ellipsoid
 from metalpy.scab.tied.potential_fields.magnetics.simulation import TiedSimulation3DIntegralMixin
 from metalpy.scab.utils.misc import define_inducing_field
+from metalpy.utils.numeric import limit_significand
 from metalpy.utils.taichi import ti_prepare
 
 
@@ -24,6 +25,7 @@ def main(cell_size, gpu=False):
     if gpu:
         ti_prepare(arch=ti.gpu, device_memory_fraction=0.8)
 
+    cell_size = limit_significand(cell_size)
     a, c = 10, 40
 
     model_mesh = Ellipsoid.spheroid(a, c, polar_axis=0).to_scene(model=80).build(cell_size=cell_size)

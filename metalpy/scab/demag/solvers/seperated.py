@@ -42,13 +42,15 @@ class SeperatedSolver(DemagnetizationSolver):
 
         Notes
         -----
-            优势：
-            1. 可以一定程度上绕过完整核矩阵尺寸的int32限制 (允许的网格规模为 `Integrated` 方法的3倍)
-            2. 可以使用AoS提高内存近邻性
+        优势：
 
-            缺陷：
-            1. 网格规模仍然受到taichi的int32索引限制
-            2. 相比于 `Integrated` 方法，内存需求并不会降低，并且如果矩阵规模较小，计算效率可能会低于 `Integrated` 方法
+        - 可以一定程度上绕过完整核矩阵尺寸的int32限制 (允许的网格规模为 `Integrated` 方法的3倍)
+        - 可以使用AoS提高内存近邻性
+
+        缺陷：
+
+        - 网格规模仍然受到taichi的int32索引限制
+        - 相比于 `Integrated` 方法，内存需求并不会降低，并且如果矩阵规模较小，计算效率可能会低于 `Integrated` 方法
         """
         super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field)
         self.direct_to_host = direct_to_host

@@ -33,11 +33,13 @@ class IntegratedSolver(DemagnetizationSolver):
 
         Notes
         -----
-            优势：
-            1. 简单直观
+        优势：
 
-            缺陷：
-            1. 存在taichi的int32索引限制
+        - 简单直观
+
+        缺陷：
+
+        - 存在taichi的int32索引限制
         """
         super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field)
         self.is_cpu = is_cpu
