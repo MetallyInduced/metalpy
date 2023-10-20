@@ -1,10 +1,14 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 
-from .injectors import RecoverableInjector, after
+from .injectors import RecoverableInjector
 from .mixin import Mixin
 
 
 class Patch(ABC):
+    Priority = DefaultPriority = 225
+
     def __init__(self):
         """用于在全局上下文中劫持与注入python-based方法，继承类必须重写apply方法
 
@@ -35,8 +39,8 @@ class Patch(ABC):
         --------
             PatchContext: patch上下文
         """
-        self.recoverable_injs: list[tuple[RecoverableInjector, tuple, dict]] = None
-        self.mixins: dict[type, list[tuple[Mixin, tuple, dict]]] = None
+        self.recoverable_injs: list[tuple[RecoverableInjector, tuple, dict]] | None = None
+        self.mixins: dict[type, list[tuple[Mixin, tuple, dict]]] | None = None
         self._context = None
 
     def get_mixed_classes(self):
@@ -73,7 +77,7 @@ class Patch(ABC):
     def priority(self):
         # -1 专属于Mixed的优先级，用于注入Mixin系统
         # TODO: 可能可以改为require/after类型的依赖图？
-        return 225
+        return type(self).Priority
 
     @property
     def context(self):

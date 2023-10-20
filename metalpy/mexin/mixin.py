@@ -1,3 +1,9 @@
+import functools
+import warnings
+
+from metalpy.utils.string import format_string_list
+
+
 class Mixin:
     def __init__(self, this):
         """定义一个Mixin类，用于在其它类中添加新的功能
@@ -20,3 +26,57 @@ class Mixin:
 
     def post_apply(self, this):
         pass
+
+
+def before(func=None, *, target=None):
+    return TaggedMethod(func, tag=TaggedMethod.Before, target=target)
+
+
+def after(func=None, *, target=None):
+    return TaggedMethod(func, tag=TaggedMethod.After, target=target)
+
+
+def replaces(func=None, *, keep_orig=False, target=None):
+    return TaggedMethod(func, tag=TaggedMethod.Replaces, keep_orig=keep_orig, target=target)
+
+
+class TaggedMethod:
+    Before = 'before'
+    After = 'after'
+    Replaces = 'replaces'
+    All = {Before, After, Replaces}
+
+    def __init__(self, func, tag, target=None, keep_orig=False):
+        self.func = func
+        self.tag = tag
+        self.target = target
+        self.keep_orig = keep_orig
+
+    def __new__(cls, func, *args, **kwargs):
+        if func is not None:
+            return TaggedMethod(*args, **kwargs)(func)
+        else:
+            return super().__new__(cls)
+
+    def __call__(self, func):
+        self.func = func
+
+        @functools.wraps(self.func)
+        def wrapper(*args, **kwargs):
+            return self.func(*args, **kwargs)
+
+        wrapper.__tags__ = self
+        return wrapper
+
+    @staticmethod
+    def verify(tag):
+        if tag not in TaggedMethod.All:
+            warnings.warn(f'Unknown mixin method type {tag},'
+                          f' must be one of {format_string_list(TaggedMethod.All)}.'
+                          f' Defaults to `{TaggedMethod.Replaces}`.')
+            return TaggedMethod.Replaces
+        return tag
+
+    @staticmethod
+    def check(meth):
+        return getattr(meth, '__tags__', None)

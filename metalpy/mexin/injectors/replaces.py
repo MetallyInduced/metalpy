@@ -1,9 +1,8 @@
 from typing import Union
 
-from metalpy.utils.object_path import get_nest
 from .recoverable_injector import RecoverableInjector
 from .utils import wrap_method_with_target
-from .replacement import create_replacement, get_ancestor
+from .replacement import create_replacement, get_ancestor, get_nest
 
 
 class Replaces(RecoverableInjector):
@@ -28,8 +27,8 @@ class Replaces(RecoverableInjector):
         """
         super().__init__()
         target_name = target.__name__
-        root_target = get_ancestor(target)
         if nest is None:
+            root_target = get_ancestor(target)
             nest = get_nest(root_target)
             if nest is None:
                 raise NotImplementedError(

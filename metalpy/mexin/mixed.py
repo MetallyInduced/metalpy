@@ -1,7 +1,8 @@
 import inspect
+import warnings
 
-from .injectors import extends, replaces, after
-from .mixin import Mixin
+from .injectors import extends, replaces, after, before
+from .mixin import Mixin, TaggedMethod
 from .patch import Patch
 from .sentinal import NO_MIXIN
 
@@ -34,7 +35,7 @@ class MixinManager:
         obj = mixin_type(target, *args, **kwargs)
 
         # 获取mixin的所有方法
-        methods = inspect.getmembers(obj, predicate=lambda x: inspect.ismethod(x) or inspect.isfunction(x))
+        methods = inspect.getmembers(obj, predicate=MixinManager._is_method)
         for name, method in methods:
             if name.startswith('__') or \
                f'_{mixin_type.__name__}__' in name or \
@@ -62,16 +63,61 @@ class MixinManager:
     def bind_method(self, method, name=None):
         # TODO: 引入注解来标记是否需要替换，或者标记替换别的目标
         # TODO: 标记是否需要保留原函数
+        tag = TaggedMethod.Replaces
+        keep_orig = False
         if name is None:
             name = method.__name__
+
+        mixing_config = TaggedMethod.check(method)
+        if mixing_config:
+            tag = TaggedMethod.verify(mixing_config.tag)
+            keep_orig = mixing_config.keep_orig
+            if mixing_config.target is not None:
+                # 用户指定的替换目标，覆盖之前获取到的名字
+                name = mixing_config.target
+
         target = self.target
-        if hasattr(target, name):
-            # 如果在目标存在同名方法则替换
-            method = replaces(getattr(target, name), keep_orig=False)(method)
-        else:
-            method = extends(target, name)(method)
+        target_method = getattr(target, name, None)
+
+        if not target_method:
+            # Replaces模式下如果不存在目标函数则隐式变为Extend，扩展新方法
+            if tag != TaggedMethod.Replaces:
+                warnings.warn(f'Trying to perform `{tag}`'
+                              f' on non-existing method `{name}`.'
+                              f' Consider using `{TaggedMethod.Replaces}` instead.')
+
+            extension = method
+            if keep_orig:
+                # Extend时本不存在原函数，但用户想keep_orig，所以给一个空函数来make user happy
+                warnings.warn(f'Trying to keep non-existing original method `{name}`.'
+                              f' Populating with an empty function.')
+
+                def extension(*args, **kwargs): ...
+
+            method = extends(target, name)(extension)
+
+            if keep_orig:
+                # 用于触发真正的Replaces
+                target_method = method
+
+        if target_method:
+            # 如果在目标存在同名方法则替换、前后插入
+            if tag == TaggedMethod.Replaces:
+                method = replaces(target_method, nest=target, keep_orig=keep_orig)(method)
+            elif tag == TaggedMethod.Before:
+                method = before(target_method, nest=target)(method)
+            elif tag == TaggedMethod.After:
+                method = after(target_method, nest=target)(method)
 
         return method
+
+    @staticmethod
+    def _is_method(func):
+        return (
+            inspect.ismethod(func)
+            or inspect.isfunction(func)
+            or TaggedMethod.check(func)
+        )
 
 
 class Mixed(Patch):
@@ -88,8 +134,10 @@ class Mixed(Patch):
         self.add_injector(after(self.target.__init__), self.apply_mixins)
 
     def apply_mixins(self, this, *_, **__):
-        manager = MixinManager(this)
-        this.mixins = manager
+        manager = getattr(this, 'mixins', None)
+        if manager is None:
+            manager = MixinManager(this)
+            this.mixins = manager
         for m, args, kwargs in self.pre_applied_mixins:
             manager.add(m, *args, **kwargs)
 

@@ -1,6 +1,6 @@
 import functools
 
-from metalpy.utils.object_path import reassign_object_name, reassign_object_module
+from metalpy.utils.object_path import get_nest as _get_nest, reassign_object_name, reassign_object_module
 
 
 def create_replacement(func, orig, executor, qualname=None, module_name=None):
@@ -65,6 +65,13 @@ def get_ancestor(repl):
         prev = orig
         orig = get_orig(orig)
     return prev
+
+
+def get_nest(repl):
+    """适配Replacement的get_nest"""
+    if hasattr(repl, 'repl_executor'):
+        return repl.repl_executor.nest
+    return _get_nest(repl)
 
 
 def is_or_is_replacement(obj, other):
