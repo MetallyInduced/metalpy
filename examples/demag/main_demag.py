@@ -8,7 +8,6 @@ from SimPEG.utils import plot2Ddata
 from discretize.utils import mkvc
 from matplotlib import pyplot as plt
 
-from metalpy.mepa import LinearExecutor
 from metalpy.scab import Progressed, Tied, Demaged
 from metalpy.scab.builder import SimulationBuilder
 from metalpy.scab.builder.potential_fields.magnetics import Simulation3DIntegralBuilder
@@ -21,7 +20,7 @@ from metalpy.utils.numeric import limit_significand
 from metalpy.utils.taichi import ti_prepare
 
 
-def main(cell_size, gpu=False):
+def compute(cell_size, gpu=False):
     if gpu:
         ti_prepare(arch=ti.gpu, device_memory_fraction=0.8)
 
@@ -59,7 +58,7 @@ def main(cell_size, gpu=False):
     # 基于积分方程法求解退磁效应
     sim_numeric = copy.deepcopy(builder)
     sim_numeric.patched(Demaged(
-        method=Demagnetization.Compressed if gpu else None,
+        method=Demagnetization.Compressed,
         compressed_size=400000,
         progress=True
     ))
@@ -71,27 +70,24 @@ def main(cell_size, gpu=False):
 
 
 if __name__ == '__main__':
-    executor = LinearExecutor(1)
+    # taichi相关配置
+    ti_prepare(device_memory_fraction=0.9)
+    gpu = False
 
-    workers = [w for w in executor.get_workers() if 'large-mem' in w.group][:1]
-    if len(workers) == 1:
-        f = executor.submit(main, [1, 1, 0.5], workers=workers)
-    else:
-        ti_prepare(device_memory_fraction=0.9)
-        gpu = False
-        if executor.is_local():
-            gpu = True
-        f = executor.submit(main, [1.6, 1.6, 1], gpu=gpu)
+    model_t, pred_t, model_p, pred_p, receiver_points = compute(
+        cell_size=[2, 2, 2],
+        gpu=gpu
+    )
 
-    demaged_model, pred, demaged_model2, pred2, receiver_points = executor.gather(f)
-
-    print('Model MAPE (%):', (abs(demaged_model2 - demaged_model) / abs(demaged_model)).mean() * 100)
-    ape = abs((pred - pred2) / pred)
-    print('TMI MAPE (%):', ape[abs(pred) > 1e-2].mean() * 100)
+    model_mape = abs((model_p - model_t) / model_t).mean()
+    tmi_mape = abs((pred_t - pred_p) / pred_t).mean()
+    print(f'--- Mean Absolute Percentage Error ---')
+    print(f'Model: {model_mape:.2%}')
+    print(f'TMI: {tmi_mape:.2%}')
 
     fig = plt.figure(figsize=(17, 4))
 
-    data_array = np.c_[pred, pred2, pred-pred2]
+    data_array = np.c_[pred_t, pred_p, pred_t - pred_p]
     plot_title = ["Observed", "Predicted", "Absolute Error"]
     plot_units = ["nT", "nT", ""]
 
