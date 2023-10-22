@@ -8,7 +8,7 @@ import imageio
 import pyvista as pv
 import tqdm
 
-from metalpy.mepa import LinearExecutor, BoundWorkerContext, Executor
+from metalpy.mepa import LinearExecutor, Executor, ParallelProgress
 from metalpy.utils.dhash import dhash
 from metalpy.utils.file import make_cache_file_path, PathLike
 from metalpy.utils.model import convert_model_dict_to_multiblock, pv_ufunc_apply, DataSetLike
@@ -156,7 +156,7 @@ class UniversalDataSet(DataSetWrapper):
 
             if progress is True:
                 total = len(model_files)
-                progress = tqdm.tqdm(total=total)
+                progress = executor.progress(total=total)
             elif isinstance(progress, tqdm.tqdm):
                 pass
             else:
@@ -165,24 +165,10 @@ class UniversalDataSet(DataSetWrapper):
             if executor is None:
                 executor = LinearExecutor()
 
-            timer = Timer()
-            with timer:
-                if progress:
-                    worker_context = executor.on('progress', lambda d: progress.update(d))
-                else:
-                    worker_context = None
-
-                futures = []
-
+            with Timer() as timer:
                 allocator = executor.arrange(model_files)
-                for w in executor.get_workers():
-                    futures.append(executor.submit(
-                        _load_models_from_directory,
-                        cwd=path,
-                        paths=allocator.assign(w),
-                        callback=callback,
-                        worker_context=worker_context
-                    ))
+                futures = executor.distribute(_load_models_from_directory, cwd=path, paths=allocator, callback=callback,
+                                              progress=progress)
 
                 model_dicts = executor.gather(futures)
 
@@ -193,15 +179,14 @@ class UniversalDataSet(DataSetWrapper):
                 if progress is not None:
                     progress.close()
 
-            if cache and timer.elapsed > 5:
-                if verbose:
-                    print(f'Saving loaded model to `{cache_path}`...')
+                if cache and timer.elapsed > 5:
+                    if verbose:
+                        print(f'Saving loaded model to `{cache_path}`...')
 
-                with timer:
-                    ret.save(cache_path, binary=True)
-
-                if verbose:
-                    print(f'Model saved in {timer}.')
+                    with timer:
+                        ret.save(cache_path, binary=True)
+                        if verbose:
+                            print(f'Model saved in {timer}.')
 
         return cls(ret)
 
@@ -242,7 +227,7 @@ def _load_models_from_directory(
         cwd,
         paths=None,
         callback=None,
-        worker_context: BoundWorkerContext | None = None,
+        progress: ParallelProgress | None = None,
 ):
     root_model: dict[str, Any] = {}
 
@@ -255,7 +240,7 @@ def _load_models_from_directory(
             cwd=cwd,
             child_path=Path(path),
             callback=callback,
-            worker_context=worker_context
+            progress=progress
         )
 
         if sub_model is not None:
@@ -281,7 +266,7 @@ def _check_directory_and_load(
         cwd: Path,
         child_path: Path,
         callback=None,
-        worker_context: BoundWorkerContext | None = None
+        progress: ParallelProgress | None = None
 ):
     sub_model = None
     if _check_is_readable(child_path):
@@ -290,8 +275,8 @@ def _check_directory_and_load(
         except IOError:
             pass
 
-        if worker_context is not None:
-            worker_context.fire(1)
+        if progress is not None:
+            progress.update(1)
 
     if sub_model is not None:
         return child_path.relative_to(cwd).parts, sub_model

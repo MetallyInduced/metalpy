@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from typing import overload
 
 
 class WorkerContext(ABC):
@@ -9,8 +12,17 @@ class WorkerContext(ABC):
     def fire(self, event, *args, **kwargs):
         pass
 
-    def bind(self, event):
-        return BoundWorkerContext(self, event)
+    @overload
+    def bind(self, event) -> BoundWorkerContext: ...
+
+    @overload
+    def bind(self, event, idx: int | None) -> IndexedBoundWorkerContext: ...
+
+    def bind(self, event, idx: int | None = None) -> BoundWorkerContext | IndexedBoundWorkerContext:
+        if idx is None:
+            return BoundWorkerContext(self, event)
+        else:
+            return IndexedBoundWorkerContext(self, event, idx=idx)
 
 
 class BoundWorkerContext:
@@ -29,3 +41,28 @@ class BoundWorkerContext:
 
     def fire(self, *args, **kwargs):
         self.context.fire(self.event, *args, **kwargs)
+
+
+class IndexedBoundWorkerContext(BoundWorkerContext):
+    def __init__(self, context: WorkerContext, event, idx: int | None = None):
+        """支持将WorkerContext绑定到给定事件上，从而在调用fire函数时不需要额外指定事件名
+
+        Parameters
+        ----------
+        context
+            事件消息通信上下文
+        event
+            绑定的事件名
+        event
+            绑定的事件回调函数的下标
+        """
+        super().__init__(context, event)
+        self.idx = idx
+
+    def __getstate__(self):
+        """idx不需要一起传过去
+        """
+        return {
+            'context': self.context,
+            'event': self.event
+        }

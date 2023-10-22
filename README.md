@@ -14,7 +14,7 @@
 **METAL Essential Tools and Libraries (Python)** (**metalpy**),
 is a collection of common python tools and libraries for SimPEG and related workflows,
 which currently includes:
-1. **MEPA**: a general-purposed parallelization framework.
+1. [**MEPA**](metalpy/mepa/README.md): a general-purposed parallelization framework.
 2. [**Mexin**](metalpy/mexin/README.md): a code injection framework for Python.
 3. [**SCAB**](metalpy/scab/README.md): a collection of SimPEG related utilities and extensions.
 4. [**Carto**](metalpy/carto/README.md): cartography related utilities, aiming to download tile maps and

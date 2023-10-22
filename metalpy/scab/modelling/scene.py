@@ -208,42 +208,29 @@ class Scene(OSMFormat, PTopoFormat):
 
             if progress:
                 n_tasks = sum((obj.n_tasks for layer in layers for obj in layer))
-                progress = tqdm.tqdm(
-                    total=n_tasks * n_workers,
-                    ncols=80
-                )
-                ctx = executor.on('update', lambda d: progress.update(d))
-                ctx.update = ctx.fire  # 戴上面具（指伪装成tqdm的progress bar）
+                progress = executor.progress(total=n_tasks * n_workers)
             else:
-                ctx = None
+                progress = None
 
             mesh_centers = np.asarray(mesh.cell_centers)
 
             shuffle = n_workers > 1
             mesh_alloc = executor.arrange(mesh_centers, shuffle=shuffle)
 
-            futures = []
-            for i, worker in enumerate(executor.get_workers()):
-                futures.append(executor.submit(
-                    self._build_mesh_worker,
-                    layers,
-                    mesh_alloc.assign(worker),
-                    progress=ctx,
-                    worker=worker
-                ))
-            executor.gather(futures)
+            futures = executor.distribute(self._build_mesh_worker, layers, mesh_alloc, progress=progress)
+            results = executor.gather(futures)
 
             models_dict = {}
-            for key in futures[0].result().keys():
-                arr = np.concatenate([future.result()[key] for future in futures])
-                models_dict[key] = mesh_alloc.inverse_shuffle(arr)  # 需要还原被打乱的数据
+            for key in results[0].keys():
+                # 组装并还原被打乱的数据
+                models_dict[key] = mesh_alloc.reassemble([result[key] for result in results])
 
             if cache_filepath is not None:
                 import pickle
                 with open(cache_filepath, 'wb') as f:
                     pickle.dump(models_dict, f)
 
-        if isinstance(progress, tqdm.tqdm):
+        if progress is not None:
             progress.close()
 
         return ModelledMesh(mesh, models_dict)

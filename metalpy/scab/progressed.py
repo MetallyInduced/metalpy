@@ -1,91 +1,67 @@
 from __future__ import annotations
 
+from typing import Union
+
 import tqdm
 from SimPEG.simulation import BaseSimulation
 
-from metalpy.mepa import Executor, Worker
+from metalpy.mepa import Executor, Worker, ParallelProgress
 from metalpy.mexin import Mixin
 from metalpy.mexin.patch import Patch
 from .distributed.policies import Distributable
-from ..mepa.executor import WorkerContext
+
+ProgressContext = Union[tqdm.tqdm, ParallelProgress, None]
 
 
 class Progress(Mixin):
-    def __init__(self, this: BaseSimulation, ctx: WorkerContext = None):
+    def __init__(self, this: BaseSimulation, patch: Progressed):
         super().__init__(this)
+        self.patch = patch
 
-        self.progress_ctx = ctx
-        self.progressbar: tqdm.tqdm | None = None
+    def get_progress_ctx(self, _=None):
+        return self.patch.get_context()
 
-    @property
-    def progressbar(self) -> tqdm.tqdm | None:
-        return self._progressbar
+    def reset(self, _, total):
+        self.get_progress_ctx().reset(total)
 
-    @progressbar.setter
-    def progressbar(self, value: tqdm.tqdm | None):
-        self._progressbar = value
+    def update(self, _, n):
+        self.get_progress_ctx().update(n)
 
-    def get_progressbar(self, this):
-        return self.progressbar
-
-    def reset(self, this, total):
-        if self.progress_ctx is not None:
-            self.progress_ctx.fire(Progressed.REGISTER, total)
-        else:
-            self.progressbar = tqdm.tqdm(total=total, **Progressed.PROGRESS_STYLES)
-
-    def update(self, this, count):
-        if self.progress_ctx is not None:
-            self.progress_ctx.fire(Progressed.UPDATE, count)
-        elif self.progressbar is not None:
-            self.progressbar.update(count)
-
-    def close(self, this):
-        if self.progress_ctx is not None:
-            self.progress_ctx.fire(Progressed.FINISHED, 1)
-        elif self.progressbar is not None:
-            self.progressbar.close()
+    def close(self, _):
+        self.get_progress_ctx().close()
 
 
 class Progressed(Patch, Distributable):
-    REGISTER = 'Progressed-register'
-    UPDATE = 'Progressed-update'
-    FINISHED = 'Progressed-finished'
-    PROGRESS_STYLES = {
+    BaseProgressStyles = {
         'unit_scale': True
     }
 
-    def __init__(self, ctx=None):
+    def __init__(self, _progress_ctx: ProgressContext = None, **tqdm_kw):
+        """进度条插件，为正演添加进度条机制（目前）
+
+        Parameters
+        ----------
+        _progress_ctx
+            进度上下文，用户不应手动指定
+        tqdm_kw
+            用于 `tqdm` 的进度条参数
+        """
         super().__init__()
-        self.ctx = ctx
-        self.progress: tqdm.tqdm | None = None
-        self.n_distributes = 0
+        self.progress_ctx: ProgressContext = _progress_ctx
+        self.tqdm_kw = {**Progressed.BaseProgressStyles, **tqdm_kw}
 
     def apply(self):
         if len(self.context.get_patches()) == 1:
             raise RuntimeError("Progressed patch cannot be used alone due to SimPEG's design")
+        self.add_mixin(BaseSimulation, Progress, patch=self)
 
-        self.add_mixin(BaseSimulation, Progress, ctx=self.ctx)
-
-    def get_context(self, executor: Executor):
-        if self.ctx is None:
-            self.progress = tqdm.tqdm(total=0, **Progressed.PROGRESS_STYLES)
-            executor.on(Progressed.REGISTER, self.add_to_total)
-            executor.on(Progressed.UPDATE, lambda x: self.progress.update(x))
-            executor.on(Progressed.FINISHED, self.indicate_finished)
-            self.ctx = executor.get_worker_context()
-
-        self.n_distributes += 1
-        return self.ctx
-
-    def add_to_total(self, i):
-        self.progress.total += i
-        self.progress.refresh()
-
-    def indicate_finished(self, i):
-        self.n_distributes -= i
-        if self.n_distributes <= 0 and self.progress is not None:
-            self.progress.close()
+    def get_context(self, executor: Executor | None = None):
+        if self.progress_ctx is None:
+            if executor is not None:
+                self.progress_ctx = executor.progress(**self.tqdm_kw)
+            else:
+                self.progress_ctx = tqdm.tqdm(**self.tqdm_kw)
+        return self.progress_ctx
 
     def distribute_to(self, executor: Executor, worker: Worker):
-        return Progressed(ctx=self.get_context(executor))
+        return Progressed(_progress_ctx=self.get_context(executor))

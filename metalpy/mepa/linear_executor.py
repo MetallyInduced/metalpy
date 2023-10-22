@@ -24,6 +24,11 @@ class LinearExecutor(Executor):
                                      lambda x: x if not isinstance(x, LazyEvaluator) else self.gather([x])[0])
         return LazyEvaluator(func, *args, **kwargs)
 
+    def progress(self, total=0, **kwargs):
+        ret = super().progress(total=total, **kwargs)
+        ret.enable_local_lock(False)
+        return ret
+
     def get_workers(self):
         return self.workers
 

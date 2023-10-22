@@ -4,12 +4,13 @@ import contextlib
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Collection
-from typing import Callable
+from typing import Callable, Any
 
-from .task_allocator import BoundedTaskAllocator, ShuffleChoice
+from .parallel_progress import ParallelProgress
+from .task_allocator import TaskAllocator, BoundTaskAllocator, ShuffleChoice
 from .utils import structured_traverse
 from .worker import Worker
-from .worker_context import WorkerContext, BoundWorkerContext
+from .worker_context import WorkerContext, BoundWorkerContext, IndexedBoundWorkerContext
 
 
 class Executor(ABC):
@@ -22,8 +23,57 @@ class Executor(ABC):
         self._anonymous_event_counter = 0
 
     def submit(self, func, *args, worker=None, workers=None, **kwargs):
+        """发布任务
+
+        Parameters
+        ----------
+        func
+            待执行的函数
+        worker, workers
+            指定需要绑定的worker
+        args, kwargs
+            函数参数
+
+        Returns
+        -------
+        future
+            所分配任务的future
+        """
         workers = check_workers(worker, workers)
         return self.do_submit(func, workers=workers, *args, **kwargs)
+
+    def distribute(self, func, *args, **kwargs):
+        """将任务分派到所有worker上
+
+        对 `args` 和 `kwargs` 中的 `TaskAllocator` 会按权重分配到worker上。
+
+        Parameters
+        ----------
+        func
+            待执行的函数
+        args, kwargs
+            函数参数
+
+        Returns
+        -------
+        futures
+            所分配任务的futures，长度与执行器实例的worker数相同
+        """
+        ret = []
+        for w in self.get_workers():
+            def check_param(p):
+                if isinstance(p, TaskAllocator):
+                    return p.assign(w)
+                else:
+                    return p
+
+            ret.append(self.submit(
+                func,
+                *structured_traverse(list(args), check_param),
+                **structured_traverse(kwargs, check_param),
+                worker=w
+            ))
+        return ret
 
     def map(self, func, *iterables, worker=None, workers=None, chunksize=None):
         workers = check_workers(worker, workers)
@@ -70,7 +120,7 @@ class Executor(ABC):
     def do_submit(self, func, *args, workers=None, **kwargs):
         pass
 
-    def arrange(self, data, shuffle: ShuffleChoice = False) -> BoundedTaskAllocator:
+    def arrange(self, data, shuffle: ShuffleChoice = False) -> BoundTaskAllocator:
         """将给定序列数据按当前worker的权重分割
 
         Parameters
@@ -85,13 +135,13 @@ class Executor(ABC):
         allocator
             数据分配器，遍历即可得到按权重分配的数据
         """
-        return BoundedTaskAllocator.arrange(
+        return BoundTaskAllocator.arrange(
             data,
             weights=self.get_workers(),
             shuffle=shuffle
         )
 
-    def arrange_many(self, *data_list, shuffle: ShuffleChoice = False) -> BoundedTaskAllocator:
+    def arrange_many(self, *data_list, shuffle: ShuffleChoice = False) -> BoundTaskAllocator:
         """将给定多个序列数据按当前worker的权重分割，并类似zip(*)进行组合
 
         Parameters
@@ -117,11 +167,32 @@ class Executor(ABC):
         <<<  (array([3, 4, 5]), array([10, 11, 12])),
         <<<  (array([6]), array([13]))]
         """
-        return BoundedTaskAllocator.arrange_many(
+        return BoundTaskAllocator.arrange_many(
             *data_list,
             weights=self.get_workers(),
             shuffle=shuffle
         )
+
+    def progress(self, total=0, **kwargs) -> ParallelProgress:
+        """构造并行进度条，用于快捷实现分布式进度展示
+
+        Parameters
+        ----------
+        total
+            总任务量
+        kwargs
+            其它需要传递给 `tqdm` 进度条构造函数的参数
+
+        Returns
+        -------
+        parallel_progress
+            主机侧并行进度条，可以通过函数捕获或传参，传递给worker使用
+
+        See Also
+        --------
+        :class:`ParallelProgress` : 并行进度条实现
+        """
+        return ParallelProgress(self, total=total, **kwargs)
 
     @abstractmethod
     def get_workers(self) -> Collection[Worker]:
@@ -189,6 +260,10 @@ class Executor(ABC):
     def submit_and_gather(self, func, *args, worker=None, workers=None, **kwargs):
         fut = self.submit(func, *args, worker=worker, workers=workers, **kwargs)
         return self.gather(fut)
+
+    def distribute_and_gather(self, func, *args, **kwargs):
+        futures = self.distribute(func, *args, **kwargs)
+        return self.gather(futures)
 
     def _gather(self, futures):
         """收集futures的结果的实现逻辑
@@ -263,7 +338,7 @@ class Executor(ABC):
     def receive_events(self, timeout):
         pass
 
-    def on(self, event, callback) -> BoundWorkerContext:
+    def on(self, event, callback) -> IndexedBoundWorkerContext:
         """绑定子worker发出的消息事件回调。
 
         Executor会在单独的监听线程中获取消息事件并调用回调函数。
@@ -271,7 +346,7 @@ class Executor(ABC):
         Parameters
         ----------
         event
-            监听的事件标记或事件回调函数
+            监听的事件标记
         callback
             事件回调函数
 
@@ -280,8 +355,10 @@ class Executor(ABC):
         context
             返回绑定到该事件的WorkerContext，可以直接通过fire调用到该回调函数，不需要指定事件
         """
-        self._event_handlers.setdefault(event, []).append(callback)
-        return self.get_worker_context().bind(event)
+        callbacks = self._event_handlers.setdefault(event, [])
+        callbacks.append(callback)
+
+        return self.get_worker_context().bind(event, len(callbacks))
 
     def register(self, callback) -> BoundWorkerContext:
         """绑定一个匿名消息的事件回调。
@@ -305,10 +382,49 @@ class Executor(ABC):
 
         return self.on(event, callback)
 
+    def off(self, event: BoundWorkerContext | Any, callback=None):
+        """移除子worker绑定的消息事件回调。
+
+        Parameters
+        ----------
+        event
+            监听的事件标记
+        callback
+            事件回调函数，如果不指定，则指定事件下的所有回调函数
+        """
+        if isinstance(event, BoundWorkerContext):
+            event_key = event.event
+            idx = None
+            if isinstance(event, IndexedBoundWorkerContext):
+                idx = event.idx
+        else:
+            event_key = event
+            if callback is not None:
+                # 指示需要进行搜索
+                idx = callback
+            else:
+                # 指示全部移除
+                idx = None
+
+        if idx is None:
+            # 全部移除
+            self._event_handlers.pop(event)
+        else:
+            callbacks = self._event_handlers.get(event_key, None)
+            if callbacks is not None:
+                if not isinstance(idx, int):
+                    idx = callbacks.index(callback)
+                callbacks[idx] = None
+                pop_trailing_nones(callbacks)
+                if len(callbacks) == 0:
+                    self._event_handlers.pop(event)
+
     def dispatch_event(self, event, args, kwargs):
         listeners = self._event_handlers.get(event, None)
         if listeners is not None:
             for listener in listeners:
+                if listener is None:
+                    continue
                 listener(*args, **kwargs)
 
     def monitor(self):
@@ -388,3 +504,8 @@ def check_workers(worker, workers):
         workers = list(workers)
 
     return workers
+
+
+def pop_trailing_nones(elems):
+    while elems[-1] is None:
+        elems.pop()

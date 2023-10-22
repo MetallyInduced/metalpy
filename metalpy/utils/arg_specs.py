@@ -24,7 +24,7 @@ class Arg:
         return f'{Arg.__name__}("{self.name}")'
 
     def __str__(self):
-        return Arg.__name__
+        return self.__repr__()
 
 
 class ArgSpecKey:

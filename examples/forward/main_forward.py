@@ -51,7 +51,7 @@ def main():
         receiver_list = magnetics.receivers.Point(receiver_points, components=components)
         receiver_list = [receiver_list]
 
-        inducing_field = magnetics.sources.SourceField(
+        inducing_field = magnetics.sources.UniformBackgroundField(
             receiver_list=receiver_list, parameters=source_field
         )
         survey = magnetics.survey.Survey(inducing_field)

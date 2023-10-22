@@ -40,6 +40,10 @@ class TaskAllocator(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def reassemble(self, *data, reverse_shuffle=True):
+        pass
+
+    @abc.abstractmethod
     def __getitem__(self, item):
         pass
 
@@ -91,7 +95,7 @@ class SingleTaskAllocator(TaskAllocator):
     def finished(self):
         return self.base_index >= len(self.data)
 
-    def inverse_shuffle(self, data):
+    def inverse_shuffle(self, *data):
         """从随机打乱的数据中恢复原索引
 
         Parameters
@@ -104,12 +108,40 @@ class SingleTaskAllocator(TaskAllocator):
         ordered_data
             还原为原顺序的数据
         """
+        assert len(data) == 1, f'`{SingleTaskAllocator.__name__}` accepts only one data.'
+        data = data[0]
+
         if self.shuffle_mask is None:
             return data
         else:
             inverse_mask = self.shuffle_mask.copy()
             inverse_mask[self.shuffle_mask] = np.arange(len(self.shuffle_mask))
             return np.asarray(data)[inverse_mask]
+
+    def reassemble(self, *data, reverse_shuffle=True):
+        """从被分组的数据中重新组装，并恢复随机打乱过程
+
+        Parameters
+        ----------
+        data
+            乱序的数据列表，可能是分派任务后产出的数据
+        reverse_shuffle
+            指示是否将拼装后的结果从乱序中复原
+
+        Returns
+        -------
+        reassembled_data
+            组装后的数据
+        """
+        assert len(data) == 1, f'`{SingleTaskAllocator.__name__}` accepts only one data.'
+        data = data[0]
+
+        data = np.concatenate(data, axis=0)
+
+        if reverse_shuffle:
+            data = self.inverse_shuffle(data)
+
+        return data
 
     def __getitem__(self, item):
         if item > 0:
@@ -145,11 +177,17 @@ class MultiTaskAllocator(TaskAllocator):
             a.inverse_shuffle(d) for d, a in zip(data_list, self.allocators)
         ]
 
+    def reassemble(self, *data_list, reverse_shuffle=True):
+        return [
+            a.reassemble(d, reverse_shuffle=reverse_shuffle)
+            for d, a in zip(data_list, self.allocators)
+        ]
+
     def __getitem__(self, item):
         return self.allocators.batch_items[item]
 
 
-class BoundedTaskAllocator(TaskAllocator):
+class BoundTaskAllocator(TaskAllocator):
     def __init__(self, allocator: TaskAllocator, weights: WeightsType):
         self.allocator = allocator
         self.weights = extract_weights(weights)
@@ -157,7 +195,7 @@ class BoundedTaskAllocator(TaskAllocator):
     @staticmethod
     def arrange(data, *, weights, shuffle: ShuffleChoice = False):
         weights = extract_weights(weights)
-        return BoundedTaskAllocator(
+        return BoundTaskAllocator(
             SingleTaskAllocator(data, total=sum(weights), shuffle=shuffle),
             weights=weights
         )
@@ -165,7 +203,7 @@ class BoundedTaskAllocator(TaskAllocator):
     @staticmethod
     def arrange_many(*data_list, weights, shuffle: ShuffleChoice = False):
         weights = extract_weights(weights)
-        return BoundedTaskAllocator(
+        return BoundTaskAllocator(
             MultiTaskAllocator(*data_list, total=sum(weights), shuffle=shuffle),
             weights=weights
         )
@@ -185,6 +223,9 @@ class BoundedTaskAllocator(TaskAllocator):
 
     def inverse_shuffle(self, *data):
         return self.allocator.inverse_shuffle(*data)
+
+    def reassemble(self, *data_list, reverse_shuffle=True):
+        return self.allocator.reassemble(*data_list, reverse_shuffle=reverse_shuffle)
 
     def __iter__(self):
         yield from self.allocator.iter(self.weights)
