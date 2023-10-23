@@ -51,18 +51,18 @@ class SliceView:
 
         Examples
         --------
-            >>> plotter = pv.Plotter(shape=(1, 2))
-            >>> plotter.subplot(0, 0)
-            >>> slice_view = SliceView(plotter, [0, 1])
+        >>> plotter = pv.Plotter(shape=(1, 2))
+        >>> plotter.subplot(0, 0)
+        >>> slice_view = SliceView(plotter, [0, 1])
 
-            >>> voxels = pv.voxelize(pv.Sphere(1, (0, 0, 0)).scale((8, 4, 2), inplace=False), density=0.4)
-            >>> plotter.add_mesh(voxels, opacity=1, style='surface', show_edges=True)
-            >>> slice_view.add_mesh(voxels, opacity=1, style='surface', show_edges=True)
+        >>> voxels = pv.voxelize(pv.Sphere(1, (0, 0, 0)).scale((8, 4, 2), inplace=False), density=0.4)
+        >>> plotter.add_mesh(voxels, opacity=1, style='surface', show_edges=True)
+        >>> slice_view.add_mesh(voxels, opacity=1, style='surface', show_edges=True)
 
-            >>> plotter.show_grid()
-            >>> plotter.enable_cell_picking(callback=slice_view.clip_by_selection, show=False, through=False)
+        >>> plotter.show_grid()
+        >>> plotter.enable_cell_picking(callback=slice_view.clip_by_selection, show=False, through=False)
 
-            >>> plotter.show()
+        >>> plotter.show()
         """
         self.mesh_elements = []
         self.actors = []

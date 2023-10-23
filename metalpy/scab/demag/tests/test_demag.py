@@ -4,7 +4,7 @@ from discretize.utils import mkvc
 
 from metalpy.scab import Tied, Demaged
 from metalpy.scab.builder import SimulationBuilder
-from metalpy.scab.demag import Demagnetization
+from metalpy.scab.demag.demagnetization import Demagnetization
 from metalpy.scab.demag.utils import get_prolate_spheroid_demag_factor
 from metalpy.scab.modelling.shapes import Ellipsoid
 from metalpy.utils.file import make_cache_directory

@@ -11,7 +11,7 @@ from matplotlib import pyplot as plt
 from metalpy.scab import Progressed, Tied, Demaged
 from metalpy.scab.builder import SimulationBuilder
 from metalpy.scab.builder.potential_fields.magnetics import Simulation3DIntegralBuilder
-from metalpy.scab.demag import Demagnetization
+from metalpy.scab.demag.demagnetization import Demagnetization
 from metalpy.scab.demag.utils import get_prolate_spheroid_demag_factor
 from metalpy.scab.modelling.shapes import Ellipsoid
 from metalpy.scab.tied.potential_fields.magnetics.simulation import TiedSimulation3DIntegralMixin
