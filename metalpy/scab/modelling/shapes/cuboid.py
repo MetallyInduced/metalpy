@@ -113,6 +113,30 @@ class Cuboid(Shape3D):
     @property
     def z1(self): return self.origin[2] + self.lengths[2]
 
+    @x0.setter
+    def x0(self, val):
+        self.lengths[0] = self.x1 - val
+        self.origin[0] = val
+
+    @x1.setter
+    def x1(self, val): self.lengths[0] = val - self.x0
+
+    @y0.setter
+    def y0(self, val):
+        self.lengths[1] = self.y1 - val
+        self.origin[1] = val
+
+    @y1.setter
+    def y1(self, val): self.lengths[1] = val - self.y0
+
+    @z0.setter
+    def z0(self, val):
+        self.lengths[2] = self.z1 - val
+        self.origin[2] = val
+
+    @z1.setter
+    def z1(self, val): self.lengths[2] = val - self.z0
+
     @property
     def corner(self): return self.origin
 

@@ -162,11 +162,13 @@ class TaichiSimulation3DIntegral:
 
         # TODO: 由于Taichi目前采用i32作为索引类型，数组元素总数不能超过int32的上限，否则行为未定义
         #  如果后续Taichi支持i64索引类型，则可以去掉这个限制
-        assert n_rows * n_cols < ti_size_max, (
-            "Kernel matrix with more than INT32_MAX elements has exceeded limits of Taichi."
-            "\nConsider set `store_sensitivities='forward_only'`"
-            " or `builder.store_sensitivities(False)` if using `SimulationBuilder`."
-            "\nSee also `https://github.com/taichi-dev/taichi/issues/8161`."
+        ratio = n_rows * n_cols / ti_size_max
+        assert ratio < 1, (
+            f"Kernel matrix with more than `INT32_MAX` elements has exceeded limits of Taichi"
+            f" ({ratio:.2f}x larger than `INT32_MAX`)."
+            f"\nConsider set `store_sensitivities='forward_only'`"
+            f" or `builder.store_sensitivities(False)` if using `SimulationBuilder`."
+            f"\nSee also `https://github.com/taichi-dev/taichi/issues/8161`."
         )
 
         monitor = None

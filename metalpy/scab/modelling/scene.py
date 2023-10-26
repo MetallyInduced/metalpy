@@ -230,8 +230,8 @@ class Scene(OSMFormat, PTopoFormat):
                 with open(cache_filepath, 'wb') as f:
                     pickle.dump(models_dict, f)
 
-        if progress is not None:
-            progress.close()
+            if progress is not None:
+                progress.close()
 
         return ModelledMesh(mesh, models_dict)
 

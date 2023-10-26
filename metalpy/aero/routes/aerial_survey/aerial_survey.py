@@ -10,6 +10,7 @@ from numpy.typing import ArrayLike
 from metalpy.aero.utils.line_analysis import split_lines
 from metalpy.carto.coords import Coordinates
 from metalpy.utils import array_ops
+from metalpy.utils.array_ops import get_column
 from metalpy.utils.matplotlib import check_axis
 from metalpy.utils.pandas import drop_by_indices
 from metalpy.utils.type import is_numeric_array, notify_package
@@ -509,17 +510,19 @@ def _infer_position_columns(arr):
     return keys_found
 
 
-def _guess_is_lon_lat_position(cols: Sequence[str], position):
-    if 'lon' in cols[0].lower() and 'lat' in cols[1].lower():
-        return True
-    elif (
-            all(abs(position.iloc[:, 0]) <= 180)  # 经度范围
-            and all(abs(position.iloc[:, 1]) <= 90)  # 纬度范围
-            and all(position.std() < 10)  # 如果单位为m，则主要区域范围不应小于10m，此时应为误用经纬度
-    ):
+def _guess_is_lon_lat_position(cols: Sequence[str | int], position):
+    if isinstance(cols[0], str) and 'lon' in cols[0].lower() and 'lat' in cols[1].lower():
         return True
     else:
-        return False
+        x, y = get_column(position, 0), get_column(position, 1)
+        if (
+                all(abs(x) <= 180)  # 经度范围
+                and all(abs(y) <= 90)  # 纬度范围
+                and all(np.std(x) < 10)  # 如果单位为m，则主要区域范围不应小于10m，此时应为误用经纬度
+        ):
+            return True
+        else:
+            return False
 
 
 WrapLonLatToUTM = array_ops.OperatorDispatcher('WrapLonLatToUTM')

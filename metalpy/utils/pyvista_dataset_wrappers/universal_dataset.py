@@ -154,16 +154,14 @@ class UniversalDataSet(DataSetWrapper):
             if preview:
                 model_files = model_files[:preview]
 
+            if executor is None:
+                executor = LinearExecutor()
+
             if progress is True:
                 total = len(model_files)
                 progress = executor.progress(total=total)
-            elif isinstance(progress, tqdm.tqdm):
-                pass
-            else:
+            elif progress is False:
                 progress = None
-
-            if executor is None:
-                executor = LinearExecutor()
 
             with Timer() as timer:
                 allocator = executor.arrange(model_files)
