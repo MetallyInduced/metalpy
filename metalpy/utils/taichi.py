@@ -62,7 +62,7 @@ def ti_reinit():
     ti_inited = True
 
 
-def ti_reset():
+def ti_reset(*, params=True, now=False):
     """重置taichi的配置参数，使得下次调用涉及kernel的函数时会重新初始化
 
     同时也用于解决taichi目前没有gc导致内存泄露的问题
@@ -71,11 +71,18 @@ def ti_reset():
 
     Notes
     -----
-        reset会在下次init时生效，因此不会立刻解决内存泄露的问题
+    reset会在下次 `ti_init_once` 时生效，因此不会立刻解决内存泄露的问题，可以调用 `ti_reinit` 立刻强制重新初始化
     """
     global ti_inited, ti_args
-    ti_args = copy.deepcopy(ti_default_args)
+    if params:
+        ti_args = copy.deepcopy(ti_default_args)
     ti_inited = False
+    if now:
+        ti_reinit()
+
+
+def ti_reset_now(*, params=True):
+    ti_reset(params=params, now=True)
 
 
 class WrappedTaichiContext:

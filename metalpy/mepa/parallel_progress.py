@@ -117,6 +117,7 @@ class ParallelProgress:
             # 创建者制定了总量，也视为一次分发，需要由创建者来 `close`
             self.n_distributes += 1
 
+        self._disable = False
         self._local_lock = Lock()
 
     @contextlib.contextmanager
@@ -126,6 +127,10 @@ class ParallelProgress:
             yield
         finally:
             self.close()
+
+    @property
+    def disable(self):
+        return self._disable
 
     def iters(self, iterable: Sequence[_ElemT]) -> Generator[_ElemT, None, None]:
         total = len(iterable)
@@ -172,6 +177,8 @@ class ParallelProgress:
         else:
             self.context.fire(self._close_key)
 
+        self._disable = True
+
     tqdm = iters
     trange = range
     reset = register
@@ -204,6 +211,7 @@ class ParallelProgress:
         return {
             'executor': None,
             'context': self.context,
+            '_disable': self._disable,
             '_register_key': self._register_key,
             '_update_key': self._update_key,
             '_close_key': self._close_key,

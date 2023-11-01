@@ -22,7 +22,7 @@ class Progress(Mixin):
         return self.patch.get_context()
 
     def reset(self, _, total):
-        self.get_progress_ctx().reset(total)
+        self.patch.reset(total)
 
     def update(self, _, n):
         self.get_progress_ctx().update(n)
@@ -33,7 +33,8 @@ class Progress(Mixin):
 
 class Progressed(Patch, Distributable):
     BaseProgressStyles = {
-        'unit_scale': True
+        'unit_scale': True,
+        'smoothing': 0.1,
     }
 
     def __init__(self, _progress_ctx: ProgressContext = None, **tqdm_kw):
@@ -55,13 +56,18 @@ class Progressed(Patch, Distributable):
             raise RuntimeError("Progressed patch cannot be used alone due to SimPEG's design")
         self.add_mixin(BaseSimulation, Progress, patch=self)
 
-    def get_context(self, executor: Executor | None = None):
-        if self.progress_ctx is None:
+    def get_context(self, executor: Executor | None = None, allow_restart=False):
+        if self.progress_ctx is None or (self.progress_ctx.disable and allow_restart):
             if executor is not None:
                 self.progress_ctx = executor.progress(**self.tqdm_kw)
             else:
                 self.progress_ctx = tqdm.tqdm(**self.tqdm_kw)
         return self.progress_ctx
 
+    def reset(self, total):
+        # 允许重启进度条以支持重用 Progressed 实例
+        self.get_context(allow_restart=True).reset(total)
+
     def distribute_to(self, executor: Executor, worker: Worker):
-        return Progressed(_progress_ctx=self.get_context(executor))
+        # 允许重启进度条以支持重用 Progressed 实例
+        return Progressed(_progress_ctx=self.get_context(executor, allow_restart=True))

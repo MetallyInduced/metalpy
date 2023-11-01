@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 
 from SimPEG.simulation import BaseSimulation
 
@@ -53,13 +54,13 @@ class TaichiContext(Mixin):
             params['cpu_max_num_threads'] = max_cpu_threads
 
         if ti_prepare(**params, **kwargs):
-            ti_reset()
+            ti_reset(params=False)
 
     def post_apply(self, this):
         impl = TaichiContext._implementations.get(type(this))
 
         if impl is None:
-            print(f'Taichi support for {get_full_qualified_path(this)} is not implemented. Ignoring it.')
+            warnings.warn(f'Taichi support for {get_full_qualified_path(this)} is not implemented. Ignoring it.')
             return
 
         this.mixins.add(impl, profile=self.profile)
