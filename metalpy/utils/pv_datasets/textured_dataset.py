@@ -5,6 +5,7 @@ import pyvista as pv
 from metalpy.mepa.executor import Executor
 from metalpy.utils.model import pv_ufunc_apply
 from .dataset_wrapper import TDataSetWrapper
+from .textures import Texture
 from .texture_readers import TextureHelper
 from .universal_dataset import UniversalDataSet
 
@@ -19,7 +20,7 @@ class TexturedDataSet(UniversalDataSet):
             model_path,
             texture=True,
             helper: TextureHelper = None
-    ) -> pv.DataSet | TDataSetWrapper:
+    ) -> TDataSetWrapper | pv.DataSet:
         if texture:
             helper_func = TextureHelper().bind_texture
         else:
@@ -39,7 +40,7 @@ class TexturedDataSet(UniversalDataSet):
             preview: int | bool = False,
             texture=True,
             executor: Executor | None = None
-    ) -> pv.DataSet | TDataSetWrapper:
+    ) -> TDataSetWrapper | pv.DataSet:
         if texture:
             helper_func = TextureHelper().bind_texture
         else:
@@ -86,5 +87,5 @@ def _add_textured_dataset_to_plotter(dataset, plotter: pv.BasePlotter, *args, **
     if dataset.n_points <= 0:
         return
 
-    texture = TextureHelper.extract_named_texture(dataset)
-    plotter.add_mesh(dataset, texture=texture, *args, **kwargs)
+    texture = Texture.extract_all(dataset)
+    plotter.add_mesh(dataset, *args, **kwargs, **texture.build())

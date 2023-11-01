@@ -5,12 +5,11 @@ import warnings
 from pathlib import Path
 from typing import Iterable
 
-import imageio
 import numpy as np
 import pyvista as pv
 
 from metalpy.utils.file import openable, PathLike
-from metalpy.utils.model import DataSetLike
+from .textures import Diffuse
 
 
 class TextureHelper:
@@ -28,53 +27,6 @@ class TextureHelper:
     def bind_texture(self, model, model_path):
         model_path = Path(model_path)
         return self.get_reader(model_path.suffix).bind_texture(model, cwd=model_path.parent)
-
-    @staticmethod
-    def bind_named_texture(dataset: DataSetLike, texture_path, name=None):
-        if name is None:
-            name = Path(texture_path).stem
-
-        tex = imageio.v3.imread(texture_path)
-        tex_name, shape_name = TextureHelper.texture_field_name(name)
-        dataset.field_data[tex_name] = tex.ravel()
-        dataset.field_data[shape_name] = tex.shape
-        dataset.point_data.active_t_coords_name = name
-
-    @staticmethod
-    def extract_named_texture(dataset: DataSetLike, name=None):
-        tex = None
-        if name is None:
-            for tex_name in dataset.field_data:
-                tex_name, shape_name = TextureHelper.check_texture_field_name(tex_name)
-                if tex_name is None:
-                    continue
-                tex = dataset.field_data.get(tex_name, None)
-                if tex is not None:
-                    shape = dataset.field_data[shape_name]
-                    tex = tex.reshape(shape)
-                    break
-        else:
-            tex_name, shape_name = TextureHelper.texture_field_name(name)
-            tex = dataset.field_data[tex_name]
-            shape = dataset.field_data[shape_name]
-            tex = tex.reshape(shape)
-
-        if tex is None:
-            return None
-
-        return pv.Texture(tex)
-
-    @staticmethod
-    def check_texture_field_name(tex_name: str):
-        if tex_name.startswith('Texture'):
-            name = tex_name.split('[', maxsplit=1)[1][:-1]
-            return f'Texture[{name}]', f'TextureShape[{name}]'
-        else:
-            return None, None
-
-    @staticmethod
-    def texture_field_name(tex_name):
-        return f'Texture[{tex_name}]', f'TextureShape[{tex_name}]'
 
 
 class TextureReader(abc.ABC):
@@ -137,7 +89,11 @@ class ObjTextureReader(TextureReader):
                         continue
                     if parts[0] == 'map_Kd':
                         if mtl_name is not None:
-                            texture_paths[mtl_name] = texture_dir / parts[1]
+                            texture_paths[mtl_name] = Diffuse(texture_path=texture_dir / parts[1])
+                            n_textured += 1
+                    elif parts[0] == 'Kd':
+                        if mtl_name is not None:
+                            texture_paths[mtl_name] = Diffuse(texture=[float(c) for c in parts[1:]])
                             n_textured += 1
                     elif parts[0] == 'newmtl':
                         mtl_name = parts[1]
@@ -149,7 +105,7 @@ class ObjTextureReader(TextureReader):
             model = obj_mesh
             for name, tex in texture_paths.items():
                 if tex is not None:
-                    TextureHelper.bind_named_texture(model, tex, name=name)
+                    tex.bind(model, name=name)
                     break
         else:
             material_ids = obj_mesh.cell_data['MaterialIds']
@@ -167,7 +123,7 @@ class ObjTextureReader(TextureReader):
             for i in np.unique(material_ids):
                 name = materials[i]
                 mesh_part = obj_mesh.extract_cells(material_ids == i)
-                TextureHelper.bind_named_texture(mesh_part, texture_paths[name], name=name)
+                texture_paths[name].bind(mesh_part, name=name)
                 model[name] = mesh_part
 
         return model

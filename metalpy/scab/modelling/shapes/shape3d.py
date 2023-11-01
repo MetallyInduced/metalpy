@@ -14,6 +14,8 @@ from ..utils.mesh import is_inside_bounds
 
 if TYPE_CHECKING:
     from metalpy.scab.modelling import Scene
+    from metalpy.scab.modelling.modelled_mesh import ModelledMesh
+    import pyvista as pv
 
 
 class Shape3D(ABC):
@@ -177,7 +179,7 @@ class Shape3D(ABC):
     def do_clone(self, deep=True):
         raise NotImplementedError()
 
-    def to_polydata(self):
+    def to_polydata(self) -> 'pv.PolyData':
         """将 Shape 转换为 PolyData 表示
 
         Returns
@@ -204,7 +206,7 @@ class Shape3D(ABC):
 
         return ret
 
-    def to_local_polydata(self):
+    def to_local_polydata(self) -> 'pv.PolyData':
         """将 Shape 转换为本地坐标系下的 PolyData 表示
 
         Returns
@@ -238,7 +240,7 @@ class Shape3D(ABC):
         from metalpy.scab.modelling import Scene
         return Scene.of(self, models=(model,), skip_checking=True)
 
-    def build(self, model=True, **kwargs):
+    def build(self, model=True, **kwargs) -> 'ModelledMesh':
         """直接基于当前Shape3D实例构建场景的网格和模型
 
         Parameters

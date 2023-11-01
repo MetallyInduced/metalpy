@@ -5,13 +5,14 @@ from pathlib import Path
 from typing import Any, Collection, Callable, TYPE_CHECKING
 
 import imageio
+import numpy as np
 import pyvista as pv
-import tqdm
 
 from metalpy.mepa import LinearExecutor, Executor, ParallelProgress
 from metalpy.utils.dhash import dhash
 from metalpy.utils.file import make_cache_file_path, PathLike
-from metalpy.utils.model import convert_model_dict_to_multiblock, pv_ufunc_apply, DataSetLike
+from metalpy.utils.model import convert_model_dict_to_multiblock, pv_ufunc_apply, DataSetLike, DataAssociation, \
+    pv_ufunc_map
 from metalpy.utils.time import Timer
 from .dataset_wrapper import DataSetWrapper, TDataSetWrapper
 
@@ -78,12 +79,50 @@ class UniversalDataSet(DataSetWrapper):
             return_crs=return_crs
         ))
 
+    @property
+    def n_points(self):
+        return self._count_size(DataAssociation.Point)
+
+    @property
+    def n_cells(self):
+        return self._count_size(DataAssociation.Cell)
+
+    @property
+    def points(self):
+        association = DataAssociation.Point
+        points = pv_ufunc_map(self.dataset, association.get)
+
+        return np.vstack(points)
+
+    @points.setter
+    def points(self, points):
+        index = [0]
+        association = DataAssociation.Point
+
+        def func(dataset):
+            n_points = association.get_count(dataset)
+            end = index[0] + n_points
+            association.set(dataset, points[index[0]:end])
+            index[0] = end
+
+        pv_ufunc_apply(
+            self.dataset,
+            func,
+            inplace=True
+        )
+
+        assert index[0] == len(points), (
+            f'It is not allowed to add extra points by setting'
+            f' `{type(self).__name__}.points = ...`.'
+            f' Consider merging all blocks into a single `PolyData`.'
+        )
+
     @classmethod
     def read(
             cls: type[TDataSetWrapper],
             model_path: PathLike,
             callback: ModelPostprocessor | None = None
-    ) -> pv.DataSet | TDataSetWrapper:
+    ) -> TDataSetWrapper | pv.DataSet:
         model = _load_model(model_path, callback=callback)
         return cls(model)
 
@@ -97,7 +136,7 @@ class UniversalDataSet(DataSetWrapper):
             preview: int | bool = False,
             callback: ModelPostprocessor | None = None,
             executor: Executor | None = None
-    ) -> pv.DataSet | TDataSetWrapper:
+    ) -> TDataSetWrapper | pv.DataSet:
         """从指定路径中读取全部模型文件
 
         Parameters
@@ -205,6 +244,10 @@ class UniversalDataSet(DataSetWrapper):
             return wrapper
         else:
             return super().__getattr__(item)
+
+    def _count_size(self, association: DataAssociation):
+        count = pv_ufunc_map(self.dataset, association.get_count)
+        return sum(count)
 
 
 __MODEL_FORMATS = set(pv.core.utilities.reader.CLASS_READERS.keys())

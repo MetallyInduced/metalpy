@@ -235,7 +235,7 @@ class Scene(OSMFormat, PTopoFormat):
 
         return ModelledMesh(mesh, models_dict)
 
-    def create_mesh(self, cell_size=None, n_cells=None, bounds=None,) -> Union[TensorMesh]:
+    def create_mesh(self, cell_size=None, n_cells=None, bounds=None) -> TensorMesh:
         """根据场景边界构建网格
 
         Parameters
@@ -313,8 +313,8 @@ class Scene(OSMFormat, PTopoFormat):
 
         See Also
         --------
-            Scene.create_mesh : 构造网格
-            Scene.build_model : 构造模型
+        Scene.create_mesh : 构造网格
+        Scene.build_model : 构造模型
         """
         mesh = self.create_mesh(cell_size=cell_size, n_cells=n_cells, bounds=bounds)
         pruned = self.build_model(mesh, executor=executor, progress=progress, cache=cache, cache_dir=cache_dir)

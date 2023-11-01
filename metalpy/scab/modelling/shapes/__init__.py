@@ -12,3 +12,4 @@ from .bar_framework import BarFramework
 
 from .full_space import FullSpace
 from .surface_topo import SurfaceTopo
+Terrain = SurfaceTopo

@@ -220,17 +220,18 @@ def pv_ufunc_apply(obj: DataSetLike, fn, *, inplace=True):
     Parameters
     ----------
     obj
-        需要应用函数`fn`的PyVista对象
+        需要应用函数 `fn` 的PyVista对象
     fn
-        需要应用到`obj`对象上的处理函数。
-        要求为`inplace`操作，具体操作是否直接在`obj`上执行由pv_ufunc_apply的`inplace`选项控制，并执行复制等操作。
+        需要应用到 `obj` 对象上的处理函数。
+        语义上要求为 `inplace` 操作，具体 `inplace` 行为由 `inplace` 参数控制
     inplace
-        指示操作是否直接在目标对象上进行
+        指示操作是否直接在目标对象上进行。
+        若为 `False` ，则会在所有对象的拷贝上应用 `fn` ，然后重新拼装完整对象。
 
     Returns
     -------
     obj
-        obj自身，如果`inplace`为False，则为拷贝的新对象
+        obj自身，如果 `inplace` 为False，则为拷贝的新对象
     """
     if isinstance(obj, pv.MultiBlock):
         if inplace:
@@ -246,6 +247,41 @@ def pv_ufunc_apply(obj: DataSetLike, fn, *, inplace=True):
             obj = obj.copy()
         fn(obj)
         return obj
+
+
+def pv_ufunc_visit(obj: DataSetLike, fn):
+    """遍历PyVista对象并执行指定函数，不会进行拷贝，如果 `fn` 产生了修改，则会直接修改 `obj`。
+
+     即 `pv_ufunc_apply` 的强制 `inplace` 版本，语义上要求 `fn` 不会对DataSet进行修改，只进行遍历获取信息。
+
+    Parameters
+    ----------
+    obj
+        需要应用函数 `fn` 的PyVista对象
+    fn
+        需要应用到 `obj` 对象上的处理函数
+    """
+    pv_ufunc_apply(obj, fn, inplace=True)
+
+
+def pv_ufunc_map(obj: DataSetLike, fn):
+    """遍历PyVista对象并执行映射
+
+    Parameters
+    ----------
+    obj
+        需要应用函数 `fn` 的PyVista对象
+    fn
+        需要应用到 `obj` 对象上的映射
+    """
+    mapped = []
+
+    def wrapper(dataset):
+        mapped.append(fn(dataset))
+
+    pv_ufunc_visit(obj, wrapper)
+
+    return mapped
 
 
 class DataAssociation(Enum):
@@ -268,6 +304,28 @@ class DataAssociation(Enum):
     @property
     def field_collection(self):
         return f'{self}_data'
+
+    @property
+    def field(self):
+        return f'{self}s'
+
+    def get(self, dataset):
+        return getattr(dataset, self.field)
+
+    def set(self, dataset, info):
+        setattr(dataset, self.field, info)
+
+    def get_count(self, dataset):
+        return getattr(dataset, self.field_count)
+
+    def get_collection(self, dataset):
+        return getattr(dataset, self.field_collection)
+
+    def get_data(self, dataset, key):
+        return self.get_collection(dataset)[key]
+
+    def set_data(self, dataset, key, val):
+        self.get_collection(dataset).__setitem__(key, val)
 
 
 def pv_ufunc_assign(obj: pv.DataSet,
@@ -302,19 +360,15 @@ def pv_ufunc_assign(obj: pv.DataSet,
 
     val = as_pyvista_array(val)
 
-    name_count = data_type.field_count
-    name_collection = data_type.field_collection
-
     def ufunc(x):
-        element_count = getattr(x, name_count)
-        data_collection = getattr(x, name_collection)
+        element_count = data_type.get_count(x)
 
         if val.ndim == 0:
             _val = np.full(element_count, val)
         else:
             _val = val
 
-        data_collection.__setitem__(key, _val)
+        data_type.set_data(x, key, _val)
 
         if set_active:
             x.set_active_scalars(key)

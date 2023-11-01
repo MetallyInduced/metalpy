@@ -22,7 +22,7 @@ class Ellipsoid(Shape3D):
         self.radii = np.asarray([a, b, c])
 
     @staticmethod
-    def sphere(r):
+    def sphere(r) -> 'Ellipsoid':
         """定义一个球体
 
         Parameters
@@ -38,7 +38,7 @@ class Ellipsoid(Shape3D):
         return Ellipsoid(r, r, r)
 
     @staticmethod
-    def spheroid(a, c, polar_axis=2):
+    def spheroid(a, c, polar_axis=2) -> 'Ellipsoid':
         """定义一个旋转椭球体（三个轴长为a, a, c）
 
         a > c时，其为扁椭球体
@@ -65,6 +65,12 @@ class Ellipsoid(Shape3D):
         r = [a, a, a]
         r[polar_axis] = c
         return Ellipsoid(*r)
+
+    @staticmethod
+    def ellipsoid(a, b, c) -> 'Ellipsoid':
+        """同直接调用构造函数
+        """
+        return Ellipsoid(a, b, c)
 
     def do_place(self, mesh_cell_centers, progress):
         return np.sum((mesh_cell_centers / self.radii) ** 2, axis=1) < 1
