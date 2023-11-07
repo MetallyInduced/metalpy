@@ -25,7 +25,7 @@ class AerialSurveyLines:
         lines
             测线信息
         """
-        self.lines = np.asarray(lines)
+        self.lines = np.fromiter(lines, dtype=object)
 
     @property
     def length(self):

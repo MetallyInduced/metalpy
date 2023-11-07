@@ -88,8 +88,12 @@ class AerialSurvey:
         return cls(pos, data)
 
     @property
+    def bounds(self):
+        return Coordinates(self.position).bounds
+
+    @property
     def center(self):
-        return Coordinates(self.position).bounds.center.tolist()
+        return self.bounds.center.tolist()
 
     @property
     def length(self):
@@ -119,10 +123,18 @@ class AerialSurvey:
             self.position.to_numpy().astype(np.float32)
         )
 
-        origin_area = np.prod(Coordinates(self.position).bounds.extent)
+        origin_area = np.prod(self.bounds.extent)
         oriented_area = np.prod(rect_size)
 
         return min(origin_area, oriented_area)
+
+    @property
+    def x(self):
+        return get_column(self.position, 0)
+
+    @property
+    def y(self):
+        return get_column(self.position, 1)
 
     def slice_data(self, slice0: slice | tuple, *slices: slice | tuple):
         if self.data is None:
