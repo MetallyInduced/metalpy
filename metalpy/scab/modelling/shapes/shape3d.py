@@ -525,8 +525,10 @@ class Shape3D(ABC):
     def _check_progress(self, progress):
         if progress is True and self.progress_manually:
             return tqdm.tqdm(total=self.n_tasks)
-        else:
+        elif progress:
             return progress
+        else:
+            return None
 
 
 def bounding_box_of(shapes: Iterable[Shape3D]):

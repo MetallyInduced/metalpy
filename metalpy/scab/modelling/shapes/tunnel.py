@@ -11,7 +11,7 @@ def is_abs_distance_in(arr, x0, r):
 
 class Tunnel(Shape3D):
     def __init__(self, p0, r0, r1, L):
-        """定义一个起始点在x0，内外圆半径r0和r1，向x方向延申长度为L的空心圆柱环
+        """定义一个起始点在p0，内外圆半径r0和r1，向x方向延申长度为L的空心圆柱环
 
         Parameters
         ----------
@@ -90,15 +90,41 @@ class Tunnel(Shape3D):
         zs = np.tile(z, 2)
 
         indices = np.arange(xs.shape[0]).reshape([4, -1])
-        edge_counts = np.ones(resolution, dtype=np.integer) * 4
-        bottom_faces = np.c_[edge_counts, indices[0], indices[1], np.roll(indices[1], -1), np.roll(indices[0], -1)]
-        top_faces = np.c_[edge_counts, indices[2], indices[3], np.roll(indices[3], -1), np.roll(indices[2], -1)]
-        outer_side_faces = np.c_[edge_counts, indices[1], indices[3], np.roll(indices[3], -1), np.roll(indices[1], -1)]
-        inner_side_faces = np.c_[edge_counts, indices[0], indices[2], np.roll(indices[2], -1), np.roll(indices[0], -1)]
+        rolled = np.roll(indices, -1, axis=1)
+        edge_counts = np.full(resolution, 3)
 
-        faces = np.c_[bottom_faces, top_faces, outer_side_faces, inner_side_faces].ravel()
+        face_vertices = [
+            [0, 1],  # 底面
+            [2, 3],  # 顶面
+            [1, 3],  # 外圈表面
+            [0, 2],  # 内圈表面
+        ]
 
-        return pv.PolyData(np.c_[xs, ys, zs], faces=faces)
+        faces = []
+        for i0, i1 in face_vertices:
+            faces.extend([  # 这个三角面
+                edge_counts,
+                indices[i0],
+                indices[i1],
+                rolled[i1]
+            ])
+            faces.extend([  # 那个三角面
+                edge_counts,
+                rolled[i1],
+                rolled[i0],
+                indices[i0]
+            ])
+
+        # 每次都 column_stac 然后 vstack 再 ravel
+        # 和
+        # 直接全部 column_stac 到一起再 ravel
+        # 对PyVista而言等价
+        faces = np.column_stack(faces).ravel()
+
+        ret = pv.PolyData(np.c_[xs, ys, zs], faces=faces)
+        ret.flip_normals()
+
+        return ret
 
     @property
     def bottom_area(self):

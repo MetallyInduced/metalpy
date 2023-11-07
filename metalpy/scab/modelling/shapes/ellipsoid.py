@@ -88,7 +88,10 @@ class Ellipsoid(Shape3D):
     def to_local_polydata(self):
         import pyvista as pv
 
-        return pv.ParametricEllipsoid(*self.radii)
+        ret = pv.ParametricEllipsoid(*self.radii)
+        ret.flip_normals()
+
+        return ret
 
     @property
     def volume(self):

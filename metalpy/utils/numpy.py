@@ -54,5 +54,10 @@ class FixedShapeNDArray(np.ndarray):
         else:
             return ret
 
+    def reshape(
+        self, shape, /, **kwargs
+    ):
+        return self.view(np.ndarray).reshape(shape, **kwargs)
+
     def __getitem__(self, item):
         return super().__getitem__(item).view(np.ndarray)

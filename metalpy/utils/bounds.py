@@ -103,8 +103,9 @@ class Bounds(FixedShapeNDArray):
 
         ret = Bounds.unbounded(n_axes)
 
-        ret.xmin = xmin
-        ret.xmax = xmax
+        if n_axes > 0:
+            ret.xmin = xmin
+            ret.xmax = xmax
         if n_axes > 1:
             ret.ymin = ymin
             ret.ymax = ymax

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Iterable
+from typing import Iterable, TYPE_CHECKING, Literal, overload
 
 import numpy as np
 from discretize import TensorMesh
@@ -10,6 +10,10 @@ from numpy.typing import ArrayLike
 from metalpy.scab.modelling.object import Object
 from metalpy.utils.numpy import ensure_as_numpy_array_collection
 from metalpy.utils.type import is_numeric_array, get_first_key, ensure_set_key
+
+
+if TYPE_CHECKING:
+    import pyvista as pv
 
 
 class ModelledMesh:
@@ -135,6 +139,14 @@ class ModelledMesh:
     @property
     def has_only_default_model(self):
         return len(self) == 1 and self.has_default_model
+
+    @property
+    def cell_centers(self):
+        return self.mesh.cell_centers
+
+    @property
+    def active_cell_centers(self):
+        return self.cell_centers[self.active_cells]
 
     def set_active_model(self, key):
         self.default_key = key
@@ -338,28 +350,40 @@ class ModelledMesh:
     def __contains__(self, item):
         return item in self._models
 
-    def plot(self, *, scalars=True, prune=True, **kwargs):
-        fill = None
-        if prune:
-            fill = np.nan
-
+    def plot(self, *, scalars=True, prune: Literal[True, False] = True, **kwargs):
         if scalars is True:
             active_scalars = self.default_key
             if active_scalars is not None:
                 scalars = active_scalars
 
-        poly = self.to_polydata(scalars=scalars, fill_inactive=fill)
-
-        if prune:
-            poly = poly.threshold()
+        poly = self.to_polydata(scalars=scalars, prune=prune)
 
         poly.plot(**kwargs)
+
+    @overload
+    def to_polydata(self,
+                    scalars: str | Iterable[str] | ArrayLike | bool = True,
+                    extra_models: dict[str, ArrayLike] | None = None,
+                    fill_inactive=None,
+                    *,
+                    prune: Literal[False] = False,
+                    **kwargs: ArrayLike) -> 'pv.RectilinearGrid': ...
+
+    @overload
+    def to_polydata(self,
+                    scalars: str | Iterable[str] | ArrayLike | bool = True,
+                    extra_models: dict[str, ArrayLike] | None = None,
+                    fill_inactive=None,
+                    *,
+                    prune: Literal[True],
+                    **kwargs: ArrayLike) -> 'pv.UnstructuredGrid': ...
 
     def to_polydata(self,
                     scalars: str | Iterable[str] | ArrayLike | bool = True,
                     extra_models: dict[str, ArrayLike] | None = None,
                     fill_inactive=None,
-                    **kwargs: ArrayLike):
+                    prune: bool = True,
+                    **kwargs: ArrayLike) -> 'pv.RectilinearGrid' | 'pv.UnstructuredGrid':
         """导出模型网格为PyVista模型
 
         Parameters
@@ -375,6 +399,8 @@ class ModelledMesh:
             额外需要绑定的模型，但是以kwargs风格传入
         fill_inactive
             用于填充非活跃网格的值，为None时默认使用模型对应类型的默认值（一般为0，参见Scene.INACTIVE_XXX）
+        prune
+            从导出的 `RectilinearGrid` 中筛选活跃网格（会导致返回类型变为 `UnstructuredGrid` ）
 
         Returns
         -------
@@ -383,7 +409,7 @@ class ModelledMesh:
 
         Notes
         -----
-        虽然名字为to_polydata，但他的返回值并不是pv.PolyData而是pv.RectilinearGrid
+        虽然名字为to_polydata，但他的返回值并不是 `pv.PolyData` 而是 `pv.RectilinearGrid` 或 `pv.UnstructuredGrid`
         """
         import pyvista as pv
         from metalpy.scab.modelling import Scene
@@ -441,6 +467,9 @@ class ModelledMesh:
 
         ret: pv.RectilinearGrid = Scene.mesh_to_polydata(self.mesh, models)
         ret.set_active_scalars(active_scalars)
+
+        if prune:
+            return ret.extract_cells(self.active_cells)
 
         return ret
 

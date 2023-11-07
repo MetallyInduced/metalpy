@@ -2,9 +2,14 @@ import numpy as np
 import pytest
 
 from metalpy.scab.modelling.shapes import Cuboid
+from metalpy.scab.modelling.shapes.testing.shape3d_place_test import assert_placing_inside
 
 
 def test_cuboid():
+    assert_placing_inside(Cuboid(bounds=[1, 2, 3, 4, 5, 6]))
+
+
+def test_cuboid_ctor():
     # 测试各种定义方式的等价性
     cubes = [
         Cuboid([0, 2, 0], [2, 0, 2]),
