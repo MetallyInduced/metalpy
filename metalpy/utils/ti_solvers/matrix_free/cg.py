@@ -1,12 +1,12 @@
 from math import sqrt
 
-import numpy as np
 import taichi as ti
-import tqdm
 from taichi import TaichiTypeError, TaichiRuntimeError
 
+from ..solver_progress import SolverProgress
 
-def conjugate_gradient(
+
+def cg(
         A: ti.linalg.LinearOperator,
         b,
         x,
@@ -93,21 +93,14 @@ def conjugate_gradient(
         for I in ti.grouped(p):
             p[I] = r[I] + beta[None] * p[I]
 
-    def truncated_log(residual):
-        return round(np.log10(residual), 3)
-
     def solve():
         init()
         initial_rTr = reduce(r, r)
 
-        progress_bar = None
-        progress_by_res_counter = 3  # 发散计数器，残差大于初始残差时减去1，低于0后视为发散，转为按迭代代数统计进度
-        origin = initial_rTr
-        postfixes = {
-            'iter': 0,
-            'residual': np.inf,
-            'target': tol
-        }
+        if progress:
+            progress_bar = SolverProgress(tol, maxiter)
+        else:
+            progress_bar = None
 
         old_rTr = initial_rTr
         update_p()
@@ -119,69 +112,19 @@ def conjugate_gradient(
             update_x()
             update_r()
             new_rTr = reduce(r, r)
-            if sqrt(new_rTr) < tol:
+            residual = sqrt(new_rTr)
+
+            if progress_bar is not None:
+                progress_bar.sync(residual)
+
+            if residual < tol:
                 break
+
             beta[None] = new_rTr / old_rTr
             update_p()
             old_rTr = new_rTr
 
-            if progress:
-                res = sqrt(new_rTr)
-                log_res = truncated_log(res)
-                res_str = f'{res:.2e}'
-                postfixes['residual'] = res_str
-
-                if progress_bar is None:
-                    # 先等待残差下降才启动进度条
-                    origin = log_res
-                    end = truncated_log(tol)
-                    postfixes['iter'] = 0
-                    progress_bar = tqdm.tqdm(
-                        total=origin - end,
-                        unit='logRES',
-                        postfix=postfixes
-                    )
-                elif progress_by_res_counter >= 0:
-                    n = origin - log_res
-                    if n < 0:
-                        if progress_by_res_counter > 0:
-                            n = 0
-                        progress_by_res_counter -= 1
-
-                    if n >= 0:
-                        postfixes['iter'] = i + 1
-                        progress_bar.set_postfix(postfixes, refresh=False)
-                        progress_bar.update(n - progress_bar.n)
-                    else:
-                        # 发得一手好散，改为基于代数的进度条
-                        postfixes.pop('iter')  # 不需要再在后缀中展示当前代数
-                        progress_bar.unit = 'it'
-                        progress_bar.total = maxiter
-                        progress_bar.last_print_n = i
-                        progress_bar.n = i + 1
-                        progress_bar.set_postfix(postfixes, refresh=False)
-                        progress_bar.refresh()
-                else:
-                    progress_bar.set_postfix(residual=res_str, refresh=False)
-                    progress_bar.update(1)
-
         if progress_bar is not None:
-            res = sqrt(new_rTr)
-            log_res = truncated_log(res)
-            res_str = f'{res:.2e}'
-            postfixes['residual'] = res_str
-
-            if progress_by_res_counter >= 0:
-                # 重设进度条最大值，保证进度条最终会跑完
-                n = origin - log_res
-                progress_bar.total = n
-                postfixes['iter'] = i + 1
-                progress_bar.set_postfix(postfixes, refresh=False)
-                progress_bar.update(n - progress_bar.n)
-            else:
-                progress_bar.set_postfix(residual=res_str, refresh=False)
-                progress_bar.update(1)
-
             progress_bar.close()
 
     solve()

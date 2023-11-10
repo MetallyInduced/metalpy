@@ -11,8 +11,8 @@ from metalpy.scab.utils.misc import Field
 from metalpy.utils.numeric import limit_significand
 from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, copy_from, ti_size_t, ti_size_dtype, \
     ti_cfg
+from metalpy.utils.ti_solvers import matrix_free
 from .kernel import kernel_matrix_forward
-from .matrix_free import conjugate_gradient
 from .solver import DemagnetizationSolver
 
 
@@ -508,7 +508,7 @@ def solve_Tx_b_compressed(Tmat33, indices_mat, m, progress: bool = False):
             mul3(Ax, x, 1)
             mul3(Ax, x, 2)
 
-        conjugate_gradient(ti.linalg.LinearOperator(linear), b, x, progress=progress)
+        matrix_free.cg(ti.linalg.LinearOperator(linear), b, x, progress=progress)
 
         return x.to_numpy()
 

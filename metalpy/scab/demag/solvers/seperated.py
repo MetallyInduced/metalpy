@@ -3,10 +3,10 @@ import psutil
 import taichi as ti
 
 from metalpy.scab.utils.misc import Field
+from metalpy.utils.ti_solvers import matrix_free
 from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, copy_from
 from .integrated import solve_Ax_b
 from .kernel import kernel_matrix_forward
-from .matrix_free import conjugate_gradient
 from .solver import DemagnetizationSolver
 
 
@@ -113,7 +113,7 @@ def solve_Tx_b(Tmat33, m, progress: bool = False):
             mul3(Ax, x, 1)
             mul3(Ax, x, 2)
 
-        conjugate_gradient(ti.linalg.LinearOperator(linear), b, x, progress=progress)
+        matrix_free.cg(ti.linalg.LinearOperator(linear), b, x, progress=progress)
 
         return x.to_numpy()
 
