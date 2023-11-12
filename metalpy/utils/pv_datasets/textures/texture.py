@@ -11,15 +11,21 @@ from metalpy.utils.model import DataSetLike
 class Texture(abc.ABC):
     def __init__(self, texture=None, texture_path=None):
         if texture is not None:
-            texture = np.asarray(texture)
+            if isinstance(texture, Path):
+                texture_path = texture
+                texture = None
+            else:
+                texture = np.asarray(texture)
         else:
             assert texture_path is not None, 'Either one of `texture` and `texture_path` must be provided.'
 
-        self._texture = texture
+        self.texture = texture
         self.texture_path = texture_path
 
-    @abc.abstractmethod
     def build(self):
+        return {}
+
+    def apply(self, actor):
         pass
 
     @property
@@ -56,7 +62,7 @@ class Texture(abc.ABC):
     @staticmethod
     def extract_all(dataset, name=None):
         textures = TextureSet()
-        for texture_type in Texture.__subclasses__():
+        for texture_type in Texture.get_subclasses():
             tex = texture_type.extract(dataset, name=name)
             if not isinstance(tex, EmptyTexture):
                 textures.append(tex)
@@ -65,6 +71,14 @@ class Texture(abc.ABC):
 
     @classmethod
     def extract(cls, dataset, name=None):
+        tex = cls.extract_field(dataset, name=name)
+        if tex is None:
+            return EmptyTexture()
+
+        return cls(tex)
+
+    @classmethod
+    def extract_field(cls, dataset, name=None):
         tex = None
         if name is None:
             for tex_name in dataset.field_data:
@@ -82,10 +96,7 @@ class Texture(abc.ABC):
             shape = dataset.field_data[shape_name]
             tex = tex.reshape(shape)
 
-        if tex is None:
-            return EmptyTexture()
-
-        return cls(tex)
+        return tex
 
     @classmethod
     def field_name(cls, name):
@@ -100,6 +111,13 @@ class Texture(abc.ABC):
             return f'{prefix}[{name}]', f'{prefix}Shape[{name}]'
         else:
             return None, None
+
+    @classmethod
+    def get_subclasses(cls):
+        # 请不要整什么奇怪的继承关系，谢谢
+        for sub in cls.__subclasses__():
+            yield sub
+            yield from sub.get_subclasses()
 
 
 class EmptyTexture(Texture):
@@ -121,3 +139,11 @@ class TextureSet(list[Texture]):
             ret.update(tex.build())
 
         return ret
+
+    def apply(self, actor):
+        for tex in self:
+            tex.apply(actor)
+
+    def bind(self, dataset: DataSetLike, name=None):
+        for tex in self:
+            tex.bind(dataset, name=name)

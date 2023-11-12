@@ -33,7 +33,7 @@ def _get_row_np(arr, ind):
 @GetRow.register(ArrayType.pandas)
 def _get_row_pd(arr, ind):
     import pandas as pd
-    if isinstance(ind, pd.Index):
+    if isinstance(ind, pd.Index) or getattr(ind, 'dtype', None) == bool:
         return arr.loc[ind]  # 行索引
     else:
         return arr.iloc[ind]  # 否则认为是行号

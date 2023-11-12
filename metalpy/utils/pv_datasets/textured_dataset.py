@@ -56,7 +56,7 @@ class TexturedDataSet(UniversalDataSet):
             callback=helper_func,
         ).view(TexturedDataSet)
 
-    def plot(self, *args, texture=True, **kwargs):
+    def plot(self, texture=True, **kwargs):
         plotter = pv.Plotter()
 
         show_grid = kwargs.pop('show_grid', False)
@@ -67,25 +67,28 @@ class TexturedDataSet(UniversalDataSet):
         if show_axes:
             plotter.show_axes()
 
-        self.add_to_plotter(plotter, texture=texture, *args, **kwargs)
+        self.add_to_plotter(plotter, texture=texture, **kwargs)
 
         plotter.show()
 
-    def add_to_plotter(self, plotter: pv.BasePlotter, *args, texture=True, **kwargs):
+    def add_to_plotter(self, plotter: pv.BasePlotter, *, texture=True, **kwargs):
         if texture:
             pv_ufunc_apply(self.dataset, lambda dataset: _add_textured_dataset_to_plotter(
                 dataset,
                 plotter,
-                *args,
                 **kwargs
             ))
         else:
-            plotter.add_mesh(self.dataset, *args, **kwargs)
+            plotter.add_mesh(self.dataset, **kwargs)
 
 
-def _add_textured_dataset_to_plotter(dataset, plotter: pv.BasePlotter, *args, **kwargs):
+def _add_textured_dataset_to_plotter(dataset, plotter: pv.BasePlotter, **kwargs):
     if dataset.n_points <= 0:
         return
 
-    texture = Texture.extract_all(dataset)
-    plotter.add_mesh(dataset, *args, **kwargs, **texture.build())
+    textures = Texture.extract_all(dataset)
+    new_kwargs = textures.build()
+    new_kwargs.update(kwargs)
+
+    actor = plotter.add_mesh(dataset, **new_kwargs)
+    textures.apply(actor)
