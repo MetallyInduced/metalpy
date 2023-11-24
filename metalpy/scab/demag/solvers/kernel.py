@@ -15,11 +15,8 @@ def kernel_matrix_forward(
         Txx: ti.template(),
         Txy: ti.template(),
         Txz: ti.template(),
-        Tyx: ti.template(),
         Tyy: ti.template(),
         Tyz: ti.template(),
-        Tzx: ti.template(),
-        Tzy: ti.template(),
         Tzz: ti.template(),
         mat: ti.types.ndarray(),
         write_to_mat: ti.template(),
@@ -83,14 +80,14 @@ def kernel_matrix_forward(
         else:
             dx1 = Txx[i]
 
-            if ti.math.isnan(dx1):
+            if ti.math.isinf(dx1):
                 continue
 
             dx2 = Txy[i]
             dy1 = Txz[i]
-            dy2 = Tyx[i]
-            dz1 = Tyy[i]
-            dz2 = Tyz[i]
+            dy2 = Tyy[i]
+            dz1 = Tyz[i]
+            dz2 = Tzz[i]
 
         if ti.abs(dx1) / min_hx < tol2:
             dx1 = tol2 * min_hx
@@ -134,64 +131,64 @@ def kernel_matrix_forward(
         r8 = ti.sqrt(dz1dz1 + R3)
 
         # compactify argument calculations
-        arg1_ = dx1 + dy2 + r1
         arg1 = dy2 + dz2 + r1
         arg2 = dx1 + dz2 + r1
         arg3 = dx1 + r1
         arg4 = dy2 + r1
         arg5 = dz2 + r1
 
-        arg6_ = dx2 + dy2 + r2
         arg6 = dy2 + dz2 + r2
         arg7 = dx2 + dz2 + r2
         arg8 = dx2 + r2
         arg9 = dy2 + r2
         arg10 = dz2 + r2
 
-        arg11_ = dx2 + dy2 + r3
         arg11 = dy2 + dz1 + r3
         arg12 = dx2 + dz1 + r3
         arg13 = dx2 + r3
         arg14 = dy2 + r3
         arg15 = dz1 + r3
 
-        arg16_ = dx1 + dy2 + r4
         arg16 = dy2 + dz1 + r4
         arg17 = dx1 + dz1 + r4
         arg18 = dx1 + r4
         arg19 = dy2 + r4
         arg20 = dz1 + r4
 
-        arg21_ = dx2 + dy1 + r5
         arg21 = dy1 + dz2 + r5
         arg22 = dx2 + dz2 + r5
         arg23 = dx2 + r5
         arg24 = dy1 + r5
         arg25 = dz2 + r5
 
-        arg26_ = dx1 + dy1 + r6
         arg26 = dy1 + dz2 + r6
         arg27 = dx1 + dz2 + r6
         arg28 = dx1 + r6
         arg29 = dy1 + r6
         arg30 = dz2 + r6
 
-        arg31_ = dx1 + dy1 + r7
         arg31 = dy1 + dz1 + r7
         arg32 = dx1 + dz1 + r7
         arg33 = dx1 + r7
         arg34 = dy1 + r7
         arg35 = dz1 + r7
 
-        arg36_ = dx2 + dy1 + r8
         arg36 = dy1 + dz1 + r8
         arg37 = dx2 + dz1 + r8
         arg38 = dx2 + r8
         arg39 = dy1 + r8
         arg40 = dz1 + r8
 
+        # 判断观测点是否在网格内，如果在网格内，则对角线元素+1
+        inside = (
+            + ti.math.sign(dx1 * dx2)
+            + ti.math.sign(dy1 * dy2)
+            + ti.math.sign(dz1 * dz2)
+            == -3
+        )
+
         txx = (
-            -2 * ti.atan2(dx1, arg1 + tol1)
+            + -2 * ti.atan2(dx1, arg1 + tol1)
             - -2 * ti.atan2(dx2, arg6 + tol1)
             + -2 * ti.atan2(dx2, arg11 + tol1)
             - -2 * ti.atan2(dx1, arg16 + tol1)
@@ -202,36 +199,21 @@ def kernel_matrix_forward(
         ) / -4 / ti.math.pi
 
         txy = (
-            ti.log(arg5)
-            - ti.log(arg10)
-            + ti.log(arg15)
-            - ti.log(arg20)
-            + ti.log(arg25)
-            - ti.log(arg30)
-            + ti.log(arg35)
-            - ti.log(arg40)
+            + ti.log(arg5) - ti.log(arg10)
+            + ti.log(arg15) - ti.log(arg20)
+            + ti.log(arg25) - ti.log(arg30)
+            + ti.log(arg35) - ti.log(arg40)
         ) / -4 / ti.math.pi
 
         txz = (
-            ti.log(arg4) - ti.log(arg9)
+            + ti.log(arg4) - ti.log(arg9)
             + ti.log(arg14) - ti.log(arg19)
             + ti.log(arg24) - ti.log(arg29)
             + ti.log(arg34) - ti.log(arg39)
         ) / -4 / ti.math.pi
 
-        tyx = (
-            ti.log(arg5)
-            - ti.log(arg10)
-            + ti.log(arg15)
-            - ti.log(arg20)
-            + ti.log(arg25)
-            - ti.log(arg30)
-            + ti.log(arg35)
-            - ti.log(arg40)
-        ) / -4 / ti.math.pi
-
         tyy = (
-            -2 * ti.atan2(dy2, arg2 + tol1)
+            + -2 * ti.atan2(dy2, arg2 + tol1)
             - -2 * ti.atan2(dy2, arg7 + tol1)
             + -2 * ti.atan2(dy2, arg12 + tol1)
             - -2 * ti.atan2(dy2, arg17 + tol1)
@@ -242,81 +224,44 @@ def kernel_matrix_forward(
         ) / -4 / ti.math.pi
 
         tyz = (
-            ti.log(arg3) - ti.log(arg8)
+            + ti.log(arg3) - ti.log(arg8)
             + ti.log(arg13) - ti.log(arg18)
             + ti.log(arg23) - ti.log(arg28)
             + ti.log(arg33) - ti.log(arg38)
         ) / -4 / ti.math.pi
 
-        tzx = (
-            ti.log(arg4)
-            - ti.log(arg9)
-            + ti.log(arg14)
-            - ti.log(arg19)
-            + ti.log(arg24)
-            - ti.log(arg29)
-            + ti.log(arg34)
-            - ti.log(arg39)
-        ) / -4 / ti.math.pi
+        # txx + tyy + tzz = 0, 如果观测点在网格外
+        # txx + tyy + tzz = -1, 如果观测点在网格内
+        tzz = -inside - txx - tyy
 
-        tzy = (
-            ti.log(arg3) - ti.log(arg8)
-            + ti.log(arg13) - ti.log(arg18)
-            + ti.log(arg23) - ti.log(arg28)
-            + ti.log(arg33) - ti.log(arg38)
-        ) / -4 / ti.math.pi
-
-        tzz = (
-            -2 * ti.atan2(dz2, arg1_ + tol1)
-            - -2 * ti.atan2(dz2, arg6_ + tol1)
-            + -2 * ti.atan2(dz1, arg11_ + tol1)
-            - -2 * ti.atan2(dz1, arg16_ + tol1)
-            + -2 * ti.atan2(dz2, arg21_ + tol1)
-            - -2 * ti.atan2(dz2, arg26_ + tol1)
-            + -2 * ti.atan2(dz1, arg31_ + tol1)
-            - -2 * ti.atan2(dz1, arg36_ + tol1)
-        ) / -4 / ti.math.pi
+        tyx = txy
+        tzx = txz
+        tzy = tyz
 
         neg_sus = -susc_model[icell]
 
         if ti.static(compressed):
-            Txx[i] = neg_sus * txx
+            Txx[i] = neg_sus * txx + inside
             Txy[i] = neg_sus * txy
             Txz[i] = neg_sus * txz
-            Tyx[i] = neg_sus * tyx
-            Tyy[i] = neg_sus * tyy
+            Tyy[i] = neg_sus * tyy + inside
             Tyz[i] = neg_sus * tyz
-            Tzx[i] = neg_sus * tzx
-            Tzy[i] = neg_sus * tzy
-            Tzz[i] = neg_sus * tzz
+            Tzz[i] = neg_sus * tzz + inside
         else:
             if ti.static(write_to_mat):
-                mat[iobs * 3 + 0, icell * 3 + 0] = neg_sus * txx
+                mat[iobs * 3 + 0, icell * 3 + 0] = neg_sus * txx + inside
                 mat[iobs * 3 + 0, icell * 3 + 1] = neg_sus * txy
                 mat[iobs * 3 + 0, icell * 3 + 2] = neg_sus * txz
                 mat[iobs * 3 + 1, icell * 3 + 0] = neg_sus * tyx
-                mat[iobs * 3 + 1, icell * 3 + 1] = neg_sus * tyy
+                mat[iobs * 3 + 1, icell * 3 + 1] = neg_sus * tyy + inside
                 mat[iobs * 3 + 1, icell * 3 + 2] = neg_sus * tyz
                 mat[iobs * 3 + 2, icell * 3 + 0] = neg_sus * tzx
                 mat[iobs * 3 + 2, icell * 3 + 1] = neg_sus * tzy
-                mat[iobs * 3 + 2, icell * 3 + 2] = neg_sus * tzz
+                mat[iobs * 3 + 2, icell * 3 + 2] = neg_sus * tzz + inside
             else:
-                Txx[iobs, icell] = neg_sus * txx
+                Txx[iobs, icell] = neg_sus * txx + inside
                 Txy[iobs, icell] = neg_sus * txy
                 Txz[iobs, icell] = neg_sus * txz
-                Tyx[iobs, icell] = neg_sus * tyx
-                Tyy[iobs, icell] = neg_sus * tyy
+                Tyy[iobs, icell] = neg_sus * tyy + inside
                 Tyz[iobs, icell] = neg_sus * tyz
-                Tzx[iobs, icell] = neg_sus * tzx
-                Tzy[iobs, icell] = neg_sus * tzy
-                Tzz[iobs, icell] = neg_sus * tzz
-
-    if ti.static(not compressed):
-        if ti.static(write_to_mat):
-            for i in range(3 * nC):
-                mat[i, i] += 1
-        else:
-            for i in range(nC):
-                Txx[i, i] += 1
-                Tyy[i, i] += 1
-                Tzz[i, i] += 1
+                Tzz[iobs, icell] = neg_sus * tzz + inside

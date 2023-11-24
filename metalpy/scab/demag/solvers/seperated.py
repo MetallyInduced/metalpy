@@ -62,16 +62,19 @@ class SeperatedSolver(DemagnetizationSolver):
         nC = xn.shape[0]
         nObs = receiver_locations.shape[0]
 
-        # [[Txx, Txy, Txz], [Tyx, Tyy, Tyz], [Tzx, Tzy, Tzz]]
-        self.Tmat33 = [
-            [ti_field(self.kernel_type) for _ in range(3)]
-            for _ in range(3)
+        self.Tmat321 = [
+            [ti_field(self.kernel_type) for _ in range(3)],  # Txx, Txy, Txz
+            [ti_field(self.kernel_type) for _ in range(2)],  # ---- Tyy, Tyz
+            [ti_field(self.kernel_type) for _ in range(1)],  # --------- Tzz
         ]
-        self.Tmat9 = [t for ts in self.Tmat33 for t in ts]
+        self.Tmat33 = [
+            self.Tmat321[0],  # Txx, Txy, Txz
+            [self.Tmat321[0][1]] + self.Tmat321[1],  # Tyx, Tyy, Tyz
+            [self.Tmat321[0][2], self.Tmat321[1][1]] + self.Tmat321[2]  # Tzx, Tzy, Tzz
+        ]
+        self.Tmat6 = [t for ts in self.Tmat321 for t in ts]
 
-        # 保证 Tx[xyz]，Ty[xyz]，Tz[xyz] 分别在空间上连续，提高空间近邻性
-        for m in self.Tmat33:
-            builder.dense(ti.ij, (nObs, nC)).place(*m)
+        builder.dense(ti.ij, (nObs, nC)).place(*self.Tmat6)
 
         builder.finalize()
 
@@ -80,7 +83,7 @@ class SeperatedSolver(DemagnetizationSolver):
             self.receiver_locations,
             self.xn, self.yn, self.zn,
             self.base_cell_sizes, model,
-            *self.Tmat9, np.empty(0),
+            *self.Tmat6, np.empty(0),
             write_to_mat=False, compressed=False
         )
 
@@ -101,17 +104,39 @@ def solve_Tx_b(Tmat33, m, progress: bool = False):
 
         copy_from(b, m[:, None])
 
-        @ti_func
-        def mul3(Ax, x, i: ti.template()):
-            multiply_with_row_stride_3(
-                Ax, *Tmat33[i], x, i, 3
-            )
+        dtype = x.dtype
 
         @ti_kernel
         def linear(x: ti.template(), Ax: ti.template()):
-            mul3(Ax, x, 0)
-            mul3(Ax, x, 1)
-            mul3(Ax, x, 2)
+            n_obs = Tmat33[0][0].shape[0]
+            n_cells = x.shape[0] // 3
+
+            for r in range(n_obs):
+                summed0: dtype = 0
+                summed1: dtype = 0
+                summed2: dtype = 0
+
+                for c in range(0, n_cells):
+                    col = c * 3
+                    summed0 += (
+                            Tmat33[0][0][r, c] * x[col + 0, 0]
+                            + Tmat33[0][1][r, c] * x[col + 1, 0]
+                            + Tmat33[0][2][r, c] * x[col + 2, 0]
+                    )
+                    summed1 += (
+                            Tmat33[1][0][r, c] * x[col + 0, 0]
+                            + Tmat33[1][1][r, c] * x[col + 1, 0]
+                            + Tmat33[1][2][r, c] * x[col + 2, 0]
+                    )
+                    summed2 += (
+                            Tmat33[2][0][r, c] * x[col + 0, 0]
+                            + Tmat33[2][1][r, c] * x[col + 1, 0]
+                            + Tmat33[2][2][r, c] * x[col + 2, 0]
+                    )
+
+                Ax[3 * r + 0, 0] = summed0
+                Ax[3 * r + 1, 0] = summed1
+                Ax[3 * r + 2, 0] = summed2
 
         matrix_free.cg(ti.linalg.LinearOperator(linear), b, x, progress=progress)
 

@@ -60,7 +60,7 @@ class IntegratedSolver(DemagnetizationSolver):
             self.receiver_locations,
             self.xn, self.yn, self.zn,
             self.base_cell_sizes, model,
-            *[0] * 9, self.A,
+            *[0] * 6, self.A,
             write_to_mat=True, compressed=False
         )
 
