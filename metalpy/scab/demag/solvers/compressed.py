@@ -104,11 +104,12 @@ class CompressedSolver(DemagnetizationSolver):
         nC = xn.shape[0]
         nObs = receiver_locations.shape[0]
 
+        default_table_size = get_default_table_size(nC)
         if compressed_size is None:
-            compressed_size = 100000
+            compressed_size = default_table_size
 
         if np.issubdtype(type(compressed_size), np.floating):
-            compressed_size = int(nC * nObs * compressed_size)
+            compressed_size = int(default_table_size * compressed_size)
 
         self.compressed_size = compressed_size
         self.used, self.overflow = 0, False
@@ -264,7 +265,7 @@ def compress_kernel(
         assert deterministic == CompressedSolver.Optimal
 
     table_size = Tmat6[0].shape[0]
-    kernel_size = np.prod(indices_mat.shape)
+    default_table_size = get_default_table_size(xn.shape[0])
 
     if deterministic == CompressedSolver.Optimal:
         used, overflow = compress_kernel_optimal(
@@ -282,7 +283,10 @@ def compress_kernel(
 
     if overflow:
         raise RuntimeError(f'Compression hash table overflowed.'
-                           f' Consider using a larger `compressed_size` (currently {table_size}).')
+                           f' Consider using larger `compressed_size` like'
+                           f' `{int(table_size * 1.5)}` or'
+                           f' `{table_size / default_table_size * 1.5:.2f}`'
+                           f' (currently {table_size}).')
 
     memory_efficiency = used / table_size
     if memory_efficiency < 0.95:
@@ -293,7 +297,7 @@ def compress_kernel(
                       f' Consider setting `compressed_size` to'
                       f' `{int(used / 0.95)}`'
                       f' or'
-                      f' `1 / {int(1 / (used / 0.95 / kernel_size))}`'
+                      f' `{used / 0.95 / default_table_size:.2f}`'
                       f'.')
 
     return used, overflow > 0
@@ -596,3 +600,7 @@ def check_binary_floats_stability(matrix, threshold=0.95, axes_names=None):
                           f'\n'
                           f' See `metalpy.utils.numeric.limit_significand`'
                           f' for more details.')
+
+
+def get_default_table_size(n_cells):
+    return 100 * n_cells

@@ -10,11 +10,9 @@ from matplotlib import pyplot as plt
 
 from metalpy.scab import Progressed, Tied, Demaged
 from metalpy.scab.builder import SimulationBuilder
-from metalpy.scab.builder.potential_fields.magnetics import Simulation3DIntegralBuilder
 from metalpy.scab.demag.demagnetization import Demagnetization
 from metalpy.scab.demag.utils import get_prolate_spheroid_demag_factor
 from metalpy.scab.modelling.shapes import Ellipsoid
-from metalpy.scab.tied.potential_fields.magnetics.simulation import TiedSimulation3DIntegralMixin
 from metalpy.scab.utils.misc import define_inducing_field
 from metalpy.utils.numeric import limit_significand
 from metalpy.utils.taichi import ti_prepare
@@ -34,11 +32,9 @@ def compute(cell_size, gpu=False):
     obsy = np.linspace(-2048, 2048, 128 + 1)
     obsx, obsy = np.meshgrid(obsx, obsy)
     obsx, obsy = mkvc(obsx), mkvc(obsy)
-    obsz = np.full_like(obsy, 80)
+    obsz = np.full_like(obsy, 3 * a)
     receiver_points = np.c_[obsx, obsy, obsz]
 
-    # 手动引入来帮助Dask定位并上传到worker
-    _ = TiedSimulation3DIntegralMixin, Simulation3DIntegralBuilder
     builder = SimulationBuilder.of(magnetics.simulation.Simulation3DIntegral)
     builder.patched(Tied(arch='gpu' if gpu else 'cpu'), Progressed())
     builder.source_field(*source_field)
@@ -47,26 +43,29 @@ def compute(cell_size, gpu=False):
     builder.model_type(scalar=True)
     builder.store_sensitivities(False)
 
+    # 基于积分方程法求解退磁效应
+    sim_numeric = copy.deepcopy(builder)
+    sim_numeric.patched(Demaged(
+        method=Demagnetization.Compressed,
+        compressed_size=0.05,
+        quantized=True,
+        progress=True
+    ))
+    simulation = sim_numeric.build()
+    pred_sim = simulation.dpred(model_mesh.model)
+    demaged_model_sim = simulation.chi
+
     # 基于椭球体退磁因子计算
     sim_factored = copy.deepcopy(builder)
     factor = get_prolate_spheroid_demag_factor(c / a, polar_axis=0)
     sim_factored.patched(Demaged(factor=factor))
     simulation = sim_factored.build()
-    pred = simulation.dpred(model_mesh.model)
-    demaged_model = simulation.chi
+    pred_truth = simulation.dpred(model_mesh.model)
+    demaged_model_truth = simulation.chi
 
-    # 基于积分方程法求解退磁效应
-    sim_numeric = copy.deepcopy(builder)
-    sim_numeric.patched(Demaged(
-        method=Demagnetization.Compressed,
-        compressed_size=400000,
-        progress=True
-    ))
-    simulation = sim_numeric.build()
-    pred2 = simulation.dpred(model_mesh.model)
-    demaged_model2 = simulation.chi
+    print(model_mesh.n_active_cells)
 
-    return demaged_model, pred, demaged_model2, pred2, receiver_points
+    return demaged_model_truth, pred_truth, demaged_model_sim, pred_sim, receiver_points
 
 
 if __name__ == '__main__':
@@ -75,7 +74,7 @@ if __name__ == '__main__':
     gpu = False
 
     model_t, pred_t, model_p, pred_p, receiver_points = compute(
-        cell_size=[2, 2, 2],
+        cell_size=[2, 1, 1],
         gpu=gpu
     )
 
