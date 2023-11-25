@@ -344,7 +344,7 @@ class ModelledMesh:
         model = np.asarray(model)
         assert model.shape[0] in (self.n_active_cells, self.n_cells), \
             f'`ModelledMesh` only accepts models matching active cells or all mesh cells.' \
-            f' Got model with size {model.shape[0]}, expected {self.n_active_cells} or {self.n_cells}.'
+            f' Got model {item} with size {model.shape[0]}, expected {self.n_active_cells} or {self.n_cells}.'
         self._models[item] = model
 
     def __contains__(self, item):
@@ -627,6 +627,13 @@ class ModelledMesh:
             ret = self.reactivate(mask, scalars=scalars, shallow=shallow)
 
         if not isinstance(model, str):
+            if self.is_active_model(mask):
+                # mask是self下的有效网格模型，意味着其不是ret下的有效网格模型
+                # 因此model不能直接继承给ret，而需要重新映射为ret下的有效网格模型
+                # 例如：假设self总网格3000个，有效网格1000个，ret含有效网格500个，
+                # model作为self的有效网格模型，长度为1000，
+                # 而ret只接受500或3000两种模型格式，因此需要重新映射到长度为500的格式
+                model = model[mask]
             model = ensure_set_key(ret, Object.DEFAULT_KEY, model)
 
         ret.set_active_model(model)

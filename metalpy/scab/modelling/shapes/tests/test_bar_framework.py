@@ -8,7 +8,7 @@ def shp():
 
 def _test_bar_framework(inherit_transform):
     kwargs = {
-        'bar_spec': 1,
+        'spec': 1,
         'n_rooms': 2,
         'inherit_transform': inherit_transform
     }

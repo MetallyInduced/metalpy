@@ -23,6 +23,7 @@ from .object import Object
 from .shapes import Shape3D
 from .shapes.full_space import FullSpace
 from .shapes.shape3d import bounding_box_of
+from ...utils.numeric import limit_significand
 
 
 class Scene(OSMFormat, PTopoFormat):
@@ -268,7 +269,7 @@ class Scene(OSMFormat, PTopoFormat):
         sizes = bounds.extent
 
         if cell_size is not None:
-            if np.isscalar(cell_size):
+            if np.ndim(cell_size) == 0:  # array 状态下的int不会被视为 scalar，不能使用np.isscalar
                 cell_size = [cell_size] * 3
             cell_size = np.asarray(cell_size)
             n_cells = np.ceil(sizes / cell_size).astype(int)
@@ -320,6 +321,50 @@ class Scene(OSMFormat, PTopoFormat):
         pruned = self.build_model(mesh, executor=executor, progress=progress, cache=cache, cache_dir=cache_dir)
 
         return pruned
+
+    def build_active(
+            self,
+            active_cells,
+            cell_size=None,
+            iters=1,
+            limit_sig=True
+    ) -> ModelledMesh:
+        """重新构建网格和模型，使得有效网格数接近 `active_cells`
+
+        Parameters
+        ----------
+        active_cells
+            有效网格数
+        cell_size
+            网格尺寸，若指定，则会以该尺寸作为网格比例，否则使用各向同性网格
+        iters
+            迭代次数，每次迭代会根据上一次的结果调整网格尺寸
+        limit_sig
+            是否限制网格尺寸的有效数字位数
+
+        Returns
+        -------
+        model_mesh
+            模型网格
+
+        See Also
+        --------
+        Scene.build : 构造网格和模型
+        """
+        if cell_size is None:
+            model_mesh = self.build(n_cells=active_cells)
+            cell_size = [h[0] for h in model_mesh.mesh.h]
+        else:
+            model_mesh = self.build(cell_size=cell_size)
+
+        for i in range(1, iters + 1):
+            ratio = (model_mesh.n_active_cells / active_cells) ** (1 / 3)
+            cell_size = [c * ratio for c in cell_size]
+            if i == iters and limit_sig:
+                cell_size = limit_significand(cell_size)
+            model_mesh = self.build(cell_size=cell_size)
+
+        return model_mesh
 
     def build_objects(self, mesh, progress=None):
         if progress is True:

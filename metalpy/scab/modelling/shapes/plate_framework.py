@@ -24,12 +24,12 @@ class PlateFramework(BarFramework):
             inherit_transform=inherit_transform
         )
 
-    def _create_bars(self, axis):
-        # 长轴为c，坐标为a，b
-        a, b, c = axes = np.r_[axis + 1, axis + 2, axis] % 3  # 三个轴的下标
-        ra = self.bar_radius(a)
-        b0, b1 = self.axis_span(b)
-        c0, c1 = self.axis_span(c)
+    def _create_parts(self, axis):
+        # axis为厚度轴，其余两个轴为平面轴
+        a, b, c = axes = np.r_[axis, axis + 1, axis + 2] % 3  # 三个轴的下标
+        ra = self.bar_radius[a]
+        b0, b1 = self.axis_span[b]
+        c0, c1 = self.axis_span[c]
 
         axes = axes[axes]
 

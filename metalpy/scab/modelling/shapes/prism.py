@@ -5,6 +5,7 @@ from scipy.stats import linregress
 from metalpy.utils.bounds import Bounds
 from metalpy.utils.dhash import dhash
 from metalpy.utils.ear_clip import ear_clip
+from metalpy.utils.geometry import gen_random_convex_polygon
 from . import Shape3D
 
 
@@ -86,6 +87,34 @@ class Prism(Shape3D):
             self.triangulated_polygon = np.asarray(cells)
         else:
             self.triangulated_polygon = ear_clip(self.pts, verbose=verbose)
+
+    @staticmethod
+    def rand(n_edges,
+             size=(1, 1),
+             z0=0,
+             z1=1,
+             random_state=None,
+             ):
+        """生成随机棱柱
+
+        Parameters
+        ----------
+        n_edges
+            随机棱柱的边数
+        size
+            随机棱柱在xy平面上的尺寸
+        z0, z1
+            随机棱柱的底面和顶面高度
+        random_state
+            随机种子
+
+        Returns
+        -------
+        ret
+            随机棱柱实例
+        """
+        pts = gen_random_convex_polygon(n_edges, size=size, random_state=random_state)
+        return Prism(pts, z0, z1)
 
     @property
     def h(self):

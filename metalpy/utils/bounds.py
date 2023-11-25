@@ -72,10 +72,7 @@ class Bounds(FixedShapeNDArray):
     """
 
     def __new__(cls, var_inp, *args, dtype=None) -> 'Bounds':
-        if np.isscalar(var_inp):
-            return np.asanyarray([var_inp, *args], dtype=dtype).view(cls)
-        else:
-            return np.asanyarray(var_inp, dtype=dtype).view(cls)
+        return np.asanyarray(np.r_[var_inp, args], dtype=dtype).view(cls)
 
     def __array_finalize__(self, _, **__):
         pass

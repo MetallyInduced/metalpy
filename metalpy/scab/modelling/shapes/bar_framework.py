@@ -54,7 +54,7 @@ class BarFramework(Composition):
         ----------
         outline
             边界模型，一般为Cuboid或者立方体Prism
-        bar_spec
+        spec, bar_spec
             三个方向上条柱的粗细，传入单一值时代表同时定义三个方向
         n_rooms
             三个方向上的房间数，传入单一值时代表同时定义三个方向
@@ -75,6 +75,8 @@ class BarFramework(Composition):
             self.spec = spec
         elif bar_spec is not None:
             self.bar_spec = bar_spec
+        else:
+            raise AssertionError('`spec` must be specified.')
 
         if bounds is not None:
             bounds = Bounds(bounds)
@@ -199,12 +201,7 @@ class BarFramework(Composition):
 
     @cached_property
     def bars(self):
-        ret = Composition(
-            *self._create_bars(0),
-            *self._create_bars(1),
-            *self._create_bars(2),
-            mix_mode=Composition.Union
-        )
+        ret = self._create_base_framework()
 
         if self.inherit_transform:
             ret.transforms = self.outline.transforms.clone()
@@ -218,7 +215,7 @@ class BarFramework(Composition):
             self.outline
         ]
 
-    def _create_bars(self, axis):
+    def _create_parts(self, axis):
         # 长轴为c，坐标为a，b
         a, b, c = axes = np.r_[axis + 1, axis + 2, axis] % 3  # 三个轴的下标
         ra, rb = self.bar_radius[a], self.bar_radius[b]
@@ -230,3 +227,11 @@ class BarFramework(Composition):
             origin = np.r_[ax - ra, bx - rb, c0][axes]
             end = np.r_[ax + ra, bx + rb, c1][axes]
             yield Cuboid(origin=origin, end=end)
+
+    def _create_base_framework(self):
+        return Composition(
+            *self._create_parts(0),
+            *self._create_parts(1),
+            *self._create_parts(2),
+            mix_mode=Composition.Union
+        )
