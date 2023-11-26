@@ -74,7 +74,7 @@ if __name__ == '__main__':
     gpu = False
 
     model_t, pred_t, model_p, pred_p, receiver_points = compute(
-        cell_size=[2, 1, 1],   # 受限于taichi的int32索引限制，网格数最大只支持65535
+        cell_size=[2, 1, 1],   # 受限于taichi的int32索引限制，网格数最大只支持65536
         gpu=gpu
     )
 

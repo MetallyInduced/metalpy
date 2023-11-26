@@ -18,9 +18,9 @@ from .solvers.solver import DemagnetizationSolver
 
 
 class Demagnetization:
-    Compressed = 'compressed'
-    Seperated = 'seperated'
-    Integrated = 'integrated'
+    Compressed = 'Compressed'
+    Seperated = 'Seperated'
+    Integrated = 'Integrated'
     methods = {
         Compressed,
         Seperated,
@@ -130,9 +130,13 @@ class Demagnetization:
 
         self.is_cpu = ti_cfg().arch == ti.cpu
 
+        is_symmetric = all(np.all(h == h[0]) for h in mesh.h)
         if symmetric is None:
             symmetric = not self.is_cpu
-        self.symmetric = symmetric and all(np.all(h == h[0]) for h in mesh.h)
+        elif symmetric is True:
+            if not is_symmetric:
+                warnings.warn('`symmetric` mode is enabled, but the mesh is not symmetric.')
+        self.symmetric = symmetric and is_symmetric
 
         # CPU后端可以直接判断内存是否足够
         # 但CUDA后端不能在没有额外依赖的情况下查询内存，并且内存不足时会抛出异常，无法通过再次ti.init还原
@@ -151,10 +155,10 @@ class Demagnetization:
             if ti_cfg().arch == ti.cuda and 'cuStreamSynchronize' in e.args[0]:
                 raise RuntimeError(f'Failed to build kernel matrix.'
                                    f' This may be resulted by insufficient memory'
-                                   f' (please check log for detailed error info).'
-                                   f'\nMemory consumption can be reduced by'
-                                   f' specifying `method={Demagnetization.__name__}.Compressed`'
-                                   f' and tune the `compressed_size` and `quantized`.')
+                                   f' (please check log for details).'
+                                   f'\nTry specifying `method={Demagnetization.__name__}.Compressed`'
+                                   f' with proper `compressed_size` and'
+                                   f' enabling `quantized` and `symmetric` when necessary.')
             else:
                 raise e
 
@@ -192,8 +196,14 @@ def dispatch_solver(
         symmetric: bool = False,
         progress=False
 ) -> DemagnetizationSolver:
-    mat_size = receiver_locations.shape[0] * 3 * xn.shape[0] * 3
+    n_obs = receiver_locations.shape[0]
+    n_cells = xn.shape[0]
+    mat_size = n_obs * 3 * n_cells * 3
     kernel_size = mat_size * np.finfo(np.result_type(receiver_locations, xn)).bits / 8
+
+    max_cells_allowed_0 = int((1 + np.sqrt(1 + 8 * ti_size_max)) / 2)  # CompressedSolver对称模式下支持的最大网格数
+    max_cells_allowed_1 = int(np.sqrt(ti_size_max))  # CompressedSolver非对称模式和SeperatedSolver支持的最大网格数
+    max_cells_allowed_2 = max_cells_allowed_1 // 3  # IntegratedSolver支持的最大网格数
 
     if is_cpu:
         available_memory = psutil.virtual_memory().free
@@ -220,30 +230,74 @@ def dispatch_solver(
         **common_kwargs
     }
 
+    if n_cells > max_cells_allowed_0:
+        raise AssertionError(
+            f'Mesh with {n_cells} cells (> {max_cells_allowed_0})'
+            f' is not supported.'
+        )
+    elif n_cells > max_cells_allowed_1:
+        assert method in {Demagnetization.Compressed, None}, (
+            f'Mesh with {n_cells} cells (> {max_cells_allowed_1})'
+            f' requires symmetric `{CompressedSolver.__name__}` (got `{solver_name(method)}`).'
+        )
+        assert symmetric, (
+            f'Mesh with {n_cells} cells (> {max_cells_allowed_1})'
+            f' requires `symmetric` mesh.'
+            f' Try setting `symmetric=True`.'
+        )
+    elif n_cells > max_cells_allowed_2:
+        assert method != Demagnetization.Integrated, (
+            f'`{IntegratedSolver.__name__}` does not support'
+            f' mesh with {n_cells} cells (> {max_cells_allowed_2}).'
+        )
+
     if method is not None:
-        if method == Demagnetization.Compressed:
-            candidate = CompressedSolver(**kw_com)
-        elif method == Demagnetization.Seperated:
-            candidate = SeperatedSolver(direct_to_host=False, **kw_sep)
-        elif method == Demagnetization.Integrated:
-            if mat_size > ti_size_max:
-                warnings.warn(f'`Integrated` method does not support'
-                              f' kernel size ({mat_size}) > ti_size_max ({ti_size_max}),'
-                              f' which may lead to unexpected result.')
-            candidate = IntegratedSolver(**kw_int)
-        else:
-            warnings.warn('Unrecognized solver. Falling back to `Seperated` method.')
-            candidate = SeperatedSolver(direct_to_host=False, **kw_sep)
+        candidate = dispatch_solver_by_name(
+            method,
+            kw_int=kw_int,
+            kw_sep=kw_sep,
+            kw_com=kw_com
+        )
     elif available_memory is not None and kernel_size > available_memory * 0.8:
         candidate = CompressedSolver(**kw_com)
-    elif mat_size > ti_size_max:
-        candidate = SeperatedSolver(direct_to_host=False, **kw_sep)
-    elif is_cpu:
-        candidate = IntegratedSolver(**kw_int)
-    elif ti_test_snode_support():
-        candidate = SeperatedSolver(direct_to_host=True, **kw_sep)
+    elif n_cells > max_cells_allowed_1:
+        candidate = CompressedSolver(**kw_com)
+    elif n_cells > max_cells_allowed_2:
+        candidate = SeperatedSolver(direct_to_host=ti_test_snode_support(), **kw_sep)
     else:
         print("Current GPU doesn't support SNode, fall back to legacy implementation.")
         candidate = IntegratedSolver(**kw_int)
+
+    return candidate
+
+
+def solver_name(method):
+    return dispatch_solver_by_name(method).__name__
+
+
+def dispatch_solver_by_name(method, kw_int=None, kw_sep=None, kw_com=None):
+    """通过方法名获取求解器，当不指定求解器参数时，返回求解器类
+    """
+    if method == Demagnetization.Compressed:
+        if kw_com is not None:
+            candidate = CompressedSolver(**kw_com)
+        else:
+            candidate = CompressedSolver
+    elif method == Demagnetization.Seperated:
+        if kw_sep is not None:
+            candidate = SeperatedSolver(direct_to_host=False, **kw_sep)
+        else:
+            candidate = SeperatedSolver
+    elif method == Demagnetization.Integrated:
+        if kw_int is not None:
+            candidate = IntegratedSolver(**kw_int)
+        else:
+            candidate = IntegratedSolver
+    else:
+        warnings.warn('Unrecognized solver. Falling back to `Seperated` method.')
+        if kw_sep is not None:
+            candidate = SeperatedSolver(direct_to_host=False, **kw_sep)
+        else:
+            candidate = SeperatedSolver
 
     return candidate

@@ -23,7 +23,6 @@ class DemagnetizationSolver(abc.ABC):
         self.source_field = source_field
 
         self.model = None
-        self.last_source_field = None
 
     @property
     def kernel_type(self):

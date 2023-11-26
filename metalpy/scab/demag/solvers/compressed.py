@@ -11,7 +11,6 @@ from metalpy.scab.utils.misc import Field
 from metalpy.utils.numeric import limit_significand
 from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, copy_from, ti_size_t, ti_size_dtype, \
     ti_cfg, ti_pyfunc
-from metalpy.utils.taichi_kernels import ti_use
 from metalpy.utils.ti_solvers import matrix_free
 from .kernel import kernel_matrix_forward
 from .solver import DemagnetizationSolver
@@ -86,6 +85,9 @@ class CompressedSolver(DemagnetizationSolver):
 
             在当前64位位宽下，只支持最多压缩到21位，索引约200万项，
             更宽则一个int64中只能存储2个索引，和32位相同，此时自动转为非压缩模式。
+
+        `symmetric` 指定是否启用对称模式（当网格为规则网格时可以启用）存储索引矩阵，
+        对称模式下，所有对角线元素值相同，存储在 indices_mat[0] ，上三角部分逐行存储在 indices_mat[1:] 。
 
         注意事项：
 
@@ -309,13 +311,12 @@ def compress_kernel(
     memory_efficiency = used / table_size
     if memory_efficiency < 0.95:
         # 一个特点是，尤其是对于规则六边形网格
-        # 随着网格数增加，不同网格关系数的增速比核矩阵的增速慢
-        # 即随着网格数增加，压缩比会越来越低
+        # 不同网格关系数的和有效网格数近似线性关系
         warnings.warn(f'Low memory efficiency detected ({memory_efficiency:.2%}).'
                       f' Consider setting `compressed_size` to'
                       f' `{int(used / 0.95)}`'
                       f' or'
-                      f' `{used / 0.95 / default_table_size:.2f}`'
+                      f' `{used / 0.95 / default_table_size:.4f}`'
                       f'.')
 
     return used, overflow > 0
@@ -620,8 +621,7 @@ def solve_Tx_b_compressed_symmetric(Tmat321, indices_mat, m, progress: bool = Fa
         n_cells = x.shape[0] // 3
 
         @ti_func
-        def extract(r, c):
-            i = index_mat2triu(r, c, n_cells)
+        def extract_by_index(i):
             ind = indices_mat[i]
             return (
                 Tmat321[0][0][ind], Tmat321[0][1][ind], Tmat321[0][2][ind],
@@ -629,20 +629,32 @@ def solve_Tx_b_compressed_symmetric(Tmat321, indices_mat, m, progress: bool = Fa
                 Tmat321[2][0][ind]
             )
 
+        @ti_func
+        def extract(r, c):
+            i = index_mat2triu(r, c, n_cells)
+            return extract_by_index(i)
+
+        @ti_func
+        def extract_diag():
+            return extract_by_index(0)
+
         @ti_kernel
         def linear(x: ti.template(), Ax: ti.template()):
             n_obs = Ax.shape[0] // 3
             n_cells = x.shape[0] // 3
 
-            # 上三角和对角线部分
+            # 对角线和上三角部分
+            txx_, txy_, txz_, tyy_, tyz_, tzz_ = extract_diag()
             for r in range(n_obs):
                 row = r * 3
 
-                bx_u: dtype = 0
-                by_u: dtype = 0
-                bz_u: dtype = 0
+                mx_, my_, mz_ = x[row + 0, 0], x[row + 1, 0], x[row + 2, 0]
 
-                for c in range(r, n_cells):
+                bx_u: dtype = txx_ * mx_ + txy_ * my_ + txz_ * mz_
+                by_u: dtype = txy_ * mx_ + tyy_ * my_ + tyz_ * mz_
+                bz_u: dtype = txz_ * mx_ + tyz_ * my_ + tzz_ * mz_
+
+                for c in range(r + 1, n_cells):
                     col = c * 3
 
                     txx, txy, txz, tyy, tyz, tzz = extract(r, c)
@@ -730,46 +742,55 @@ def get_default_table_size(n_cells):
 def mul_and_div2(a, b):
     """计算 a * b // 2，通过调换除法顺序来防止溢出
     """
-    if a % 2 == 0:
-        a //= 2
-    else:
-        b //= 2
+    p = a & 1  # a是否是2的倍数
+    a >>= 1 - p
+    b >>= p
 
     return a * b
 
 
 @ti_pyfunc
 def symmetric_mat_size(nobs, nc):
-    """计算上三角矩阵下的存储大小
+    """计算对称模式下的存储大小，包含一个对角线元素和上三角部分
     """
-    # nobs * (nc + 1) // 2
-    return mul_and_div2(nobs, (nc + 1))
+    # nobs * (nc - 1) // 2 + 1
+    return mul_and_div2(nobs, nc - 1) + 1
 
 
 @ti_func
 def index_triu2mat(i, n):
     """通过索引号i计算上三角矩阵下的行列号
-    """
-    tc = 2 * n + 1.0
-    r = ti.math.floor((tc - ti.math.sqrt(tc * tc - 8 * i)) / 2, dtype=ti_size_t)
-    c = i - n * r + r * (r - 1) // 2 + r
 
-    # 由于精度损失，计算得到的r数值可能会有偏差，需要进行纠正
-    while c >= n:
-        r += 1
-        c = c - n + r
-    while c < r:
-        c = c - r + n
-        r -= 1
+    i = 0 时代表对角线元素，返回 c = r = 0
+
+    i > 0 时计算对应上三角部分的行列号 c 和 r
+    """
+    r: ti_size_t = 0
+    c: ti_size_t = 0
+
+    if i != 0:
+        # ref: https://stackoverflow.com/a/69292749
+        # 注意此处 i=0 代表所有对角线元素，因此对应到回答中 k=i-1
+        # 但是由于计算量较大且存在精度损失，效率反而不如迭代计算
+        # r = n - 2 - ti.math.floor(ti.math.sqrt(4.0 * n * (n - 1) - (8 * (i - 1)) - 7) / 2.0 - 0.5, dtype=ti_size_t)
+
+        r = 0
+        c = i
+        while c >= n:
+            r = r + 1 + (c - (n - 1)) // ((n - 1) - (r + 1))
+            c = i - mul_and_div2(2 * n - (r + 1), r) + r
+        while c <= r:
+            c = c + n - (r + 1)
+            r -= 1
 
     return r, c
 
 
 @ti_pyfunc
 def index_mat2triu(r, c, n):
-    """通过上三角矩阵下的行列号计算索引号i
+    """通过上三角矩阵下的行列号计算索引号i，需要调用方保证 c > r
     """
-    # n * r - r * (r - 1) // 2 + (c - r)
+    # n * r - r * (r + 1) // 2 + (c - (r + 1)) + 1
     # 可以变形为
-    # (2 * n - (r - 1)) * r // 2 + (c - r)
-    return mul_and_div2((2 * n - (r - 1)), r) + (c - r)
+    # (2 * n - (r + 1)) * r // 2 + (c - (r + 1)) + 1
+    return mul_and_div2(2 * n - (r + 1), r) + (c - (r + 1)) + 1

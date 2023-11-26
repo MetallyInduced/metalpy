@@ -394,7 +394,7 @@ def check_contiguous(arr, name=None):
     typename = type(arr).__name__
     if typename == 'ndarray':
         import numpy as np
-        if not arr.flags.contiguous:
+        if not arr.flags.c_contiguous and not arr.flags.f_contiguous:
             if name is None:
                 loc = ''
             else:
@@ -436,8 +436,10 @@ def ensure_contiguous(func):
         n_args = len(args)
         n_varargs = len(specs.args) - n_args
         arg_names = specs.args + ([f'__vararg{i}' for i in range(-n_varargs)] if n_varargs < 0 else [])
+
         args = tuple(check_contiguous(arg, name=name) for arg, name in zip(args, arg_names))
         kwargs = {k: check_contiguous(v, name=k) for k, v in kwargs.items()}
+
         func(*args, **kwargs)
 
     return wrapper
