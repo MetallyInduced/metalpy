@@ -4,10 +4,10 @@
 
 import taichi as ti
 
-from .taichi import ti_func
+from .taichi import ti_func, ti_pyfunc
 
 
-@ti_func
+@ti_pyfunc
 def ti_use(_):
     pass
 

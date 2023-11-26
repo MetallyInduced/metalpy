@@ -10,7 +10,8 @@ from taichi.lang.util import to_taichi_type
 from metalpy.scab.utils.misc import Field
 from metalpy.utils.numeric import limit_significand
 from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, copy_from, ti_size_t, ti_size_dtype, \
-    ti_cfg
+    ti_cfg, ti_pyfunc
+from metalpy.utils.taichi_kernels import ti_use
 from metalpy.utils.ti_solvers import matrix_free
 from .kernel import kernel_matrix_forward
 from .solver import DemagnetizationSolver
@@ -30,6 +31,7 @@ class CompressedSolver(DemagnetizationSolver):
             compressed_size: Union[int, float, None] = None,
             deterministic: Union[bool, str] = True,
             quantized: bool = False,
+            symmetric: bool = False,
             progress: bool = False
     ):
         """该函数将核矩阵通过哈希表进行压缩，以计算效率为代价换取大幅降低内存需求量
@@ -54,6 +56,9 @@ class CompressedSolver(DemagnetizationSolver):
             采用量化模式压缩核矩阵，默认为False。
             True则启用压缩，使用更小位宽来存储核矩阵，减少一定的空间需求，略微牺牲计算效率。
             （可能会报要求尺寸为2的幂的性能警告）
+        symmetric
+            指示是否启用对称模式（当网格为规则网格时可以启用），默认为False。
+            True则启用对称模式，以对称矩阵形式存储核矩阵，减少一定的空间需求
         progress
             是否输出求解进度条，默认为False不输出
 
@@ -121,15 +126,19 @@ class CompressedSolver(DemagnetizationSolver):
             [ti_field(self.kernel_type) for _ in range(2)],  # ---- Tyy, Tyz
             [ti_field(self.kernel_type) for _ in range(1)],  # --------- Tzz
         ]
-        self.Tmat33 = [
-            self.Tmat321[0],  # Txx, Txy, Txz
-            [self.Tmat321[0][1]] + self.Tmat321[1],  # Tyx, Tyy, Tyz
-            [self.Tmat321[0][2], self.Tmat321[1][1]] + self.Tmat321[2]  # Tzx, Tzy, Tzz
-        ]
         self.Tmat6 = [t for ts in self.Tmat321 for t in ts]
 
         builder.dense(ti.i, compressed_size).place(*self.Tmat6)
 
+        self.symmetric = symmetric
+        if not symmetric:
+            axes = ti.ij
+            indices_size = [nObs, nC]
+        else:
+            axes = ti.i
+            indices_size = [symmetric_mat_size(nObs, nC)]
+
+        self.quantized = quantized
         indices_mat = None
         while quantized:
             arch = ti_cfg().arch
@@ -153,18 +162,22 @@ class CompressedSolver(DemagnetizationSolver):
                 signed=False,
                 compute=ti_size_t
             )
+
             indices_mat = ti_field(indices_type)
+            indices_size[-1] = math.ceil(indices_size[-1] / n_packed)
+
             (
                 builder
-                .dense(ti.ij, (nObs, math.ceil(nC / n_packed)))
-                .quant_array(ti.j, n_packed, max_num_bits=primitive_bits)
+                .dense(axes, indices_size)
+                .quant_array(axes[-1:], n_packed, max_num_bits=primitive_bits)
                 .place(indices_mat)
             )
+
             break
 
         if indices_mat is None:
             indices_mat = ti_field(ti_size_t)
-            builder.dense(ti.ij, (nObs, nC)).place(indices_mat)
+            builder.dense(axes, indices_size).place(indices_mat)
 
         self.indices_mat = indices_mat
 
@@ -176,7 +189,8 @@ class CompressedSolver(DemagnetizationSolver):
             self.receiver_locations,
             self.xn, self.yn, self.zn,
             self.indices_mat,
-            deterministic=self.deterministic
+            deterministic=self.deterministic,
+            symmetric=self.symmetric
         )
 
         kernel_matrix_forward(
@@ -188,7 +202,8 @@ class CompressedSolver(DemagnetizationSolver):
         )
 
     def solve(self, magnetization):
-        return solve_Tx_b_compressed(self.Tmat33, self.indices_mat, magnetization, progress=self.progress)
+        solver = not self.symmetric and solve_Tx_b_compressed or solve_Tx_b_compressed_symmetric
+        return solver(self.Tmat321, self.indices_mat, magnetization, progress=self.progress)
 
 
 def search_prime(value):
@@ -259,7 +274,8 @@ def compress_kernel(
         yn: np.ndarray,
         zn: np.ndarray,
         indices_mat,
-        deterministic
+        deterministic,
+        symmetric
 ):
     if deterministic not in [True, False]:
         assert deterministic == CompressedSolver.Optimal
@@ -271,14 +287,16 @@ def compress_kernel(
         used, overflow = compress_kernel_optimal(
             Tmat6, receiver_locations,
             xn, yn, zn,
-            indices_mat
+            indices_mat,
+            symmetric
         )
     else:
         used, overflow = compress_kernel_by_hash(
             Tmat6, receiver_locations,
             xn, yn, zn,
             indices_mat,
-            deterministic
+            deterministic,
+            symmetric
         )
 
     if overflow:
@@ -309,7 +327,8 @@ def compress_kernel_optimal(
         xn: np.ndarray,
         yn: np.ndarray,
         zn: np.ndarray,
-        indices_mat
+        indices_mat,
+        symmetric: bool
 ):
     n_param = len(mats)
     table_size = mats[0].shape[0]
@@ -323,7 +342,12 @@ def compress_kernel_optimal(
     if not overflow:
         for i in range(n_param):
             copy_col_vector_from_matrix(mats[i], compressed, i)
-        indices_mat.from_numpy(inverse.reshape(table.shape[:2]).astype(ti_size_dtype))
+
+        inverse = inverse.reshape(table.shape[:2]).astype(ti_size_dtype)
+        if not symmetric:
+            indices_mat.from_numpy(inverse)
+        else:
+            indices_mat.from_numpy(inverse[np.triu_indices(xn.shape[0])])
 
     return used, overflow > 0
 
@@ -335,7 +359,8 @@ def compress_kernel_by_hash(
         yn: np.ndarray,
         zn: np.ndarray,
         indices_mat,
-        deterministic: bool
+        deterministic: bool,
+        symmetric: bool
 ):
     table_size = mats[0].shape[0]
 
@@ -368,7 +393,8 @@ def compress_kernel_by_hash(
         total_bits,
         overflow,
         prime,
-        invalid_value_for_dx1
+        invalid_value_for_dx1,
+        symmetric
     )
 
     overflow = overflow.to_numpy()[0]
@@ -394,7 +420,8 @@ def hash_unique(
         total_bits: ti.template(),
         overflow: ti.template(),
         prime: ti.template(),
-        invalid_value_for_dx1: ti.template()
+        invalid_value_for_dx1: ti.template(),
+        symmetric: ti.template()
 ):
     for I in ti.grouped(Txx):
         Txx[I] = ti.math.inf
@@ -405,9 +432,17 @@ def hash_unique(
     overflow[0] = ti.i8(0)
     qb = total_bits // 4  # quarter bits
 
-    for iobs, icell in ti.ndrange(nObs, nC):
+    total = nObs * nC
+    if ti.static(symmetric):
+        total = symmetric_mat_size(nObs, nC)
+
+    for i in ti.ndrange(total):
         if overflow[0] > 0:
             continue
+
+        iobs, icell = i // nC, i % nC
+        if ti.static(symmetric):
+            iobs, icell = index_triu2mat(i, nC)
 
         dz2 = zn[icell, 1] - receiver_locations[iobs, 2]
         dz1 = zn[icell, 0] - receiver_locations[iobs, 2]
@@ -416,25 +451,28 @@ def hash_unique(
         dx2 = xn[icell, 1] - receiver_locations[iobs, 0]
         dx1 = xn[icell, 0] - receiver_locations[iobs, 0]
 
-        # 由于互换对称性，核矩阵会存在一定的对称性（注：特例是规则网格，此时核矩阵为对称矩阵）
-        # 因此通过确保网格关系的唯一性，可以最高将压缩率提高到原来的50%
-        # 唯一性条件具体以dx条件为例：
-        #   情况1. dx1和dx2同号，保证均为正
-        #   情况2. dx1和dx2异号，保证dx1绝对值小于dx2 （注：该情况对于规则网格无意义）
-        # 检查过程如下：
-        # 1. 检查dx条件，不满足则执行互换
-        # 2. 如果dx相反（dx1和dx2互为相反数，此时dx1和dx2互换前后数值不变），则检查dy条件，不满足则执行互换
-        # 3. 如果dx和dy均相反，则检查dz条件，不满足则执行互换
-        # 提升比需要在CPU模式下验证（对于GPU，由于冲突的存在，无法达到理想提升比）
-        e1, e2 = dx1 + dx2 == 0, dy1 + dy2 == 0
-        swap_x = dx1 < 0 and -dx1 > dx2  # 检查dx条件
-        swap_y = e1 and dy1 < 0 and -dy1 > dy2  # dx相反，检查dy条件
-        swap_z = e1 and e2 and dz1 < 0 and -dz1 > dz2  # dx和dy相反，检查dz条件
+        if ti.static(not symmetric):
+            # 由于互换对称性，核矩阵会存在一定的对称性
+            # 极端情况是规则网格，此时核矩阵为对称矩阵，启用对称模式即不再需要该trick
 
-        if swap_x or swap_y or swap_z:
-            dx1, dx2 = -dx2, -dx1
-            dy1, dy2 = -dy2, -dy1
-            dz1, dz2 = -dz2, -dz1
+            # 因此通过确保网格关系的唯一性，可以最高将压缩率提高到原来的50%
+            # 唯一性条件具体以dx条件为例：
+            #   情况1. dx1和dx2同号，保证均为正
+            #   情况2. dx1和dx2异号，保证dx1绝对值小于dx2 （注：该情况对于规则网格无意义）
+            # 检查过程如下：
+            # 1. 检查dx条件，不满足则执行互换
+            # 2. 如果dx相反（dx1和dx2互为相反数，此时dx1和dx2互换前后数值不变），则检查dy条件，不满足则执行互换
+            # 3. 如果dx和dy均相反，则检查dz条件，不满足则执行互换
+            # 提升比需要在CPU模式下验证（对于GPU，由于冲突的存在，无法达到理想提升比）
+            e1, e2 = dx1 + dx2 == 0, dy1 + dy2 == 0
+            swap_x = dx1 < 0 and -dx1 > dx2  # 检查dx条件
+            swap_y = e1 and dy1 < 0 and -dy1 > dy2  # dx相反，检查dy条件
+            swap_z = e1 and e2 and dz1 < 0 and -dz1 > dz2  # dx和dy相反，检查dz条件
+
+            if swap_x or swap_y or swap_z:
+                dx1, dx2 = -dx2, -dx1
+                dy1, dy2 = -dy2, -dy1
+                dz1, dz2 = -dz2, -dz1
 
         p0 = ti.bit_cast(dx1, hash_type)
         p1 = ti.bit_cast(dx2, hash_type)
@@ -499,7 +537,10 @@ def hash_unique(
         #     # print('寄！')
         #     continue
 
-        indices_mat[iobs, icell] = a
+        if ti.static(not symmetric):
+            indices_mat[iobs, icell] = a
+        else:
+            indices_mat[i] = a
 
         Txx[a] = dx1
         Txy[a] = dx2
@@ -514,7 +555,7 @@ def cshift(key, b):
     return (key << b) | (key >> b)
 
 
-def solve_Tx_b_compressed(Tmat33, indices_mat, m, progress: bool = False):
+def solve_Tx_b_compressed(Tmat321, indices_mat, m, progress: bool = False):
     with ti_FieldsBuilder() as builder:
         x = builder.place_dense_like(m[:, None])
         b = builder.place_dense_like(m[:, None])
@@ -525,38 +566,117 @@ def solve_Tx_b_compressed(Tmat33, indices_mat, m, progress: bool = False):
 
         dtype = x.dtype
 
+        @ti_func
+        def extract(r, c):
+            ind = indices_mat[r, c]
+            return (
+                Tmat321[0][0][ind], Tmat321[0][1][ind], Tmat321[0][2][ind],
+                Tmat321[1][0][ind], Tmat321[1][1][ind],
+                Tmat321[2][0][ind]
+            )
+
         @ti_kernel
         def linear(x: ti.template(), Ax: ti.template()):
-            n_obs = indices_mat.shape[0]
-            n_cells = x.shape[0] // 3  # 启用quant类型后，indices_mat中可能会有多余的列存在
+            n_obs = Ax.shape[0] // 3
+            n_cells = x.shape[0] // 3
 
             for r in range(n_obs):
-                summed0: dtype = 0
-                summed1: dtype = 0
-                summed2: dtype = 0
+                row = r * 3
+
+                bx: dtype = 0
+                by: dtype = 0
+                bz: dtype = 0
 
                 for c in range(0, n_cells):
-                    ind = indices_mat[r, c]
                     col = c * 3
-                    summed0 += (
-                            Tmat33[0][0][ind] * x[col + 0, 0]
-                            + Tmat33[0][1][ind] * x[col + 1, 0]
-                            + Tmat33[0][2][ind] * x[col + 2, 0]
-                    )
-                    summed1 += (
-                            Tmat33[1][0][ind] * x[col + 0, 0]
-                            + Tmat33[1][1][ind] * x[col + 1, 0]
-                            + Tmat33[1][2][ind] * x[col + 2, 0]
-                    )
-                    summed2 += (
-                            Tmat33[2][0][ind] * x[col + 0, 0]
-                            + Tmat33[2][1][ind] * x[col + 1, 0]
-                            + Tmat33[2][2][ind] * x[col + 2, 0]
-                    )
 
-                Ax[3 * r + 0, 0] = summed0
-                Ax[3 * r + 1, 0] = summed1
-                Ax[3 * r + 2, 0] = summed2
+                    txx, txy, txz, tyy, tyz, tzz = extract(r, c)
+                    mx, my, mz = x[col + 0, 0], x[col + 1, 0], x[col + 2, 0]
+
+                    bx += txx * mx + txy * my + txz * mz
+                    by += txy * mx + tyy * my + tyz * mz
+                    bz += txz * mx + tyz * my + tzz * mz
+
+                Ax[row + 0, 0] = bx
+                Ax[row + 1, 0] = by
+                Ax[row + 2, 0] = bz
+
+        matrix_free.cg(ti.linalg.LinearOperator(linear), b, x, progress=progress)
+
+        return x.to_numpy()
+
+
+def solve_Tx_b_compressed_symmetric(Tmat321, indices_mat, m, progress: bool = False):
+    with ti_FieldsBuilder() as builder:
+        x = builder.place_dense_like(m[:, None])
+        b = builder.place_dense_like(m[:, None])
+
+        builder.finalize()
+
+        copy_from(b, m[:, None])
+
+        dtype = x.dtype
+
+        n_cells = x.shape[0] // 3
+
+        @ti_func
+        def extract(r, c):
+            i = index_mat2triu(r, c, n_cells)
+            ind = indices_mat[i]
+            return (
+                Tmat321[0][0][ind], Tmat321[0][1][ind], Tmat321[0][2][ind],
+                Tmat321[1][0][ind], Tmat321[1][1][ind],
+                Tmat321[2][0][ind]
+            )
+
+        @ti_kernel
+        def linear(x: ti.template(), Ax: ti.template()):
+            n_obs = Ax.shape[0] // 3
+            n_cells = x.shape[0] // 3
+
+            # 上三角和对角线部分
+            for r in range(n_obs):
+                row = r * 3
+
+                bx_u: dtype = 0
+                by_u: dtype = 0
+                bz_u: dtype = 0
+
+                for c in range(r, n_cells):
+                    col = c * 3
+
+                    txx, txy, txz, tyy, tyz, tzz = extract(r, c)
+                    mx, my, mz = x[col + 0, 0], x[col + 1, 0], x[col + 2, 0]
+
+                    bx_u += txx * mx + txy * my + txz * mz
+                    by_u += txy * mx + tyy * my + tyz * mz
+                    bz_u += txz * mx + tyz * my + tzz * mz
+
+                Ax[row + 0, 0] = bx_u
+                Ax[row + 1, 0] = by_u
+                Ax[row + 2, 0] = bz_u
+
+            # 下三角部分
+            for c in range(1, n_cells):
+                col = c * 3
+
+                bx_l: dtype = 0
+                by_l: dtype = 0
+                bz_l: dtype = 0
+
+                for r in range(c):
+                    row = r * 3
+
+                    txx, txy, txz, tyy, tyz, tzz = extract(r, c)
+                    mx, my, mz = x[row + 0, 0], x[row + 1, 0], x[row + 2, 0]
+
+                    bx_l += txx * mx + txy * my + txz * mz
+                    by_l += txy * mx + tyy * my + tyz * mz
+                    bz_l += txz * mx + tyz * my + tzz * mz
+
+                Ax[col + 0, 0] += bx_l
+                Ax[col + 1, 0] += by_l
+                Ax[col + 2, 0] += bz_l
 
         matrix_free.cg(ti.linalg.LinearOperator(linear), b, x, progress=progress)
 
@@ -604,3 +724,52 @@ def check_binary_floats_stability(matrix, threshold=0.95, axes_names=None):
 
 def get_default_table_size(n_cells):
     return 100 * n_cells
+
+
+@ti_pyfunc
+def mul_and_div2(a, b):
+    """计算 a * b // 2，通过调换除法顺序来防止溢出
+    """
+    if a % 2 == 0:
+        a //= 2
+    else:
+        b //= 2
+
+    return a * b
+
+
+@ti_pyfunc
+def symmetric_mat_size(nobs, nc):
+    """计算上三角矩阵下的存储大小
+    """
+    # nobs * (nc + 1) // 2
+    return mul_and_div2(nobs, (nc + 1))
+
+
+@ti_func
+def index_triu2mat(i, n):
+    """通过索引号i计算上三角矩阵下的行列号
+    """
+    tc = 2 * n + 1.0
+    r = ti.math.floor((tc - ti.math.sqrt(tc * tc - 8 * i)) / 2, dtype=ti_size_t)
+    c = i - n * r + r * (r - 1) // 2 + r
+
+    # 由于精度损失，计算得到的r数值可能会有偏差，需要进行纠正
+    while c >= n:
+        r += 1
+        c = c - n + r
+    while c < r:
+        c = c - r + n
+        r -= 1
+
+    return r, c
+
+
+@ti_pyfunc
+def index_mat2triu(r, c, n):
+    """通过上三角矩阵下的行列号计算索引号i
+    """
+    # n * r - r * (r - 1) // 2 + (c - r)
+    # 可以变形为
+    # (2 * n - (r - 1)) * r // 2 + (c - r)
+    return mul_and_div2((2 * n - (r - 1)), r) + (c - r)

@@ -5,7 +5,7 @@ import warnings
 import numpy as np
 import psutil
 import taichi as ti
-from discretize.base import BaseMesh
+from discretize.base import BaseTensorMesh
 from discretize.utils import mkvc
 
 from metalpy.scab.utils.misc import Field
@@ -29,13 +29,14 @@ class Demagnetization:
 
     def __init__(
             self,
-            mesh: BaseMesh,
+            mesh: BaseTensorMesh,
             source_field: Field | None = None,
             active_ind=None,
             method=None,
             compressed_size: int | float | None = None,
             deterministic: bool | str = True,
             quantized: bool = False,
+            symmetric: bool | None = None,
             progress=False
     ):
         """
@@ -66,12 +67,18 @@ class Demagnetization:
             采用量化模式压缩核矩阵，默认为False。
             True则启用压缩，使用更小位宽来存储核矩阵，减少一定的空间需求，略微牺牲计算效率。
             （可能会报要求尺寸为2的幂的性能警告）
+        symmetric
+            指示是否启用对称模式（当网格为规则网格时可以启用）。
+            True则在检测到网格符合条件时启用对称模式，以对称矩阵形式存储核矩阵，减少一定的空间需求。
+            False则禁用对称模式，无论是否符合条件。
+            在CPU模式下会对性能造成较大影响，因此默认不启用。
+            在GPU模式下性能影响较小，因此默认启用。
         progress
             是否输出求解进度条，默认为False不输出
 
         Notes
         -----
-        compressed_size参考 `metalpy.scab.demag.solvers.compressed.forward_compressed` 定义
+        compressed_size参考 `metalpy.scab.demag.solvers.compressed.CompressedSolver` 定义
 
         三个方法具体为：
 
@@ -103,8 +110,9 @@ class Demagnetization:
         self.receiver_locations = cell_centers
 
         # 计算网格在三个方向的边界位置
-        bsw = cell_centers - mesh.h_gridded[active_ind] / 2.0
-        tne = cell_centers + mesh.h_gridded[active_ind] / 2.0
+        h_gridded = mesh.h_gridded[active_ind]
+        bsw = cell_centers - h_gridded / 2.0
+        tne = cell_centers + h_gridded / 2.0
 
         xn1, xn2 = bsw[:, 0], tne[:, 0]
         yn1, yn2 = bsw[:, 1], tne[:, 1]
@@ -120,15 +128,23 @@ class Demagnetization:
             self.mesh.h[2].min(),
         ]
 
+        self.is_cpu = ti_cfg().arch == ti.cpu
+
+        if symmetric is None:
+            symmetric = not self.is_cpu
+        self.symmetric = symmetric and all(np.all(h == h[0]) for h in mesh.h)
+
         # CPU后端可以直接判断内存是否足够
         # 但CUDA后端不能在没有额外依赖的情况下查询内存，并且内存不足时会抛出异常，无法通过再次ti.init还原
         # 因此留一个错误信息以供参考
         try:
             self.solver = dispatch_solver(
                 self.receiver_locations, self.Xn, self.Yn, self.Zn, base_cell_sizes,
-                source_field=self.source_field, method=self.method,
+                source_field=self.source_field,
+                is_cpu=self.is_cpu, method=self.method,
                 compressed_size=self.compressed_size, deterministic=self.deterministic,
                 quantized=self.quantized,
+                symmetric=self.symmetric,
                 progress=self.progress
             )
         except RuntimeError as e:
@@ -168,14 +184,14 @@ def dispatch_solver(
         zn: np.ndarray,
         base_cell_sizes: np.ndarray,
         source_field,
+        is_cpu=True,
         method=None,
         compressed_size: int | float | None = None,
         deterministic: bool | str = True,
         quantized: bool = True,
+        symmetric: bool = False,
         progress=False
 ) -> DemagnetizationSolver:
-    is_cpu = ti_cfg().arch == ti.cpu
-
     mat_size = receiver_locations.shape[0] * 3 * xn.shape[0] * 3
     kernel_size = mat_size * np.finfo(np.result_type(receiver_locations, xn)).bits / 8
 
@@ -200,6 +216,7 @@ def dispatch_solver(
         'deterministic': deterministic,
         'quantized': quantized,
         'progress': progress,
+        'symmetric': symmetric,
         **common_kwargs
     }
 

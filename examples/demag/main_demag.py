@@ -26,6 +26,8 @@ def compute(cell_size, gpu=False):
     a, c = 10, 40
 
     model_mesh = Ellipsoid.spheroid(a, c, polar_axis=0).to_scene(model=80).build(cell_size=cell_size)
+    print('active cells:', model_mesh.n_active_cells)
+
     source_field = define_inducing_field(50000, 45, 20)
 
     obsx = np.linspace(-2048, 2048, 128 + 1)
@@ -47,7 +49,7 @@ def compute(cell_size, gpu=False):
     sim_numeric = copy.deepcopy(builder)
     sim_numeric.patched(Demaged(
         method=Demagnetization.Compressed,
-        compressed_size=0.05,
+        compressed_size=0.1,
         quantized=True,
         progress=True
     ))
@@ -63,8 +65,6 @@ def compute(cell_size, gpu=False):
     pred_truth = simulation.dpred(model_mesh.model)
     demaged_model_truth = simulation.chi
 
-    print(model_mesh.n_active_cells)
-
     return demaged_model_truth, pred_truth, demaged_model_sim, pred_sim, receiver_points
 
 
@@ -74,7 +74,7 @@ if __name__ == '__main__':
     gpu = False
 
     model_t, pred_t, model_p, pred_p, receiver_points = compute(
-        cell_size=[2, 1, 1],
+        cell_size=[2, 1, 1],   # 受限于taichi的int32索引限制，网格数最大只支持65535
         gpu=gpu
     )
 

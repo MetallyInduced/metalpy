@@ -92,10 +92,10 @@ class SeperatedSolver(DemagnetizationSolver):
             # TODO: 进一步考虑模型大小来选择求解方案，模型较大时也应该使用 `solve_Tx_b`
             return solve_Ax_b(merge_Tmat_as_A(self.Tmat33, direct_to_host=self.direct_to_host), magnetization)
         else:
-            return solve_Tx_b(self.Tmat33, magnetization, progress=self.progress)
+            return solve_Tx_b(self.Tmat321, magnetization, progress=self.progress)
 
 
-def solve_Tx_b(Tmat33, m, progress: bool = False):
+def solve_Tx_b(Tmat321, m, progress: bool = False):
     with ti_FieldsBuilder() as builder:
         x = builder.place_dense_like(m[:, None])
         b = builder.place_dense_like(m[:, None])
@@ -106,37 +106,39 @@ def solve_Tx_b(Tmat33, m, progress: bool = False):
 
         dtype = x.dtype
 
+        @ti_func
+        def extract(r, c):
+            return (
+                Tmat321[0][0][r, c], Tmat321[0][1][r, c], Tmat321[0][2][r, c],
+                Tmat321[1][0][r, c], Tmat321[1][1][r, c],
+                Tmat321[2][0][r, c]
+            )
+
         @ti_kernel
         def linear(x: ti.template(), Ax: ti.template()):
-            n_obs = Tmat33[0][0].shape[0]
+            n_obs = Ax.shape[0] // 3
             n_cells = x.shape[0] // 3
 
             for r in range(n_obs):
-                summed0: dtype = 0
-                summed1: dtype = 0
-                summed2: dtype = 0
+                row = r * 3
+
+                bx: dtype = 0
+                by: dtype = 0
+                bz: dtype = 0
 
                 for c in range(0, n_cells):
                     col = c * 3
-                    summed0 += (
-                            Tmat33[0][0][r, c] * x[col + 0, 0]
-                            + Tmat33[0][1][r, c] * x[col + 1, 0]
-                            + Tmat33[0][2][r, c] * x[col + 2, 0]
-                    )
-                    summed1 += (
-                            Tmat33[1][0][r, c] * x[col + 0, 0]
-                            + Tmat33[1][1][r, c] * x[col + 1, 0]
-                            + Tmat33[1][2][r, c] * x[col + 2, 0]
-                    )
-                    summed2 += (
-                            Tmat33[2][0][r, c] * x[col + 0, 0]
-                            + Tmat33[2][1][r, c] * x[col + 1, 0]
-                            + Tmat33[2][2][r, c] * x[col + 2, 0]
-                    )
 
-                Ax[3 * r + 0, 0] = summed0
-                Ax[3 * r + 1, 0] = summed1
-                Ax[3 * r + 2, 0] = summed2
+                    txx, txy, txz, tyy, tyz, tzz = extract(r, c)
+                    mx, my, mz = x[col + 0, 0], x[col + 1, 0], x[col + 2, 0]
+
+                    bx += txx * mx + txy * my + txz * mz
+                    by += txy * mx + tyy * my + tyz * mz
+                    bz += txz * mx + tyz * my + tzz * mz
+
+                Ax[row + 0, 0] = bx
+                Ax[row + 1, 0] = by
+                Ax[row + 2, 0] = bz
 
         matrix_free.cg(ti.linalg.LinearOperator(linear), b, x, progress=progress)
 

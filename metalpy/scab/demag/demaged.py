@@ -18,6 +18,7 @@ class Demaged(Patch, Distributable):
             compressed_size: Union[int, float, None] = None,
             deterministic: Union[bool, str] = True,
             quantized: bool = False,
+            symmetric: bool | None = None,
             progress: bool = False,
             **kwargs
     ):
@@ -44,6 +45,12 @@ class Demaged(Patch, Distributable):
             采用量化模式压缩核矩阵，默认为False。
             True则启用压缩，使用更小位宽来存储核矩阵，减少一定的空间需求，略微牺牲计算效率。
             （可能会报要求尺寸为2的幂的性能警告）
+        symmetric
+            指示是否启用对称模式（当网格为规则网格时可以启用）。
+            True则在检测到网格符合条件时启用对称模式，以对称矩阵形式存储核矩阵，减少一定的空间需求。
+            False则禁用对称模式，无论是否符合条件。
+            在CPU模式下会对性能造成较大影响，因此默认不启用。
+            在GPU模式下性能影响较小，因此默认启用。
         progress
             是否输出求解进度条，默认为False不输出
         """
@@ -54,6 +61,7 @@ class Demaged(Patch, Distributable):
             compressed_size=compressed_size,
             deterministic=deterministic,
             quantized=quantized,
+            symmetric=symmetric,
             progress=progress,
             **kwargs
         )

@@ -126,6 +126,10 @@ def ti_real_func(fn):
     return ti_func(fn, is_real_function=True)
 
 
+def ti_pyfunc(fn):
+    return ti.pyfunc(fn)
+
+
 def ti_kernel(fn):
     ti_wrapped = _kernel_impl(fn, level_of_class_stackframe=3)
 
