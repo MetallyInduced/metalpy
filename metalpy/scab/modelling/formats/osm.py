@@ -25,6 +25,8 @@ class OSMHandler(sax.ContentHandler):
         self.nodes = {}
         self.ways = {}
         self.buildings = {}
+        self.heights = {}
+        self.min_heights = {}
         self.current = None
         self.current_way = None
         self.bounds = np.zeros(4, dtype=np.float64)
@@ -51,8 +53,14 @@ class OSMHandler(sax.ContentHandler):
                 self.ways.setdefault(self.current_way, []).append(int(attributes['ref']))
         elif tag == 'tag':
             if self.current == 'way':
-                if attributes['k'] == 'building':
+                if attributes['k'].startswith('building') and attributes['v'] != 'no':
+                    # 既包含标准的building标签
+                    # 也包含building:part标签，但可能会导致重叠
                     self.buildings[self.current_way] = self.ways[self.current_way]
+                elif attributes['k'] == 'height':
+                    self.heights[self.current_way] = float(attributes['v'])
+                elif attributes['k'] == 'min_height':
+                    self.min_heights[self.current_way] = float(attributes['v'])
 
     def endElement(self, tag):
         if tag in ("node", 'way'):
@@ -105,7 +113,8 @@ def load_osm(path: PathLike,
 
     buildings = [
         Prism(nodes.loc[b[:-1]].to_numpy(),
-              level, level + height_map.get(k, default_height))
+              level + handler.min_heights.get(k, 0),
+              level + handler.heights.get(k, height_map.get(k, default_height)))
         for k, b in handler.buildings.items()
     ]
 
@@ -195,9 +204,15 @@ class OSMFormat:
         Notes
         -----
         OSM格式坐标默认为经纬度，默认映射到UTM坐标系下，目前不支持跨UTM区
+
+        OSM包含building和building:part两类建筑标签，
+        其中building:part标签指定了建筑物的一部分，可能会和对应的building重叠。
+        建议先在半透明模式下观察建筑分布情况，再视情况进行剔除，例如：
+
+        >>> Scene.from_osm(bounds).to_multiblock().plot(opacity=0.5)
         """
         if isinstance(path_or_bounds, PathLikeType):
-            path = Path(path)
+            path = Path(path_or_bounds)
         else:
             bounds = path_or_bounds
 
