@@ -6,7 +6,6 @@ import warnings
 from io import BytesIO
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from threading import Lock
 from typing import Iterable, Generator
 
 import numpy as np
@@ -43,7 +42,6 @@ class MapDownloader:
         self.tile_locators: list[TileLocator] | None = None
         self.running = False
         self.session: requests.Session | None = None
-        self.canvas_lock = Lock()
         self.progress = None
 
     def download(self, west_lon=None, east_lon=None, south_lat=None, north_lat=None,
@@ -179,7 +177,7 @@ class MapDownloader:
                         delta_bounds = np.abs(canvas.edge_geo_bounds - edge_true_mercator_bounds)
                         pixel_biases = delta_bounds.as_corners() / canvas.unit_size
                         if np.any(pixel_biases > 1):
-                            checks.append(f'misaligned boundary ({pixel_biases.max():.2}px)')
+                            checks.append(f'misaligned boundary ({pixel_biases.max():.2f}px)')
 
                     # 计算源和目标区域缩放因子
                     scale_factor = true_mercator_bounds.extent / mercator_bounds.extent
@@ -193,8 +191,8 @@ class MapDownloader:
                     ref_system.unit_size *= scale_factor
 
                     if len(checks) > 0:
-                        warnings.warn(f'{" and ".join(checks).capitalize()} detected.'
-                                      f' due to coordinates transformation by `{self.map_source}`.'
+                        warnings.warn(f'{" and ".join(checks).capitalize()} detected,'
+                                      f' probably due to coordinates transformation by `{self.map_source}`.'
                                       f' Consider using other map sources instead.')
 
                 if geotiff:

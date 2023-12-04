@@ -293,7 +293,7 @@ class Corners(FixedShapeNDArray):
     def __new__(cls, input_arr):
         return np.asanyarray(input_arr).view(cls)
 
-    def as_bounds(self):
+    def as_bounds(self) -> Bounds:
         """从角落点形式转换为边界形式
 
         Returns

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, overload, Literal, Sequence
+from typing import overload, Literal, Sequence, TYPE_CHECKING
 from xml import sax
 
 import numpy as np
@@ -16,7 +16,9 @@ from metalpy.utils.file import PathLike, make_cache_file_path, PathLikeType
 from metalpy.utils.type import not_none_or_default
 
 if TYPE_CHECKING:
+    from typing import TypeVar
     from metalpy.scab.modelling import Scene
+    TScene = TypeVar('TScene', bound=Scene)
 
 
 class OSMHandler(sax.ContentHandler):
@@ -122,10 +124,11 @@ def load_osm(path: PathLike,
 
 
 class OSMFormat:
-    @staticmethod
+    @classmethod
     @overload
     def from_osm(
-            path_or_bounds: PathLike | None = None,
+            cls: type['TScene'],
+            path_or_bounds: PathLike | Sequence | None = None,
             *,
             path: PathLike | None = None,
             level=0,
@@ -133,13 +136,14 @@ class OSMFormat:
             height_map: dict[int, float] = None,
             extras: Literal[True],
             dest_crs: CRSQuery = Coordinates.SearchUTM
-    ) -> tuple[Scene, OSMHandler]:
+    ) -> tuple['TScene', OSMHandler]:
         ...
 
-    @staticmethod
+    @classmethod
     @overload
     def from_osm(
-            path_or_bounds: PathLike | None = None,
+            cls: type['TScene'],
+            path_or_bounds: PathLike | Sequence | None = None,
             *,
             path: PathLike | None = None,
             level=0,
@@ -147,13 +151,14 @@ class OSMFormat:
             height_map: dict[int, float] = None,
             extras: Literal[False] = False,
             dest_crs: CRSQuery = Coordinates.SearchUTM
-    ) -> Scene:
+    ) -> 'TScene':
         ...
 
-    @staticmethod
+    @classmethod
     @overload
     def from_osm(
-            path_or_bounds: PathLike | None = None,
+            cls: type['TScene'],
+            path_or_bounds: PathLike | Sequence | None = None,
             *,
             path: PathLike | None = None,
             level=0,
@@ -161,11 +166,12 @@ class OSMFormat:
             height_map: dict[int, float] = None,
             extras: bool,
             dest_crs: CRSQuery = Coordinates.SearchUTM
-    ) -> tuple[Scene, OSMHandler] | Scene:
+    ) -> tuple['TScene', OSMHandler] | 'TScene':
         ...
 
-    @staticmethod
+    @classmethod
     def from_osm(
+            cls: type['TScene'],
             path_or_bounds: PathLike | Sequence | None = None,
             *,
             path: PathLike | None = None,
@@ -174,7 +180,7 @@ class OSMFormat:
             height_map: dict[int, float] = None,
             extras=False,
             dest_crs: CRSQuery = Coordinates.SearchUTM
-    ) -> tuple[Scene, OSMHandler] | Scene:
+    ) -> tuple['TScene', OSMHandler] | 'TScene':
         """从OSM格式xml文件生成Scene实例
 
         Parameters
@@ -246,8 +252,7 @@ class OSMFormat:
             dest_crs=dest_crs
         )
 
-        from metalpy.scab.modelling import Scene
-        scene = Scene.of(*buildings)
+        scene = cls.of(*buildings)
 
         if extras:
             return scene, extra

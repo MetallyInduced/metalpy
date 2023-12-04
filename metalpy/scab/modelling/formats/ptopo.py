@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
-from typing import cast, Iterable
+from typing import Iterable, TYPE_CHECKING
 
 from metalpy.scab.modelling.shapes import Prism, Cuboid, BarFramework
 from metalpy.utils.file import PathLike, openable
+
+if TYPE_CHECKING:
+    from typing import TypeVar
+    from metalpy.scab.modelling import Scene
+    TScene = TypeVar('TScene', bound=Scene)
 
 
 def dumps_ptopo(models: Iterable[Prism, Cuboid, BarFramework]) -> list:
@@ -99,21 +104,16 @@ def load_ptopo(ptopo: PathLike | list) -> list[Prism]:
 
 
 class PTopoFormat:
-    @staticmethod
+    @classmethod
     def from_ptopo(
+        cls: type['TScene'],
         ptopo: PathLike | list,
-    ):
+    ) -> 'TScene':
         models = load_ptopo(ptopo=ptopo)
-
-        from metalpy.scab.modelling import Scene
-        return Scene.of(*models)
+        return cls.of(*models)
 
     def to_ptopo(
-        self,
+        self: 'TScene',
         path: PathLike | None = None,
     ):
-        from metalpy.scab.modelling import Scene
-        scene = cast(Scene, self)
-        shapes = cast(Iterable, scene.shapes)
-
-        return dump_ptopo(shapes, f=path)
+        return dump_ptopo(self.shapes, f=path)

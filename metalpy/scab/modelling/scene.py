@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 import os.path
-from typing import Any, Union, Iterable, cast, Mapping
+from typing import Any, Union, Iterable, cast, Mapping, TypeVar
 
 import numpy as np
 import tqdm
@@ -14,6 +14,7 @@ from metalpy.utils.bounds import Bounds
 from metalpy.utils.dhash import dhash
 from metalpy.utils.file import ensure_dir, make_cache_directory
 from metalpy.utils.model import as_pyvista_array
+from metalpy.utils.numeric import limit_significand
 from .formats.osm import OSMFormat
 from .formats.ptopo import PTopoFormat
 from .layer import Layer
@@ -23,7 +24,9 @@ from .object import Object
 from .shapes import Shape3D
 from .shapes.full_space import FullSpace
 from .shapes.shape3d import bounding_box_of
-from ...utils.numeric import limit_significand
+
+
+TScene = TypeVar('TScene', bound='Scene')
 
 
 class Scene(OSMFormat, PTopoFormat):
@@ -36,11 +39,11 @@ class Scene(OSMFormat, PTopoFormat):
         self.objects_layer = Layer()
         self.backgrounds_layer = Layer(mix_mode=MixMode.KeepOriginal)
 
-    @staticmethod
-    def of(*shapes: Shape3D | Iterable[Shape3D],
+    @classmethod
+    def of(cls: type[TScene],
+           *shapes: Shape3D | Iterable[Shape3D],
            models: Union[Any, dict, list[Any], None] = None,
-           skip_checking=False
-           ) -> 'Scene':
+           skip_checking=False) -> TScene:
         """从一组Shape3D实例创建场景，并赋予相同的模型值`models`
 
         Parameters
@@ -71,7 +74,7 @@ class Scene(OSMFormat, PTopoFormat):
         >>> Scene.of(shapes)  # OK!
         >>> Scene.of(*shapes)  # OK!
         """
-        ret = Scene()
+        ret = cls()
 
         if not skip_checking:
             if len(shapes) == 1 and not isinstance(shapes[0], Shape3D):
@@ -402,7 +405,7 @@ class Scene(OSMFormat, PTopoFormat):
     def __len__(self):
         return sum((len(layer) for layer in self.layers))
 
-    def __iter__(self) -> Iterable[Object]:
+    def __iter__(self):
         for obj in self.objects:
             yield obj
 
