@@ -48,11 +48,14 @@ class IntegratedSolver(DemagnetizationSolver):
         nObs = receiver_locations.shape[0]
 
         if is_cpu:
-            self.builder = None
+            self.builder = builder = None
             self.A = np.empty((3 * nObs, 3 * nC), dtype=self.kernel_type)
         else:
             self.builder = builder = ti_FieldsBuilder()
             self.A = builder.place_dense((3 * nObs, 3 * nC), self.kernel_type)
+
+        if builder is not None:
+            builder.finalize()
 
     def build_kernel(self, model):
         # TODO: 实现进度条
