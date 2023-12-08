@@ -2,8 +2,10 @@ from typing import Iterable, Union
 
 import numpy as np
 
-from metalpy.utils.dhash import dhash
+from metalpy.mepa.utils import is_serial
 from metalpy.utils.bounds import Bounds
+from metalpy.utils.dhash import dhash
+from metalpy.utils.taichi_lazy import lazy_kernel
 from . import Shape3D
 
 
@@ -94,6 +96,12 @@ class Cuboid(Shape3D):
 
     def do_place(self, mesh_cell_centers, progress):
         return np.full(len(mesh_cell_centers), True)
+
+    def do_compute_implicit_distance(self, mesh_cell_centers, progress):
+        if is_serial():
+            return self._compute_implicit_distance_taichi(mesh_cell_centers)
+        else:
+            return self._compute_implicit_distance_numpy(mesh_cell_centers)
 
     @property
     def x0(self): return self.origin[0]
@@ -190,3 +198,68 @@ class Cuboid(Shape3D):
     @property
     def area(self):
         return 2 * (self.lengths * np.roll(self.lengths, 1)).sum()
+
+    def _compute_implicit_distance_taichi(self, mesh_cell_centers):
+        dist = np.empty(mesh_cell_centers.shape[0], dtype=mesh_cell_centers.dtype)
+        _compute_implicit_distance_kernel(mesh_cell_centers, self.origin, self.end, dist)
+
+        return dist
+
+    def _compute_implicit_distance_numpy(self, mesh_cell_centers):
+        d0 = self.origin - mesh_cell_centers
+        d1 = self.end - mesh_cell_centers
+        outer_dist = np.min([abs(d0), abs(d1)], axis=0)
+
+        mask = (d0 <= 0) & (d1 >= 0)
+        state = np.sum(mask, axis=1)
+        inside = state == 3  # 在长方体内，求最近距离
+        inside_2d = state == 2  # 在长方体的任一面外（上下左右前后），求第三轴垂直最近距离
+        others = state < 2  # 在长方体的角落区域（前右、上左等角落区域），求到角点或交线的欧氏距离
+
+        dist = np.empty_like(inside, dtype=d0.dtype)
+        dist[inside_2d] = outer_dist[~mask * inside_2d[:, None]]
+        dist[others] = np.linalg.norm(outer_dist[others] * (~mask[others]), axis=1)
+        dist[inside] = -np.min(outer_dist[inside], axis=1)
+
+        return dist
+
+
+@lazy_kernel
+def _compute_implicit_distance_kernel():
+    import taichi as ti
+    from metalpy.utils.taichi import ti_kernel
+
+    @ti_kernel
+    def _kernel(
+            cells_centers: ti.types.ndarray(),
+            origin: ti.types.ndarray(),
+            end: ti.types.ndarray(),
+            dist: ti.types.ndarray()
+    ):
+        for i in range(dist.shape[0]):
+            dx0, dx1 = origin[0] - cells_centers[i, 0], end[0] - cells_centers[i, 0]
+            dy0, dy1 = origin[1] - cells_centers[i, 1], end[1] - cells_centers[i, 1]
+            dz0, dz1 = origin[2] - cells_centers[i, 2], end[2] - cells_centers[i, 2]
+
+            cx = dx0 <= 0 <= dx1
+            cy = dy0 <= 0 <= dy1
+            cz = dz0 <= 0 <= dz1
+
+            state = cx + cy + cz
+
+            dx = ti.abs(ti.min(-dx0, dx1))
+            dy = ti.abs(ti.min(-dy0, dy1))
+            dz = ti.abs(ti.min(-dz0, dz1))
+
+            if state == 3:
+                dist[i] = -ti.min(dx, dy, dz)
+            else:
+                dx *= not cx
+                dy *= not cy
+                dz *= not cz
+                if state == 2:
+                    dist[i] = dx + dy + dz
+                else:
+                    dist[i] = ti.sqrt(dx * dx + dy * dy + dz * dz)
+
+    return _kernel

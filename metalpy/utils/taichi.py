@@ -42,12 +42,21 @@ def ti_prepare(**kwargs) -> bool:
     conflicted
         指示新的配置是否与已有配置冲突
     """
+    arch = kwargs.pop('arch', None)
+    if arch is not None:
+        kwargs['arch'] = ti_arch(arch)
+
     conflicts = False
     for k, v in kwargs.items():
         if k not in ti_args or ti_args[k] != v:
             conflicts = True
         ti_args[k] = v
     return conflicts
+
+
+def ti_init(**kwargs):
+    if ti_prepare(**kwargs):
+        ti_reset(params=False)
 
 
 def ti_init_once():

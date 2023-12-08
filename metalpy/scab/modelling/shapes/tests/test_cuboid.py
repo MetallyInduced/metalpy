@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from metalpy.scab.modelling.shapes import Cuboid
+from metalpy.scab.modelling.shapes import Cuboid, Shape3D
 from metalpy.scab.modelling.shapes.testing.shape3d_place_test import assert_placing_inside
 
 
@@ -34,3 +34,16 @@ def test_cuboid_failure():
     # 测试严格模式下错误定义报错
     with pytest.raises(ValueError):
         _ = Cuboid([0, 2, 0], [2, 0, 2], no_corner_adjust=True)
+
+
+def test_cuboid_implicit_distance():
+    shape = Cuboid(corner=[0, 0, 0], corner2=[1, 1, 1])
+    mesh = shape.to_scene().create_mesh(cell_size=0.25, bounds=shape.bounds.expand(increment=1))
+
+    dist_true = Shape3D.do_compute_implicit_distance(shape, mesh.cell_centers, progress=False)
+
+    dist_ti = shape._compute_implicit_distance_taichi(mesh.cell_centers)
+    np.testing.assert_allclose(dist_ti, dist_true, err_msg='`taichi` version failed.')
+
+    dist_np = shape._compute_implicit_distance_numpy(mesh.cell_centers)
+    np.testing.assert_allclose(dist_np, dist_true, err_msg='`numpy` version failed.')

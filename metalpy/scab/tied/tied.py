@@ -18,7 +18,7 @@ from .taichi_kernel_base import Profiler
 class TaichiContext(Mixin):
     _implementations = TypeMap()
 
-    def __init__(self, this, arch=None, max_cpu_threads=None, profile: Profiler | bool = False, **kwargs):
+    def __init__(self, this, max_cpu_threads=None, profile: Profiler | bool = False, **kwargs):
         """初始化taichi上下文
 
         Parameters
@@ -30,14 +30,11 @@ class TaichiContext(Mixin):
         max_cpu_threads
             cpu arch下的最大线程数，taichi默认为cpu核心数
         """
-        from metalpy.utils.taichi import ti_prepare, ti_arch, ti_reset
+        from metalpy.utils.taichi import ti_init
 
         super().__init__(this)
 
         params = {}
-
-        if arch is not None:
-            params['arch'] = ti_arch(arch)
 
         profile = Profiler.of(profile)
         self.profile = profile
@@ -53,8 +50,7 @@ class TaichiContext(Mixin):
                 max_cpu_threads = os.cpu_count() + max_cpu_threads
             params['cpu_max_num_threads'] = max_cpu_threads
 
-        if ti_prepare(**params, **kwargs):
-            ti_reset(params=False)
+        ti_init(**params, **kwargs)
 
     def post_apply(self, this):
         impl = TaichiContext._implementations.get(type(this))

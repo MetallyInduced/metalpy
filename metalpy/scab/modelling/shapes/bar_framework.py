@@ -28,7 +28,7 @@ def clarify_spec(spec, n_params=3):
     ret
         长度为n_params的数组，其值由spec定义
     """
-    if isinstance(spec, Iterable):
+    if np.ndim(spec) > 0:
         spec = list(spec)
         assert len(spec) == n_params
     else:
@@ -79,7 +79,7 @@ class BarFramework(Composition):
             raise AssertionError('`spec` must be specified.')
 
         if bounds is not None:
-            bounds = Bounds(bounds)
+            bounds = Bounds.copy(bounds)
             if inherit_transform:
                 # 通过 `Cuboid` 做坐标转换
                 bounds = Cuboid(bounds=bounds).apply(outline.transforms, inplace=True).bounds
@@ -96,7 +96,7 @@ class BarFramework(Composition):
             sizes = outline.local_bounds.extent - self.spec
             self.n_rooms = np.ceil(sizes / room_spec).astype(int)
         else:
-            self.n_rooms = n_rooms
+            self.n_rooms = np.copy(n_rooms)
 
         self.outline = outline
         self.inherit_transform = inherit_transform
@@ -159,7 +159,7 @@ class BarFramework(Composition):
     def __getitem__(self, indices):
         full = slice(None, None, None)
 
-        n_rooms = self.n_rooms
+        n_rooms = np.copy(self.n_rooms)
         bounds = self.local_bounds
 
         for axis, slicer in enumerate(indices):
@@ -169,7 +169,7 @@ class BarFramework(Composition):
             if np.isscalar(slicer):
                 slicer = slice(slicer, slicer + 1)
 
-            centers = self.centers[axis]
+            centers = self.get_centers(axis)
             r = self.bar_radius[axis]
 
             lower_bars = centers[:-1][slicer]
@@ -182,13 +182,27 @@ class BarFramework(Composition):
 
             n_rooms[axis] = len(lower_bars)
 
-        return BarFramework(outline=self.outline, bar_spec=self.bar_spec, n_rooms=n_rooms, bounds=bounds)
+        return self.extract(n_rooms=n_rooms, bounds=bounds)
 
     def get_centers(self, axis):
         a0, a1 = self.axis_span[axis]
         ra = self.bar_radius[axis]
         na = self.n_bars[axis]
         return np.linspace(a0 + ra, a1 - ra, na)
+
+    def extract(self, *, n_rooms=None, bounds=None):
+        if n_rooms is None:
+            n_rooms = self.n_rooms
+
+        if bounds is None:
+            bounds = self.bounds
+
+        return type(self)(
+            outline=self.outline,
+            spec=self.spec,
+            n_rooms=n_rooms,
+            bounds=bounds
+        )
 
     @cached_property
     def outline_bounds(self):

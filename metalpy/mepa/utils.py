@@ -34,3 +34,17 @@ def exception_caught(func, *args, **kwargs):
     except BaseException as e:
         traceback.print_exc()
         raise e
+
+
+def is_main_thread_of_main_process():
+    import threading
+    import multiprocessing
+
+    return (
+        threading.current_thread() is threading.main_thread()
+        and multiprocessing.parent_process() is None
+    )
+
+
+def is_serial():
+    return is_main_thread_of_main_process()

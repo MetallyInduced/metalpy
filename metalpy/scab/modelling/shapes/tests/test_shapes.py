@@ -12,5 +12,5 @@ def test_tunnel():
 
 def test_prism():
     assert_placing_inside(Prism([
-        [0, 0], [1, 1], [0, 2], [2, 2], [2, 0]
+        [0, 0], [2, 2], [0, 4], [4, 4], [4, 0]
     ], 3, 4))
