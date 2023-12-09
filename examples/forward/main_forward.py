@@ -7,7 +7,7 @@ from SimPEG import maps
 from SimPEG.potential_fields import magnetics
 from matplotlib import pyplot as plt, gridspec
 
-from metalpy.scab import simpeg_patched, Progressed, Tied
+from metalpy.scab import simpeg_patched, Progressed, Tied, Formatted
 from metalpy.scab.modelling import Scene
 from metalpy.scab.modelling.shapes import Cuboid, Prism, Ellipsoid, Tunnel
 from metalpy.scab.utils.misc import define_inducing_field
@@ -36,7 +36,11 @@ def main():
     active_model = model_mesh.get_active_model()
     mesh = model_mesh.mesh
 
-    with simpeg_patched(Tied(max_cpu_threads=-1), Progressed()):
+    with simpeg_patched(
+            Tied(max_cpu_threads=-1),
+            Progressed(),
+            Formatted(pandas=True, locations=True)
+    ):
         source_field = define_inducing_field(50000, 45, 20)
         pts = get_grids_ex(origin=origin, end=end,
                            n=46,  # x, y方向观测点数
@@ -47,7 +51,6 @@ def main():
 
         nC = int(np.sum(active_cells))
         components = ['tmi', 'bx', 'by', 'bz', 'bxx', 'bxy', 'bxz', 'byy', 'byz', 'bzz']
-        n_components = len(components)
         receiver_list = magnetics.receivers.Point(receiver_points, components=components)
         receiver_list = [receiver_list]
 
@@ -65,11 +68,7 @@ def main():
             store_sensitivities="forward_only",
         )
 
-    ret = simulation.dpred(active_model)
-
-    df = pd.DataFrame(pts)
-    for i, component in enumerate(components):
-        df[component] = ret[i::n_components]
+    df = simulation.dpred(active_model)
 
     filename = Path(scene._generate_model_filename(mesh))
     filename = filename.with_suffix('')

@@ -32,8 +32,8 @@ def before(func=None, *, target=None):
     return TaggedMethod(func, tag=TaggedMethod.Before, target=target)
 
 
-def after(func=None, *, target=None):
-    return TaggedMethod(func, tag=TaggedMethod.After, target=target)
+def after(func=None, *, keep_retval=False, target=None):
+    return TaggedMethod(func, tag=TaggedMethod.After, keep_retval=keep_retval, target=target)
 
 
 def replaces(func=None, *, keep_orig=False, target=None):
@@ -46,11 +46,12 @@ class TaggedMethod:
     Replaces = 'replaces'
     All = {Before, After, Replaces}
 
-    def __init__(self, func, tag, target=None, keep_orig=False):
+    def __init__(self, func, tag, target=None, keep_orig=False, keep_retval=False):
         self.func = func
         self.tag = tag
         self.target = target
         self.keep_orig = keep_orig
+        self.keep_retval = keep_retval
 
     def __new__(cls, func, *args, **kwargs):
         if func is not None:

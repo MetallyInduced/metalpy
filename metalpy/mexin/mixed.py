@@ -65,13 +65,18 @@ class MixinManager:
         # TODO: 标记是否需要保留原函数
         tag = TaggedMethod.Replaces
         keep_orig = False
+        keep_retval = False
+
         if name is None:
             name = method.__name__
 
         mixing_config = TaggedMethod.check(method)
         if mixing_config:
             tag = TaggedMethod.verify(mixing_config.tag)
+
             keep_orig = mixing_config.keep_orig
+            keep_retval = mixing_config.keep_retval
+
             if mixing_config.target is not None:
                 # 用户指定的替换目标，覆盖之前获取到的名字
                 name = mixing_config.target
@@ -107,7 +112,7 @@ class MixinManager:
             elif tag == TaggedMethod.Before:
                 method = before(target_method, nest=target)(method)
             elif tag == TaggedMethod.After:
-                method = after(target_method, nest=target)(method)
+                method = after(target_method, nest=target, keep_retval=keep_retval)(method)
 
         return method
 

@@ -2,24 +2,28 @@ import numpy as np
 from SimPEG.utils import plot2Ddata
 
 import matplotlib as mpl
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt, gridspec
 
 
 def plot_compare(
     obs,
     data_arrays,
-    plot_titles,
-    plot_units,
+    plot_titles=(),
+    colorbar_titles=(),
     *,
-    fig=None
+    fig=None,
+    show=None
 ):
     n_plots = len(data_arrays)
 
-    if np.ndim(plot_units) == 0:
-        plot_units = [plot_units] * n_plots
+    if np.ndim(colorbar_titles) == 0:
+        colorbar_titles = [colorbar_titles] * n_plots
+
+    if show is None:
+        show = fig is None  # 如果没有指定fig，则默认show
 
     if fig is None:
-        fig = plt.figure(figsize=(4 * n_plots + 3, 4))
+        fig = plt.figure(figsize=(6 * n_plots, 4))
 
     ax1 = n_plots * [None]
     ax2 = n_plots * [None]
@@ -34,8 +38,17 @@ def plot_compare(
         if (max_lim - v_lim[i]) / max_lim < 0.2:
             v_lim[i] = max_lim
 
+    plot_width = 10
+    spacer = 4
+    bar_width = 1
+    gs = gridspec.GridSpec(plot_width, (plot_width + bar_width + spacer) * n_plots + 1)
+
     for ii in range(n_plots):
-        ax1[ii] = fig.add_axes([0.33 * ii + 0.03, 0.11, 0.25, 0.84])
+        gs_index = (plot_width + bar_width + spacer) * ii
+
+        ax1[ii] = fig.add_subplot(
+            gs[0:plot_width, gs_index:gs_index + plot_width]
+        )
         cplot[ii] = plot2Ddata(
             obs,
             data_arrays[ii],
@@ -44,14 +57,24 @@ def plot_compare(
             clim=(-v_lim[ii], v_lim[ii]),
             contourOpts={"cmap": "bwr"},
         )
-        ax1[ii].set_title(plot_titles[ii])
+
+        if ii < len(plot_titles):
+            ax1[ii].set_title(plot_titles[ii])
+
         ax1[ii].set_xlabel("x (m)")
         ax1[ii].set_ylabel("y (m)")
 
-        ax2[ii] = fig.add_axes([0.33 * ii + 0.27, 0.11, 0.01, 0.84])
+        ax2[ii] = fig.add_subplot(
+            gs[0:plot_width, gs_index + plot_width:gs_index + plot_width + bar_width]
+        )
         norm[ii] = mpl.colors.Normalize(vmin=-v_lim[ii], vmax=v_lim[ii])
         cbar[ii] = mpl.colorbar.ColorbarBase(
             ax2[ii], norm=norm[ii], orientation="vertical", cmap=mpl.cm.bwr
         )
-        cbar[ii].set_label(plot_units[ii], rotation=270, labelpad=15, size=12)
-    fig.show()
+
+        if ii < len(colorbar_titles):
+            # cbar[ii].set_label(plot_units[ii], loc='top', size=12)
+            ax2[ii].set_title(colorbar_titles[ii])
+
+    if show:
+        fig.show()

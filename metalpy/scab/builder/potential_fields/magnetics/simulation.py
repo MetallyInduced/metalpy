@@ -98,7 +98,7 @@ class Simulation3DIntegralBuilder(BasePFSimulationBuilder):
 class Simulation3DDifferentialBuilder(BaseMagneticPDESimulationBuilder):
     def __init__(self, sim_cls: magnetics.Simulation3DDifferential):
         super().__init__(sim_cls)
-        self._receiver_list = []
+        self._receiver_list = None
         self._source_field = None
         self._model_type = None
 
@@ -108,10 +108,11 @@ class Simulation3DDifferentialBuilder(BaseMagneticPDESimulationBuilder):
         return super().build()
 
     def receivers(self, receiver_points, components: str | Iterable[str] = 'tmi'):
-        self._receiver_list.append(
-            magnetics.receivers.Point(
-                receiver_points, components=components
-            ))
+        assert self._receiver_list is None, ('`Simulation3DDifferential` does not support'
+                                             ' multiple groups of receiver points.')
+        self._receiver_list = magnetics.receivers.Point(
+            receiver_points, components=components
+        )
 
     def source_field(self, strength, inc, dec):
         self._source_field = define_inducing_field(strength, inc, dec)
@@ -119,7 +120,7 @@ class Simulation3DDifferentialBuilder(BaseMagneticPDESimulationBuilder):
     @SimulationBuilder._assembles('survey')
     def _survey(self):
         field = magnetics.sources.UniformBackgroundField(
-            receiver_list=self._receiver_list,
+            receiver_list=[self._receiver_list],
             amplitude=self._source_field.intensity,
             inclination=self._source_field.inclination,
             declination=self._source_field.declination,

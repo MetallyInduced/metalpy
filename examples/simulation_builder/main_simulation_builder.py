@@ -1,14 +1,12 @@
 from SimPEG.potential_fields.magnetics.simulation import Simulation3DIntegral
 
+from metalpy.scab import Tied, Progressed, Formatted
+from metalpy.scab.builder.simulation_builder import SimulationBuilder
+from metalpy.scab.modelling import Scene
+from metalpy.scab.modelling.shapes import Ellipsoid
 from metalpy.utils.bounds import Bounds
 from metalpy.utils.file import make_cache_directory
-
-from metalpy.scab.utils.format import format_pandas
 from metalpy.utils.sensor_array import get_grids_ex
-from metalpy.scab import Tied, Progressed
-from metalpy.scab.modelling.shapes import Ellipsoid
-from metalpy.scab.modelling import Scene
-from metalpy.scab.builder.simulation_builder import SimulationBuilder
 
 
 def main():
@@ -31,7 +29,7 @@ def main():
 
     # simulation
     builder = SimulationBuilder.of(Simulation3DIntegral)
-    builder.patched(Tied(), Progressed())
+    builder.patched(Tied(), Progressed(), Formatted(pandas=True, locations=True))
     builder.receivers(obs, components)
     builder.scalar_model()
     builder.active_mesh(model_mesh)
@@ -41,9 +39,6 @@ def main():
     # model and forward
     susceptibility = 3
     pred = simulation.dpred(model_mesh.model * susceptibility)
-
-    # format output
-    pred = format_pandas(pred, components, receiver_locations=obs)
 
     print(pred)
 

@@ -86,5 +86,5 @@ if __name__ == '__main__':
         obs=receiver_points,
         data_arrays=[pred_t, pred_p, pred_t - pred_p],
         plot_titles=["Observed", "Predicted", "Absolute Error"],
-        plot_units="nT"
+        colorbar_titles="nT"
     )
