@@ -56,7 +56,10 @@ class TaichiContext(Mixin):
         impl = TaichiContext._implementations.get(type(this))
 
         if impl is None:
-            warnings.warn(f'Taichi support for {get_full_qualified_path(this)} is not implemented. Ignoring it.')
+            warnings.warn(
+                f'Taichi support for {get_full_qualified_path(type(this))} is not implemented.'
+                f' Ignoring it.'
+            )
             return
 
         this.mixins.add(impl, profile=self.profile)

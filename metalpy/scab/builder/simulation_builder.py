@@ -34,9 +34,7 @@ from functools import lru_cache
 from typing import overload, TYPE_CHECKING, cast, Iterable
 
 from metalpy.scab import simpeg_patched
-
 from metalpy.mexin import Patch
-
 from metalpy.mexin.utils import TypeMap
 from metalpy.mexin.utils.misc import reget_object
 from metalpy.utils.arg_specs import ArgSpecs
@@ -113,6 +111,11 @@ class SimulationBuilder:
     @staticmethod
     @overload
     def of(sim_cls: 'type[magnetics.Simulation3DIntegral]') -> '_magnetics.Simulation3DIntegralBuilder':
+        ...
+
+    @staticmethod
+    @overload
+    def of(sim_cls: 'type[magnetics.Simulation3DDifferential]') -> '_magnetics.Simulation3DDifferentialBuilder':
         ...
 
     @staticmethod
@@ -354,3 +357,9 @@ def __register_builder(key_cls_path):
 def _():
     from .potential_fields.magnetics.simulation import Simulation3DIntegralBuilder
     return Simulation3DIntegralBuilder
+
+
+@__register_builder('SimPEG.potential_fields.magnetics.simulation.Simulation3DDifferential')
+def _():
+    from .potential_fields.magnetics.simulation import Simulation3DDifferentialBuilder
+    return Simulation3DDifferentialBuilder

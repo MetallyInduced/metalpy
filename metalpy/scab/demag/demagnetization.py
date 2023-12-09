@@ -258,14 +258,13 @@ def dispatch_solver(
             kw_sep=kw_sep,
             kw_com=kw_com
         )
-    elif available_memory is not None and kernel_size > available_memory * 0.8:
+    elif not is_cpu or available_memory is not None and kernel_size > available_memory * 0.8:
         candidate = CompressedSolver(**kw_com)
     elif n_cells > max_cells_allowed_1:
         candidate = CompressedSolver(**kw_com)
     elif n_cells > max_cells_allowed_2:
         candidate = SeperatedSolver(direct_to_host=ti_test_snode_support(), **kw_sep)
     else:
-        print("Current GPU doesn't support SNode, fall back to legacy implementation.")
         candidate = IntegratedSolver(**kw_int)
 
     return candidate

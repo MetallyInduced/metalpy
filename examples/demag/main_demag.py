@@ -1,13 +1,11 @@
 import copy
 
-import matplotlib as mpl
 import numpy as np
 import taichi as ti
 from SimPEG.potential_fields import magnetics
-from SimPEG.utils import plot2Ddata
 from discretize.utils import mkvc
-from matplotlib import pyplot as plt
 
+from metalpy.carto.utils.mpl import plot_compare
 from metalpy.scab import Progressed, Tied, Demaged
 from metalpy.scab.builder import SimulationBuilder
 from metalpy.scab.demag.demagnetization import Demagnetization
@@ -84,39 +82,9 @@ if __name__ == '__main__':
     print(f'Model: {model_mape:.2%}')
     print(f'TMI: {tmi_mape:.2%}')
 
-    fig = plt.figure(figsize=(17, 4))
-
-    data_array = np.c_[pred_t, pred_p, pred_t - pred_p]
-    plot_title = ["Observed", "Predicted", "Absolute Error"]
-    plot_units = ["nT", "nT", ""]
-
-    ax1 = 3 * [None]
-    ax2 = 3 * [None]
-    norm = 3 * [None]
-    cbar = 3 * [None]
-    cplot = 3 * [None]
-    v_lim = [np.max(np.abs(data_array[:, :-1])),
-             np.max(np.abs(data_array[:, :-1])),
-             np.max(np.abs(data_array[:, -1]))]
-
-    for ii in range(0, 3):
-        ax1[ii] = fig.add_axes([0.33 * ii + 0.03, 0.11, 0.25, 0.84])
-        cplot[ii] = plot2Ddata(
-            receiver_points,
-            data_array[:, ii],
-            ax=ax1[ii],
-            ncontour=30,
-            clim=(-v_lim[ii], v_lim[ii]),
-            contourOpts={"cmap": "bwr"},
-        )
-        ax1[ii].set_title(plot_title[ii])
-        ax1[ii].set_xlabel("x (m)")
-        ax1[ii].set_ylabel("y (m)")
-
-        ax2[ii] = fig.add_axes([0.33 * ii + 0.27, 0.11, 0.01, 0.84])
-        norm[ii] = mpl.colors.Normalize(vmin=-v_lim[ii], vmax=v_lim[ii])
-        cbar[ii] = mpl.colorbar.ColorbarBase(
-            ax2[ii], norm=norm[ii], orientation="vertical", cmap=mpl.cm.bwr
-        )
-        cbar[ii].set_label(plot_units[ii], rotation=270, labelpad=15, size=12)
-    plt.show()
+    plot_compare(
+        obs=receiver_points,
+        data_arrays=[pred_t, pred_p, pred_t - pred_p],
+        plot_titles=["Observed", "Predicted", "Absolute Error"],
+        plot_units="nT"
+    )

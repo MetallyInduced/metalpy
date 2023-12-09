@@ -6,8 +6,10 @@ from SimPEG import maps
 from SimPEG.potential_fields import magnetics
 
 from metalpy.scab.utils.misc import define_inducing_field
+from metalpy.utils.type import undefined, Dummy
 from .. import BasePFSimulationBuilder
 from ... import SimulationBuilder
+from ...base.pde_simulation import BaseMagneticPDESimulationBuilder
 
 
 class Simulation3DIntegralBuilder(BasePFSimulationBuilder):
@@ -36,7 +38,7 @@ class Simulation3DIntegralBuilder(BasePFSimulationBuilder):
     def _survey(self):
         field = magnetics.sources.UniformBackgroundField(
             receiver_list=self._receiver_list,
-            amplitude=self._source_field.strength,
+            amplitude=self._source_field.intensity,
             inclination=self._source_field.inclination,
             declination=self._source_field.declination,
         )
@@ -82,14 +84,46 @@ class Simulation3DIntegralBuilder(BasePFSimulationBuilder):
         return self.model_type(vector=True)
 
     @SimulationBuilder._supplies('chiMap')
-    def chi_map(self, chi_map: maps.IdentityMap):
+    def chi_map(self, chi_map: maps.IdentityMap | Dummy = undefined):
         return chi_map
 
     @SimulationBuilder._assembles('chiMap')
     def _chi_map(self):
-        # TODO: 考察是否需要默认提供 maps.ChiMap （从磁化率转换为磁导率，数值上约相差1）
-        #   需要注意，向量模型不可直接使用 maps.ChiMap
-        n_params = self._model_mesh.n_active_cells
+        n_params = self.n_active_cells
         if self._model_type == 'vector':
             n_params *= 3
         return maps.IdentityMap(nP=n_params)
+
+
+class Simulation3DDifferentialBuilder(BaseMagneticPDESimulationBuilder):
+    def __init__(self, sim_cls: magnetics.Simulation3DDifferential):
+        super().__init__(sim_cls)
+        self._receiver_list = []
+        self._source_field = None
+        self._model_type = None
+
+        self.source_field(50000, 90, 0)
+
+    def build(self) -> magnetics.Simulation3DDifferential:
+        return super().build()
+
+    def receivers(self, receiver_points, components: str | Iterable[str] = 'tmi'):
+        self._receiver_list.append(
+            magnetics.receivers.Point(
+                receiver_points, components=components
+            ))
+
+    def source_field(self, strength, inc, dec):
+        self._source_field = define_inducing_field(strength, inc, dec)
+
+    @SimulationBuilder._assembles('survey')
+    def _survey(self):
+        field = magnetics.sources.UniformBackgroundField(
+            receiver_list=self._receiver_list,
+            amplitude=self._source_field.intensity,
+            inclination=self._source_field.inclination,
+            declination=self._source_field.declination,
+        )
+        survey = magnetics.survey.Survey(field)
+
+        return survey

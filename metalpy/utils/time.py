@@ -1,3 +1,4 @@
+import contextlib
 import time
 
 
@@ -58,3 +59,13 @@ def perf_ns_epoch_time(start_time, end_time):
     elapsed_secs -= elapsed_mins * 60
 
     return elapsed_mins, elapsed_secs, elapsed_milis, elapsed_micros
+
+
+@contextlib.contextmanager
+def timed(msg='Elapsed time: '):
+    t = Timer()
+    try:
+        t.start()
+        yield
+    finally:
+        print(f"{msg}{t}")
