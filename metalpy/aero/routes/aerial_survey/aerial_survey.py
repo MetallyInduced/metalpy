@@ -13,7 +13,7 @@ from metalpy.utils import array_ops
 from metalpy.utils.array_ops import get_column
 from metalpy.utils.matplotlib import check_axis
 from metalpy.utils.pandas import drop_by_indices
-from metalpy.utils.type import is_numeric_array, notify_package
+from metalpy.utils.type import is_numeric_array, notify_package, Self
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -247,7 +247,7 @@ class AerialSurvey:
             ref_lines: 'AerialSurveyLines' | None = None,
             aux_lines: 'AerialSurveyLines' | None = None,
             inplace=False
-    ) -> 'AerialSurvey':
+    ) -> Self:
         """基于`extract_lines`的测线划分结果，从原始测线数据中清理掉辅助轨迹，从而合并为一个单航次的数据
 
         例如对于较大测区，需要分多航次进行测量时，清除掉中途的多次起飞降落的轨迹，结果可以视为一个航次内完成采集的数据

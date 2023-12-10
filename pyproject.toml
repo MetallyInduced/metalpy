@@ -29,6 +29,7 @@ utils = [
     'blosc2 >= 0.4.0',
     "cloudpickle",
     "tqdm",
+    "typing-extensions"  # for python <= 3.10
 ]
 mexin = []
 mepa = [

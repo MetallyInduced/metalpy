@@ -45,6 +45,7 @@ build
 # Misc
 properties
 colour
+typing-extensions
 
 # optional
 # bokeh  # 用于distributed的网页控制台

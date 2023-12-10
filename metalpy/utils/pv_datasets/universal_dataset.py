@@ -14,6 +14,7 @@ from metalpy.utils.file import make_cache_file_path, PathLike
 from metalpy.utils.model import convert_model_dict_to_multiblock, pv_ufunc_apply, DataSetLike, DataAssociation, \
     pv_ufunc_map
 from metalpy.utils.time import Timer
+from metalpy.utils.type import Self
 from .dataset_wrapper import DataSetWrapper, TDataSetWrapper
 
 if TYPE_CHECKING:
@@ -40,14 +41,14 @@ class UniversalDataSet(DataSetWrapper):
         super().__init__(dataset, *args, **kwargs)
 
     def warp(
-            self: TDataSetWrapper,
+            self,
             src_crs: 'CRSLike',
             *,
             crs=None,
             query=None,
             inplace=False,
             return_crs=False
-    ) -> TDataSetWrapper:
+    ) -> Self:
         """转换数据集的坐标系
 
         Parameters

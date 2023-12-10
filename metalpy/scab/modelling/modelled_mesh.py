@@ -9,8 +9,7 @@ from numpy.typing import ArrayLike
 
 from metalpy.scab.modelling.object import Object
 from metalpy.utils.numpy import ensure_as_numpy_array_collection
-from metalpy.utils.type import is_numeric_array, get_first_key, ensure_set_key
-
+from metalpy.utils.type import is_numeric_array, get_first_key, ensure_set_key, Self
 
 if TYPE_CHECKING:
     import pyvista as pv
@@ -476,7 +475,7 @@ class ModelledMesh:
     def extract(self,
                 indices: ArrayLike,
                 scalars: str | Iterable[str] | bool = True,
-                shallow=False) -> 'ModelledMesh':
+                shallow=False) -> Self:
         """通过网格mask提取子网格
 
         Parameters
@@ -529,7 +528,7 @@ class ModelledMesh:
                    indices,
                    scalars: str | Iterable[str] | bool = True,
                    shallow=False,
-                   ) -> 'ModelledMesh':
+                   ) -> Self:
         """给定新的有效网格掩码，重新定义模型网格
 
         Parameters
@@ -589,7 +588,7 @@ class ModelledMesh:
         model: str | ArrayLike,
         scalars: str | Iterable[str] | bool = False,
         shallow=False
-    ) -> 'ModelledMesh':
+    ) -> Self:
         """基于将网格重新绑定到model模型上或model作为字符串指定的模型上
 
         Parameters

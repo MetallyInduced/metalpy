@@ -9,6 +9,7 @@ import tqdm
 
 from metalpy.utils.dhash import dhash
 from metalpy.utils.bounds import Bounds, union
+from metalpy.utils.type import Self
 from ..transform import CompositeTransform, Transform, Translation, Rotation
 from ..utils.mesh import is_inside_bounds
 
@@ -392,7 +393,7 @@ class Shape3D(ABC):
         x, y, z = np.meshgrid(xrng, yrng, zrng, indexing='ij')
         return np.c_[x.ravel(), y.ravel(), z.ravel()]
 
-    def apply(self, trans: Transform, inplace=False):
+    def apply(self, trans: Transform, inplace=False) -> Self:
         """逻辑上对空间体位置进行变换，目前通过对网格点进行逆变换实现
 
         Parameters
@@ -415,7 +416,7 @@ class Shape3D(ABC):
         ret.transforms.add(trans)
         return ret
 
-    def translate(self, x, y, z, inplace=False):
+    def translate(self, x, y, z, inplace=False) -> Self:
         """对Shape进行平移
 
         Parameters
@@ -432,7 +433,7 @@ class Shape3D(ABC):
         """
         return self.apply(Translation(x, y, z), inplace=inplace)
 
-    def rotate(self, y, a, b, degrees=False, seq='xyz', inplace=False):
+    def rotate(self, y, a, b, degrees=False, seq='xyz', inplace=False) -> Self:
         """对Shape进行旋转，方向遵循右手准则
 
         Parameters
@@ -453,7 +454,7 @@ class Shape3D(ABC):
         """
         return self.apply(Rotation(y, a, b, degrees=degrees, seq=seq), inplace=inplace)
 
-    def translated(self, x, y, z, inplace=True):
+    def translated(self, x, y, z, inplace=True) -> Self:
         """对Shape进行平移
 
         Parameters
@@ -470,7 +471,7 @@ class Shape3D(ABC):
         """
         return self.translate(x, y, z, inplace=inplace)
 
-    def rotated(self, y, a, b, degrees=False, seq='xyz', inplace=True):
+    def rotated(self, y, a, b, degrees=False, seq='xyz', inplace=True) -> Self:
         """对Shape进行旋转，方向遵循右手准则
 
         Parameters

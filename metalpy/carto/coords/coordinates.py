@@ -10,6 +10,7 @@ from metalpy.carto.utils.crs import check_crs, CRSLike
 from metalpy.utils.bounds import Bounds
 from metalpy.utils.numpy import FixedShapeNDArray
 from metalpy.utils.string import format_string_list
+from metalpy.utils.type import Self
 
 CRSQuery = Union[str, re.Pattern, Callable]
 
@@ -139,7 +140,7 @@ class Coordinates(FixedShapeNDArray):
     def warp(self,
              crs: CRSLike | None = None,
              query: CRSQuery | None = None,
-             inplace=False) -> 'Coordinates':
+             inplace=False) -> Self:
         """将所有坐标转换到指定的另一坐标系下
 
         Parameters

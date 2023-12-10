@@ -1,7 +1,16 @@
 from __future__ import annotations
 
+import sys
 import warnings
 from typing import Iterable, Callable
+
+
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
+    from typing_extensions import Self
+
+Self = Self
 
 
 class Dummy:
