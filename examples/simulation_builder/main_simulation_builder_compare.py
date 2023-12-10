@@ -1,4 +1,3 @@
-import discretize
 import numpy as np
 import pyvista as pv
 from SimPEG import utils
@@ -6,6 +5,7 @@ from SimPEG.potential_fields import magnetics
 from SimPEG.potential_fields.magnetics import analytics
 from SimPEG.potential_fields.magnetics.simulation import Simulation3DIntegral, Simulation3DDifferential
 
+from metalpy.carto.coords import Coordinates
 from metalpy.carto.utils.mpl import plot_compare
 from metalpy.scab import Tied, Demaged, Formatted, Fixed
 from metalpy.scab.builder.simulation_builder import SimulationBuilder
@@ -19,7 +19,6 @@ def main():
 
     sphere_rad = 100
     sphere_center = [0, 0, 0]
-    cs = 25.0
     chiblk = 3
 
     xr = np.linspace(-300, 300, 41)
@@ -30,20 +29,12 @@ def main():
 
     # 网格配置改自 SimPEG 测试用例 tests/pf/test_sensitivity_PFproblem.py
     # https://github.com/simpeg/simpeg/blob/main/tests/pf/test_sensitivity_PFproblem.py
-    hxind = [(cs, 5, -1.3), (cs / 2.0, 41), (cs, 5, 1.3)]
-    hyind = [(cs, 5, -1.3), (cs / 2.0, 41), (cs, 5, 1.3)]
-    hzind = [(cs, 5, -1.3), (cs / 2.0, 40), (cs, 5, 1.3)]
-    mesh = discretize.TensorMesh([hxind, hyind, hzind], "CCC")
-
     scene = Ellipsoid.sphere(sphere_rad).translated(*sphere_center).to_scene(model=chiblk)
-    model_mesh = scene.build_model(mesh)
+    rx_bounds = Coordinates(rxLoc).bounds
+    sim_bounds = (scene.bounds | rx_bounds).expand(proportion=[-0.5, 0.5, -0.5, 0.5, -1, 1])
 
-    # 通过 或运算符 来将观测点纳入网格范围，再通过 expand 来扩展网格边界
-    # from metalpy.carto.coords import Coordinates
-    # model_mesh = scene.build(
-    #     cell_size=12,
-    #     bounds=(scene.bounds | Coordinates(rxLoc).bounds).expand(proportion=[-0.5, 0.5, -0.5, 0.5, -1, 1])
-    # )
+    model_mesh = scene.build(cell_size=12.5)
+    model_mesh = model_mesh.expand(sim_bounds, ratio=1.3)  # 采用指数扩大网格对网格边界进行扩展
 
     p = pv.Plotter()
     p.add_mesh(model_mesh.to_polydata(prune=False), opacity=0.5, show_edges=True)

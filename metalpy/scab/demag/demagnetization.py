@@ -130,7 +130,7 @@ class Demagnetization:
 
         self.is_cpu = ti_cfg().arch == ti.cpu
 
-        is_symmetric = all(np.all(h == h[0]) for h in mesh.h)
+        is_symmetric = np.allclose(h_gridded, h_gridded[0])
         if symmetric is None:
             symmetric = not self.is_cpu
         elif symmetric is True:

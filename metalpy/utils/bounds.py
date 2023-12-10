@@ -53,18 +53,6 @@ def intersects(b1: 'Bounds', b2: 'Bounds'):
     return bounds
 
 
-def bounded(xmin=np.nan, xmax=np.nan, ymin=np.nan, ymax=np.nan, zmin=np.nan, zmax=np.nan, *, n_axes=None):
-    return Bounds.partial(
-        xmin=xmin,
-        xmax=xmax,
-        ymin=ymin,
-        ymax=ymax,
-        zmin=zmin,
-        zmax=zmax,
-        n_axes=n_axes
-    )
-
-
 class Bounds(FixedShapeNDArray):
     """用于表示一个边界，接受数字和np.nan作为内容（不允许存在np.inf）
 
@@ -94,7 +82,7 @@ class Bounds(FixedShapeNDArray):
         return np.full(n_axes * 2, np.nan).view(Bounds)
 
     @staticmethod
-    def partial(xmin=np.nan, xmax=np.nan, ymin=np.nan, ymax=np.nan, zmin=np.nan, zmax=np.nan, *, n_axes=None):
+    def bounded(xmin=np.nan, xmax=np.nan, ymin=np.nan, ymax=np.nan, zmin=np.nan, zmax=np.nan, *, n_axes=None):
         if n_axes is None:
             n_axes = np.where(~np.isnan([0, 0, xmin, xmax, ymin, ymax, zmin, zmax]))[0][-1] // 2
 
@@ -111,6 +99,8 @@ class Bounds(FixedShapeNDArray):
             ret.zmax = zmax
 
         return ret
+
+    partial = staticmethod(bounded)
 
     def as_corners(self):
         """从边界形式转换为角落点形式
@@ -420,3 +410,7 @@ class Corners(FixedShapeNDArray):
     @property
     def center(self):
         return (self.origin + self.end) / 2
+
+
+bounded = Bounds.bounded
+unbounded = Bounds.unbounded
