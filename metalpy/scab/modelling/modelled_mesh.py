@@ -655,11 +655,13 @@ class ModelledMesh:
         return ret
 
     def expand(self,
-               new_bounds: ArrayLike,
+               new_bounds: ArrayLike | None = None,
                *,
                n_cells: ArrayLike | None = None,
                ratio: ArrayLike | None = None,
-               precise: bool | None = None
+               precise: bool | None = None,
+               proportion=None,
+               increment=None
                ) -> Self:
         """扩张网格边界，边界网格支持指数增大网格或等距网格（指定ratio = 1）
 
@@ -677,6 +679,8 @@ class ModelledMesh:
         precise
             要求新的网格边界与 `new_bounds` 严格重合（收缩时会裁剪边缘网格，扩张时要求使用n_cells指定边界）。
             如果指定了 `ratio` ，则默认为 `False` ，否则默认为 `True`
+        proportion, increment
+            扩张既有网格边界或新指定边界的比例或增量，参见 `Bounds.expand` 的参数说明
 
         Returns
         -------
@@ -694,7 +698,14 @@ class ModelledMesh:
         assert isinstance(self.mesh, TensorMesh), '`expand` supports only `TensorMesh` for now.'
 
         old_bounds = self.bounds
-        new_bounds = old_bounds.override(by=new_bounds)
+
+        if new_bounds is not None:
+            new_bounds = old_bounds.override(by=new_bounds)
+        else:
+            new_bounds = old_bounds
+
+        if proportion is not None or increment is not None:
+            new_bounds.expand(proportion=proportion, increment=increment, inplace=True)
 
         bounds_delta = new_bounds - self.bounds
         n_dims = bounds_delta.n_axes

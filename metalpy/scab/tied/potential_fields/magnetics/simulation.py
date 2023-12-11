@@ -12,13 +12,6 @@ from ...taichi_kernel_base import TiedMixin, tied_profile
 
 class TiedSimulation3DIntegralMixin(TiedMixin):
     def __init__(self, this, **kwargs):
-        """
-        Notes
-        -----
-        SimPEG原版的磁正演过程会忽略mesh的orientation属性，直接进行正演。
-        TiedSimulation3DIntegralMixin通过逆向旋转所有相关量来实现了网格旋转。
-        因此如果mesh.orientation不为单位矩阵（即存在旋转），则行为会与SimPEG不一致。
-        """
         super().__init__(this, **kwargs)
 
     @tied_profile

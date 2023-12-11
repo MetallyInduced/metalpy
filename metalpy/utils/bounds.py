@@ -128,23 +128,57 @@ class Bounds(FixedShapeNDArray):
         return ret
 
     def expand(self, *, proportion=None, increment=None, inplace=False):
-        number = (int, float)
+        """扩展或收缩边界
+
+        Parameters
+        ----------
+        proportion
+            按对应轴长度的比例扩展边界，可以是一个数字，也可以是一个数组，支持通过 `Bounds.unbounded` 指定
+        increment
+            按固定增量扩展边界，可以是一个数字，也可以是一个数组，支持通过 `Bounds.unbounded` 指定
+        inplace
+            指示操作是否修改self
+
+        Returns
+        -------
+        ret
+            扩张后的边界对象
+
+        Notes
+        -----
+        在-x, -y, -z方向上负数为增长，在+x, +y, +z方向上正数为增长
+
+        如果某个轴向的 `扩展比例` 和 `扩展增量` 同时指定，则 `增量` 覆盖 `比例` 的对应数值
+
+        >>> Bounds(1, 2, 3, 4).expand(proportion=0.5)
+        <<< Bounds(0.5, 2.5, 2.5, 4.5)
+
+        >>> Bounds(1, 2, 3, 4).expand(increment=1)
+        <<< Bounds(0, 3, 2, 5)
+        """
+        assert proportion is not None or increment is not None, (
+            'Either `proportion` or `increment` must be provided.'
+        )
+
         deltas = np.tile(np.asarray((-1, 1)), self.n_axes)
-        if increment is None:
-            assert proportion is not None, 'Either `proportion` or `increment` must be provided.'
-            if isinstance(proportion, number):
+        inc = Bounds.unbounded(self.n_axes)
+
+        if proportion is not None:
+            if np.ndim(proportion) == 0:
                 proportion = deltas * proportion
-            increment = self.extent.repeat(2) * proportion
-        elif isinstance(increment, number):
-            increment = increment * deltas
 
-        if inplace:
-            target = self
-        else:
-            target = self.copy()
+            proportion = Bounds(proportion)
+            n_axes = min(proportion.n_axes, self.n_axes)
+            proportion_inc = self.extent[:n_axes].repeat(2) * proportion[:2 * n_axes]
 
-        target += increment
-        return target
+            inc.override(by=proportion_inc, inplace=True)
+
+        if increment is not None:
+            if np.ndim(increment) == 0:
+                increment = increment * deltas
+            inc.override(by=increment, inplace=True)
+
+        return self.override(by=self + inc, inplace=inplace)
 
     def override(self, by, *, inplace=False):
         """用other中的非nan值替换当前边界中的对应位置值
@@ -161,11 +195,19 @@ class Bounds(FixedShapeNDArray):
         ret
             覆盖后的边界对象
         """
-        target = self
-        if not inplace:
-            target = target.copy()
-
         other = Bounds(by)
+
+        dtype = np.common_type(self, other)
+        if inplace:
+            if dtype != self.dtype:
+                raise TypeError(
+                    f'Failed to change values ({self.dtype}) into incompatible type ({dtype}).'
+                    f' Try disabling `inplace` to allow making copies.'
+                )
+            target = self
+        else:
+            target = self.astype(dtype, copy=True)
+
         length = min(target.n_axes, other.n_axes) * 2
         mask = ~np.isnan(other)[:length]
         target[:length][mask] = other[:length][mask]

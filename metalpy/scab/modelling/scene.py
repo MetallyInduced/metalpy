@@ -7,6 +7,7 @@ from typing import Any, Union, Iterable, cast, Mapping, TypeVar
 import numpy as np
 import tqdm
 from discretize import TensorMesh
+from discretize.base import BaseMesh
 
 from metalpy.mepa import LinearExecutor
 from metalpy.scab.utils.hash import dhash_discretize_mesh
@@ -158,7 +159,7 @@ class Scene(OSMFormat, PTopoFormat):
     def bounds(self):
         return bounding_box_of(self.shapes)
 
-    def build_model(self, mesh,
+    def build_model(self, mesh: ModelledMesh | BaseMesh,
                     executor=None,
                     progress=False,
                     cache=None,
@@ -196,6 +197,9 @@ class Scene(OSMFormat, PTopoFormat):
 
             如果cache为路径，则使用cache指定的文件路径
         """
+        if isinstance(mesh, ModelledMesh):
+            mesh = mesh.mesh
+
         cache_filepath = self._determine_cache_filepath(mesh, cache, cache_dir)
 
         if cache_filepath is not None and os.path.exists(cache_filepath):
@@ -239,7 +243,7 @@ class Scene(OSMFormat, PTopoFormat):
 
         return ModelledMesh(mesh, models_dict)
 
-    def create_mesh(self, cell_size=None, n_cells=None, bounds=None) -> TensorMesh:
+    def create_mesh(self, cell_size=None, n_cells=None, bounds=None) -> ModelledMesh:
         """根据场景边界构建网格
 
         Parameters
@@ -264,6 +268,11 @@ class Scene(OSMFormat, PTopoFormat):
 
             若n_cells为单个值，则用于指定总网格数，保证生成的网格数小于等于该值。
         """
+        assert cell_size is not None or n_cells is not None, (
+            'Either `cell_size` or `n_cells`'
+            ' must be specified to create tensor mesh.'
+        )
+
         actual_bounds: Bounds = self.bounds
         if bounds is not None:
             actual_bounds.override(by=bounds, inplace=True)
@@ -285,7 +294,7 @@ class Scene(OSMFormat, PTopoFormat):
                 n_cells = np.asarray(n_cells)
                 cell_size = sizes / n_cells
 
-        return TensorMesh([[(d, n)] for d, n in zip(cell_size, n_cells)], origin=bounds[::2])
+        return ModelledMesh(TensorMesh([[(d, n)] for d, n in zip(cell_size, n_cells)], origin=bounds[::2]))
 
     def build(self, cell_size=None, n_cells=None, bounds=None,
               executor=None, progress=False,

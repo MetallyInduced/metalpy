@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable, overload
 
+import numpy as np
 from SimPEG import maps
 from SimPEG.potential_fields import magnetics
 
@@ -9,7 +10,7 @@ from metalpy.scab.utils.misc import define_inducing_field
 from metalpy.utils.type import undefined, Dummy
 from .. import BasePFSimulationBuilder
 from ... import SimulationBuilder
-from ...base.pde_simulation import BaseMagneticPDESimulationBuilder
+from ...base import BaseMagneticPDESimulationBuilder
 
 
 class Simulation3DIntegralBuilder(BasePFSimulationBuilder):
@@ -28,7 +29,7 @@ class Simulation3DIntegralBuilder(BasePFSimulationBuilder):
     def receivers(self, receiver_points, components: str | Iterable[str] = 'tmi'):
         self._receiver_list.append(
             magnetics.receivers.Point(
-                receiver_points, components=components
+                np.atleast_2d(receiver_points), components=components
             ))
 
     def source_field(self, strength, inc, dec):
@@ -108,10 +109,12 @@ class Simulation3DDifferentialBuilder(BaseMagneticPDESimulationBuilder):
         return super().build()
 
     def receivers(self, receiver_points, components: str | Iterable[str] = 'tmi'):
-        assert self._receiver_list is None, ('`Simulation3DDifferential` does not support'
-                                             ' multiple groups of receiver points.')
+        assert self._receiver_list is None, (
+            '`Simulation3DDifferential` does not support'
+            ' multiple groups of receiver points.'
+        )
         self._receiver_list = magnetics.receivers.Point(
-            receiver_points, components=components
+            np.atleast_2d(receiver_points), components=components
         )
 
     def source_field(self, strength, inc, dec):

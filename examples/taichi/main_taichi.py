@@ -1,5 +1,3 @@
-import math
-
 import numpy as np
 from SimPEG import maps
 from SimPEG.potential_fields import magnetics
@@ -11,7 +9,7 @@ from metalpy.scab import simpeg_patched, Progressed
 from metalpy.scab.modelling import Scene
 from metalpy.scab.modelling.shapes import Ellipsoid
 from metalpy.scab.utils.misc import define_inducing_field
-from metalpy.utils.time import Timer
+from metalpy.utils.time import timed
 
 
 def main():
@@ -35,8 +33,6 @@ def main():
     obs = np.c_[obsx, obsy, obsz]
     components = ('tmi', 'bx', 'by', 'bz', 'bzz', 'bxx', 'bxy', 'bxz', 'byy', 'byz',)
     H = define_inducing_field(50000, 90, 0)
-
-    timer = Timer()
 
     def test_forward(store_sensitivities, model_type, *patches):
         with simpeg_patched(*patches,):
@@ -68,43 +64,35 @@ def main():
 
     taichi_patches = [metalpy.scab.Tied('cpu'), Progressed()]
 
-    with timer:
+    with timed('| Scalar model | With sensitivity matrix | Taichi | : '):
         dpred_ti = test_forward('ram', 'scalar', *taichi_patches)
-    print(timer)
 
-    with timer:
-        dpred_raw = test_forward('ram', 'scalar', )
-    print(timer)
+    with timed('| Scalar model | With sensitivity matrix | vanilla | : '):
+        dpred_raw = test_forward('ram', 'scalar')
 
     assert_almost_equal(dpred_ti, dpred_raw, decimal=3)
 
-    with timer:
+    with timed('| Scalar model | Forward only | Taichi | : '):
         dpred_ti = test_forward('forward_only', 'scalar', *taichi_patches)
-    print(timer)
 
-    with timer:
-        dpred_raw = test_forward('forward_only', 'scalar', )
-    print(timer)
+    with timed('| Scalar model | Forward only | vanilla | : '):
+        dpred_raw = test_forward('forward_only', 'scalar')
 
     assert_almost_equal(dpred_ti, dpred_raw, decimal=3)
 
-    with timer:
+    with timed('| Vector model | With sensitivity matrix | Taichi | : '):
         dpred_ti = test_forward('ram', 'vector', *taichi_patches)
-    print(timer)
 
-    with timer:
-        dpred_raw = test_forward('ram', 'vector', )
-    print(timer)
+    with timed('| Vector model | With sensitivity matrix | vanilla | : '):
+        dpred_raw = test_forward('ram', 'vector')
 
     assert_almost_equal(dpred_ti, dpred_raw, decimal=3)
 
-    with timer:
+    with timed('| Vector model | Forward only | Taichi | : '):
         dpred_ti = test_forward('forward_only', 'vector', *taichi_patches)
-    print(timer)
 
-    with timer:
-        dpred_raw = test_forward('forward_only', 'vector', )
-    print(timer)
+    with timed('| Vector model | Forward only | vanilla | : '):
+        dpred_raw = test_forward('forward_only', 'vector')
 
     assert_almost_equal(dpred_ti, dpred_raw, decimal=3)
 
