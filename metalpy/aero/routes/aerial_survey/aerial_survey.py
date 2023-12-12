@@ -34,6 +34,12 @@ class AerialSurvey:
         data
             附属的数据
         """
+        if isinstance(position, (tuple, list)):
+            position = np.asarray(position)
+
+        if isinstance(data, (tuple, list)):
+            data = np.asarray(data)
+
         self.position = position
         self.data = data
 

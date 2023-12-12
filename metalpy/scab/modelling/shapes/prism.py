@@ -1,3 +1,5 @@
+from typing import TypeVar
+
 import numpy as np
 
 from scipy.stats import linregress
@@ -7,6 +9,8 @@ from metalpy.utils.dhash import dhash
 from metalpy.utils.ear_clip import ear_clip
 from metalpy.utils.geometry import gen_random_convex_polygon
 from . import Shape3D
+
+PrismT = TypeVar('PrismT', bound='Prism')
 
 
 def is_abs_distance_in(arr, x0, r):
@@ -59,7 +63,7 @@ class Edge:
 
 
 class Prism(Shape3D):
-    def __init__(self, pts, z0, z1, verbose=True, cells=None):
+    def __init__(self, pts, z0=0, z1=1, verbose=True, cells=None, check_non_simple=True):
         """定义任意底面棱锥
 
         Parameters
@@ -72,6 +76,8 @@ class Prism(Shape3D):
             是否输出辅助信息（主要为顶点数较多时导出PyVista模型会触发进度条）
         cells
             array(n-2, 3)，每行包含三个属于(0, n-1)的下标，指定pts三角化后的结果
+        check_non_simple
+            是否检查非简单多边形。为 `True` 时遇到非简单多边形会抛出异常，否则会继续执行（但大概率结果错误）
         """
         super().__init__()
         self.pts = np.asarray(pts)
@@ -86,15 +92,16 @@ class Prism(Shape3D):
                 f' containing triangulated polygon cells. (got {cells.shape})'
             self.triangulated_polygon = np.asarray(cells)
         else:
-            self.triangulated_polygon = ear_clip(self.pts, verbose=verbose)
+            self.triangulated_polygon = ear_clip(self.pts, verbose=verbose, check_non_simple=check_non_simple)
 
-    @staticmethod
-    def rand(n_edges,
+    @classmethod
+    def rand(cls: type[PrismT],
+             n_edges,
              size=(1, 1),
              z0=0,
              z1=1,
              random_state=None,
-             ):
+             ) -> PrismT:
         """生成随机棱柱
 
         Parameters
@@ -114,7 +121,7 @@ class Prism(Shape3D):
             随机棱柱实例
         """
         pts = gen_random_convex_polygon(n_edges, size=size, random_state=random_state)
-        return Prism(pts, z0, z1)
+        return cls(pts, z0, z1)
 
     @property
     def h(self):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Literal, Iterable
 
 import numpy as np
@@ -177,19 +178,28 @@ def is_inside_convex_polygon(p, pts) -> bool:
     ret
         p是否存在于凸多边形中
     """
+    # vectors为p到所有顶点的向量
     vectors = pts - p
-    winding = determine_line_winding(vectors[-1], vectors[0])
-    if winding == 0:
-        return True
-    for va, vb in zip(vectors[:-1], vectors[1:]):
-        w = determine_line_winding(va, vb)
-        if w != winding:
-            return False
 
-    return True
+    view = np.lib.stride_tricks.sliding_window_view(
+        np.r_[vectors, vectors[:1]], (2, 2)
+    ).squeeze()
+
+    # w由外积得到的，代表p到每个顶点v的向量旋转到下一个顶点上的时钟序
+    # +1顺时针，-1逆时针，0共线
+    w = determine_line_winding(view[:, 0].T, view[:, 1].T)
+
+    if np.allclose(w, 0):
+        # 多边形自身共线且与p共线
+        # 判断p是否在任意线段上
+        flag = vectors * np.roll(vectors, -1, axis=0) <= 0
+        return np.any(np.all(flag, axis=1))
+
+    # 如果多次旋转的方向相同（共线忽略），则代表目标在多边形内
+    return np.all(w <= 0) or np.all(w >= 0)
 
 
-def ear_clip(pts, verbose=True):
+def ear_clip(pts, verbose=True, check_non_simple=True):
     """实现基于耳切法的多边形三角化
 
     Parameters
@@ -198,6 +208,8 @@ def ear_clip(pts, verbose=True):
         多边形点集
     verbose
         是否输出辅助信息，包括顶点过多警告和顶点过多时显示进度条
+    check_non_simple
+        如果遇到非简单多边形，是否抛出异常
 
     Returns
     -------
@@ -229,7 +241,6 @@ def ear_clip(pts, verbose=True):
 
     if n_vertices > 200 and verbose:
         # TODO: 用c++重写？
-        import warnings
         import tqdm
 
         warnings.warn(f'Applying ear-clipping on polygons'
@@ -254,7 +265,19 @@ def ear_clip(pts, verbose=True):
 
         if best_to_remove is None:
             # something wrong
-            raise RuntimeError(f'Non-simple polygon is not supported yet.')
+            error_info = f'Non-simple polygon is not supported yet.'
+            if check_non_simple:
+                raise RuntimeError(
+                    error_info +
+                    ' Disable checks by setting `check_non_simple` to False to obtain partial result.'
+                )
+            else:
+                if verbose:
+                    warnings.warn(
+                        error_info +
+                        ' A partial result is returned and is very likely not correct.'
+                    )
+                return triangles[:i]
 
         triangles[i] = best_to_remove.clip()  # 从polygon中删除顶点
 
