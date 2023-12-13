@@ -16,7 +16,7 @@ class IntegratedSolver(DemagnetizationSolver):
             zn: np.ndarray,
             base_cell_sizes: np.ndarray,
             source_field: Field,
-            is_cpu: bool
+            kernel_dtype=None
     ):
         """该函数直接计算核矩阵
 
@@ -28,8 +28,10 @@ class IntegratedSolver(DemagnetizationSolver):
             网格边界
         base_cell_sizes
             网格最小单元大小
-        is_cpu
-            是否是CPU架构，否则需要在对应设备上分配返回值矩阵
+        source_field
+            定义默认外部场源，求解时若未指定场源，则使用该值
+        kernel_dtype
+            核矩阵数据类型，默认为None，自动从输入数据推断
 
         Notes
         -----
@@ -41,23 +43,20 @@ class IntegratedSolver(DemagnetizationSolver):
 
         - 存在taichi的int32索引限制
         """
-        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field)
-        self.is_cpu = is_cpu
+        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field, kernel_dtype)
 
-        nC = xn.shape[0]
-        nObs = receiver_locations.shape[0]
-
-        if is_cpu:
-            self.A = np.empty((3 * nObs, 3 * nC), dtype=self.kernel_type)
+        shape = (3 * self.n_obs, 3 * self.n_cells)
+        if self.is_cpu:
+            self.A = np.empty(shape, dtype=self.kernel_dtype)
         else:
-            self.A = ti_ndarray((3 * nObs, 3 * nC), dtype=self.kernel_type)
+            self.A = ti_ndarray(shape, dtype=self.kernel_dtype)
 
     def build_kernel(self, model):
         kernel_matrix_forward(
             self.receiver_locations,
             self.xn, self.yn, self.zn,
             self.base_cell_sizes, model,
-            *[None] * 6, mat=self.A,
+            *[None] * 6, mat=self.A, kernel_dtype=self.kernel_dt,
             write_to_mat=True, compressed=False
         )
 

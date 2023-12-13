@@ -18,7 +18,7 @@ from metalpy.utils.taichi import ti_prepare
 
 def compute(cell_size, gpu=False):
     if gpu:
-        ti_prepare(arch=ti.gpu, device_memory_fraction=0.8)
+        ti_prepare(arch=ti.gpu)
 
     cell_size = limit_significand(cell_size)
     a, c = 10, 40
@@ -68,7 +68,6 @@ def compute(cell_size, gpu=False):
 
 if __name__ == '__main__':
     # taichi相关配置
-    ti_prepare(device_memory_fraction=0.9)
     gpu = False
 
     model_t, pred_t, model_p, pred_p, receiver_points = compute(

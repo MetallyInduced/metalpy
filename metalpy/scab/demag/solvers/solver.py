@@ -1,8 +1,11 @@
 import abc
 
 import numpy as np
+import taichi as ti
+from taichi.lang.util import to_taichi_type
 
 from metalpy.scab.utils.misc import Field
+from metalpy.utils.taichi import ti_cfg
 
 
 class DemagnetizationSolver(abc.ABC):
@@ -13,7 +16,8 @@ class DemagnetizationSolver(abc.ABC):
             yn: np.ndarray,
             zn: np.ndarray,
             base_cell_sizes: np.ndarray,
-            source_field: Field
+            source_field: Field,
+            kernel_dtype=None
     ):
         self.receiver_locations = receiver_locations
         self.xn = xn
@@ -23,10 +27,50 @@ class DemagnetizationSolver(abc.ABC):
         self.source_field = source_field
 
         self.model = None
+        self._kernel_dtype = kernel_dtype
 
     @property
-    def kernel_type(self):
-        return np.result_type(self.xn, self.receiver_locations)
+    def kernel_dtype(self):
+        if self._kernel_dtype is not None:
+            return self._kernel_dtype
+        else:
+            return np.result_type(self.xn, self.receiver_locations)
+
+    @property
+    def kernel_dt(self):
+        """kernel_dtype的taichi对应类型
+        """
+        return to_taichi_type(self.kernel_dtype)
+
+    @property
+    def n_cells(self):
+        return self.xn.shape[0]
+
+    @property
+    def n_obs(self):
+        return self.receiver_locations.shape[0]
+
+    @property
+    def n_cells_on_each_axes(self):
+        """估算每个轴向上的网格数，采用网格坐标范围除以最小网格尺寸，获得网格数的上界
+        """
+        return [
+            (self.xn.max() - self.xn.min()) / self.base_cell_sizes[0],
+            (self.yn.max() - self.yn.min()) / self.base_cell_sizes[1],
+            (self.zn.max() - self.zn.min()) / self.base_cell_sizes[2],
+        ]
+
+    @property
+    def h_gridded(self):
+        return (np.c_[self.xn[:, 1], self.yn[:, 1], self.zn[:, 1]] - self.receiver_locations) * 2
+
+    @property
+    def arch(self):
+        return ti_cfg().arch
+
+    @property
+    def is_cpu(self):
+        return self.arch == ti.cpu
 
     def dpred(self, model, source_field=None):
         """计算退磁效应下每个网格的三轴等效磁化率
@@ -55,9 +99,8 @@ class DemagnetizationSolver(abc.ABC):
             self.build_kernel(model)
             self.model = np.copy(model)
 
-        nC = self.xn.shape[0]
         H0 = source_field.unit_vector
-        H0 = np.tile(H0[None, :], nC).ravel()
+        H0 = np.tile(H0[None, :], self.n_cells).ravel()
         X = np.tile(model, 3).ravel()
         magnetization = X * H0
 

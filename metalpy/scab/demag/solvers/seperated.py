@@ -19,9 +19,9 @@ class SeperatedSolver(DemagnetizationSolver):
             zn: np.ndarray,
             base_cell_sizes: np.ndarray,
             source_field: Field,
-            direct_to_host: bool,
-            is_cpu: bool,
-            progress: bool
+            kernel_dtype=None,
+            direct_to_host: bool = False,
+            progress: bool = False
     ):
         """该函数将矩阵分为9个部分，从而实现一些优化
 
@@ -33,10 +33,12 @@ class SeperatedSolver(DemagnetizationSolver):
             网格边界
         base_cell_sizes
             网格最小单元大小
+        source_field
+            定义默认外部场源，求解时若未指定场源，则使用该值
+        kernel_dtype
+            核矩阵数据类型，默认为None，自动从输入数据推断
         direct_to_host
             是否通过kernel将结果直接zero-copy地复制到待返回的numpy数组
-        is_cpu
-            是否是CPU架构，如果是，才会在内存可用时合并核矩阵然后求解
         progress
             是否输出求解进度条，默认为False不输出
 
@@ -52,20 +54,16 @@ class SeperatedSolver(DemagnetizationSolver):
         - 网格规模仍然受到taichi的int32索引限制
         - 相比于 `Integrated` 方法，内存需求并不会降低，并且如果矩阵规模较小，计算效率可能会低于 `Integrated` 方法
         """
-        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field)
+        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field, kernel_dtype)
         self.direct_to_host = direct_to_host
-        self.is_cpu = is_cpu
         self.progress = progress
 
         self.builder = builder = ti_FieldsBuilder()
 
-        nC = xn.shape[0]
-        nObs = receiver_locations.shape[0]
-
         self.Tmat321 = [
-            [ti_field(self.kernel_type) for _ in range(3)],  # Txx, Txy, Txz
-            [ti_field(self.kernel_type) for _ in range(2)],  # ---- Tyy, Tyz
-            [ti_field(self.kernel_type) for _ in range(1)],  # --------- Tzz
+            [ti_field(self.kernel_dtype) for _ in range(3)],  # Txx, Txy, Txz
+            [ti_field(self.kernel_dtype) for _ in range(2)],  # ---- Tyy, Tyz
+            [ti_field(self.kernel_dtype) for _ in range(1)],  # --------- Tzz
         ]
         self.Tmat33 = [
             self.Tmat321[0],  # Txx, Txy, Txz
@@ -74,7 +72,7 @@ class SeperatedSolver(DemagnetizationSolver):
         ]
         self.Tmat6 = [t for ts in self.Tmat321 for t in ts]
 
-        builder.dense(ti.ij, (nObs, nC)).place(*self.Tmat6)
+        builder.dense(ti.ij, (self.n_obs, self.n_cells)).place(*self.Tmat6)
 
         builder.finalize()
 
@@ -83,7 +81,7 @@ class SeperatedSolver(DemagnetizationSolver):
             self.receiver_locations,
             self.xn, self.yn, self.zn,
             self.base_cell_sizes, model,
-            *self.Tmat6, mat=np.empty(0),
+            *self.Tmat6, mat=np.empty(0), kernel_dtype=self.kernel_dt,
             write_to_mat=False, compressed=False
         )
 

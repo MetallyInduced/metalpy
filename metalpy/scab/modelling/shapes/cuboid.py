@@ -241,9 +241,9 @@ def _compute_implicit_distance_kernel():
             dy0, dy1 = origin[1] - cells_centers[i, 1], end[1] - cells_centers[i, 1]
             dz0, dz1 = origin[2] - cells_centers[i, 2], end[2] - cells_centers[i, 2]
 
-            cx = dx0 <= 0 <= dx1
-            cy = dy0 <= 0 <= dy1
-            cz = dz0 <= 0 <= dz1
+            cx: ti.i8 = dx0 <= 0 <= dx1
+            cy: ti.i8 = dy0 <= 0 <= dy1
+            cz: ti.i8 = dz0 <= 0 <= dz1
 
             state = cx + cy + cz
 

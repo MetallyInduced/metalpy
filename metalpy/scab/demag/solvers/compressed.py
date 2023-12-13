@@ -10,7 +10,7 @@ from taichi.lang.util import to_taichi_type
 from metalpy.scab.utils.misc import Field
 from metalpy.utils.numeric import limit_significand
 from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, copy_from, ti_size_t, ti_size_dtype, \
-    ti_cfg, ti_pyfunc
+    ti_pyfunc
 from metalpy.utils.ti_solvers import matrix_free
 from .kernel import kernel_matrix_forward
 from .solver import DemagnetizationSolver
@@ -27,6 +27,7 @@ class CompressedSolver(DemagnetizationSolver):
             zn: np.ndarray,
             base_cell_sizes: np.ndarray,
             source_field: Field,
+            kernel_dtype=None,
             compressed_size: Union[int, float, None] = None,
             deterministic: Union[bool, str] = True,
             quantized: bool = False,
@@ -43,6 +44,10 @@ class CompressedSolver(DemagnetizationSolver):
             网格边界
         base_cell_sizes
             网格最小单元大小
+        source_field
+            定义默认外部场源，求解时若未指定场源，则使用该值
+        kernel_dtype
+            核矩阵数据类型，默认为None，自动从输入数据推断
         compressed_size
             压缩表尺寸，
             如果为整数，则用于指定尺寸大小，
@@ -52,12 +57,17 @@ class CompressedSolver(DemagnetizationSolver):
             采用确定性模式并行哈希，默认为True，牺牲一定计算效率和空间确保核矩阵正确。
             指定为CompressedForward.Optimal时直接采用unique函数计算理想压缩结果
         quantized
-            采用量化模式压缩核矩阵，默认为False。
+            采用量化模式压缩核矩阵。
             True则启用压缩，使用更小位宽来存储核矩阵，减少一定的空间需求，略微牺牲计算效率。
-            （可能会报要求尺寸为2的幂的性能警告）
+            （可能会报要求尺寸为2的幂的性能警告）。
+            在CPU模式下会对性能造成较大影响，因此默认不启用。
+            在GPU模式下性能影响较小，因此默认启用
         symmetric
-            指示是否启用对称模式（当网格为规则网格时可以启用），默认为False。
-            True则启用对称模式，以对称矩阵形式存储核矩阵，减少一定的空间需求
+            指示是否启用对称模式（当网格为规则网格时可以启用）。
+            True则在检测到网格符合条件时启用对称模式，以对称矩阵形式存储核矩阵，减少一定的空间需求。
+            False则禁用对称模式，无论是否符合条件。
+            在CPU模式下会对性能造成较大影响，因此默认不启用。
+            在GPU模式下性能影响较小，因此默认启用
         progress
             是否输出求解进度条，默认为False不输出
 
@@ -95,23 +105,20 @@ class CompressedSolver(DemagnetizationSolver):
         - 例如使用 0.375 或 0.4375 替代 0.4
         - 可以使用 `metalpy.utils.numeric.limit_significand` 来搜索合适的网格尺寸
         """
-        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field)
-
-        # 检查二进制小数的稳定性，例如 `0.4` 无法使用二进制小数精确表示，因此在其上的加减法会引入误差
-        # 而CompressedSolver依赖数值的绝对相等来实现去重，对这种误差较为敏感，需要进行检查
-        check_binary_floats_stability(
-            receiver_locations - receiver_locations[0],
-            threshold=0.95,
-            axes_names='XYZ'
-        )
+        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field, kernel_dtype)
 
         self.deterministic = deterministic
         self.progress = progress
 
-        nC = xn.shape[0]
-        nObs = receiver_locations.shape[0]
+        # 检查二进制小数的稳定性，例如 `0.4` 无法使用二进制小数精确表示，因此在其上的加减法会引入误差
+        # 而CompressedSolver依赖数值的绝对相等来实现去重，对这种误差较为敏感，需要进行检查
+        check_binary_floats_stability(
+            receiver_locations,
+            self.kernel_dtype,
+            np.max(self.n_cells_on_each_axes)
+        )
 
-        default_table_size = get_default_table_size(nC)
+        default_table_size = get_default_table_size(self.n_cells)
         if compressed_size is None:
             compressed_size = default_table_size
 
@@ -124,64 +131,16 @@ class CompressedSolver(DemagnetizationSolver):
         self.builder = builder = ti_FieldsBuilder()
 
         self.Tmat321 = [
-            [ti_field(self.kernel_type) for _ in range(3)],  # Txx, Txy, Txz
-            [ti_field(self.kernel_type) for _ in range(2)],  # ---- Tyy, Tyz
-            [ti_field(self.kernel_type) for _ in range(1)],  # --------- Tzz
+            [ti_field(self.kernel_dtype) for _ in range(3)],  # Txx, Txy, Txz
+            [ti_field(self.kernel_dtype) for _ in range(2)],  # ---- Tyy, Tyz
+            [ti_field(self.kernel_dtype) for _ in range(1)],  # --------- Tzz
         ]
         self.Tmat6 = [t for ts in self.Tmat321 for t in ts]
 
         builder.dense(ti.i, compressed_size).place(*self.Tmat6)
 
-        self.symmetric = symmetric
-        if not symmetric:
-            axes = ti.ij
-            indices_size = [nObs, nC]
-        else:
-            axes = ti.i
-            indices_size = [symmetric_mat_size(nObs, nC)]
-
-        self.quantized = quantized
-        indices_mat = None
-        while quantized:
-            arch = ti_cfg().arch
-            if not is_extension_supported(arch, ti.extension.quant):
-                warnings.warn(f'`{arch.name}` does not support quantized types.'
-                              f' Ignoring `quantized` and using {ti_size_dtype.__name__} instead.')
-                break
-
-            # TODO: 万一将来位宽变成128了？
-            primitive_bits = np.iinfo(np.int64).bits
-            quantized_bits = math.ceil(np.log2(compressed_size))
-            n_packed = primitive_bits // quantized_bits
-            if n_packed <= 2:
-                warnings.warn(f'A single `uint{primitive_bits}` can pack only'
-                              f' {n_packed} quantized index type `uint{quantized_bits}`.'
-                              f' Ignoring `quantized` and using `{ti_size_dtype.__name__}` instead.')
-                break
-
-            indices_type = ti.types.quant.int(
-                bits=quantized_bits,
-                signed=False,
-                compute=ti_size_t
-            )
-
-            indices_mat = ti_field(indices_type)
-            indices_size[-1] = math.ceil(indices_size[-1] / n_packed)
-
-            (
-                builder
-                .dense(axes, indices_size)
-                .quant_array(axes[-1:], n_packed, max_num_bits=primitive_bits)
-                .place(indices_mat)
-            )
-
-            break
-
-        if indices_mat is None:
-            indices_mat = ti_field(ti_size_t)
-            builder.dense(axes, indices_size).place(indices_mat)
-
-        self.indices_mat = indices_mat
+        self.symmetric, axes, indices_size = self._create_indices_specs(symmetric=symmetric)
+        self.quantized, self.indices_mat = self._build_indices(axes, indices_size, quantized=quantized)
 
         builder.finalize()
 
@@ -199,13 +158,80 @@ class CompressedSolver(DemagnetizationSolver):
             self.receiver_locations,
             self.xn, self.yn, self.zn,
             self.base_cell_sizes, model,
-            *self.Tmat6, mat=np.empty(0),
+            *self.Tmat6, mat=np.empty(0), kernel_dtype=self.kernel_dt,
             write_to_mat=False, compressed=True
         )
 
     def solve(self, magnetization):
         solver = not self.symmetric and solve_Tx_b_compressed or solve_Tx_b_compressed_symmetric
         return solver(self.Tmat321, self.indices_mat, magnetization, progress=self.progress)
+
+    def _create_indices_specs(self, symmetric):
+        h_gridded = self.h_gridded
+
+        is_symmetric = np.allclose(h_gridded, h_gridded[0])
+        if symmetric is None:
+            symmetric = not self.is_cpu and is_symmetric
+        elif symmetric is True and not is_symmetric:
+            warnings.warn(
+                '`symmetric` mode is enabled on a non-symmetric mesh,'
+                ' which may lead to unexpected result.'
+            )
+
+        if not symmetric:
+            axes = ti.ij
+            indices_size = [self.n_obs, self.n_cells]
+        else:
+            axes = ti.i
+            indices_size = [symmetric_mat_size(self.n_obs, self.n_cells)]
+
+        return symmetric, axes, indices_size
+
+    def _build_indices(self, axes, indices_size, quantized):
+        quantizable = is_extension_supported(self.arch, ti.extension.quant)
+        if quantized is None:
+            quantized = not self.is_cpu and quantizable
+        elif quantized is True and not quantizable:
+            warnings.warn(f'`{self.arch.name}` does not support quantized types.'
+                          f' Ignoring `quantized` and using {ti_size_dtype.__name__} instead.')
+
+        self.quantized = quantized
+
+        indices_mat = None
+        while quantized:
+            # TODO: 万一将来位宽变成128了？
+            primitive_bits = np.iinfo(np.int64).bits
+            quantized_bits = math.ceil(np.log2(self.compressed_size))
+            n_packed = primitive_bits // quantized_bits
+            if n_packed <= 2:
+                warnings.warn(f'A single `uint{primitive_bits}` can pack only'
+                              f' {n_packed} quantized index type `uint{quantized_bits}`.'
+                              f' Ignoring `quantized` and using `{ti_size_dtype.__name__}` instead.')
+                break
+
+            indices_type = ti.types.quant.int(
+                bits=quantized_bits,
+                signed=False,
+                compute=ti_size_t
+            )
+
+            indices_mat = ti_field(indices_type)
+            indices_size[-1] = math.ceil(indices_size[-1] / n_packed)
+
+            (
+                self.builder
+                .dense(axes, indices_size)
+                .quant_array(axes[-1:], n_packed, max_num_bits=primitive_bits)
+                .place(indices_mat)
+            )
+
+            break
+
+        if indices_mat is None:
+            indices_mat = ti_field(ti_size_t)
+            self.builder.dense(axes, indices_size).place(indices_mat)
+
+        return quantized, indices_mat
 
 
 def search_prime(value):
@@ -395,7 +421,7 @@ def compress_kernel_by_hash(
         overflow,
         prime,
         invalid_value_for_dx1,
-        symmetric
+        symmetric=symmetric
     )
 
     overflow = overflow.to_numpy()[0]
@@ -543,12 +569,12 @@ def hash_unique(
         else:
             indices_mat[i] = a
 
-        Txx[a] = dx1
-        Txy[a] = dx2
-        Txz[a] = dy1
-        Tyy[a] = dy2
-        Tyz[a] = dz1
-        Tzz[a] = dz2
+        Txx[a] = ti.cast(dx1, Txx.dtype)
+        Txy[a] = ti.cast(dx2, Txy.dtype)
+        Txz[a] = ti.cast(dy1, Txz.dtype)
+        Tyy[a] = ti.cast(dy2, Tyy.dtype)
+        Tyz[a] = ti.cast(dz1, Tyz.dtype)
+        Tzz[a] = ti.cast(dz2, Tzz.dtype)
 
 
 @ti_func
@@ -705,21 +731,35 @@ def copy_col_vector_from_matrix(
         dst[i] = src[i, col]
 
 
-def check_binary_floats_stability(matrix, threshold=0.95, axes_names=None):
+def check_binary_floats_stability(
+        receiver_locations, kernel_dtype, max_cells_along_axes, threshold=0.95, axes_names='XYZ'
+):
     """检查二进制小数的稳定性，例如 `0.4` 无法使用二进制小数精确表示，
     因此在其上的运算会引入误差，误差累积后会导致结果发生细微的偏差
 
     Parameters
     ----------
-    matrix
-        需要检查稳定性的矩阵
+    receiver_locations
+        观测点坐标
+    kernel_dtype
+        核矩阵数据类型
+    max_cells_along_axes
+        单个坐标轴上的最大网格数
     threshold
         稳定性阈值（0 ~ 1，列元素中稳定的元素数大于该比例则认为合格）
     axes_names
         用于输出的坐标轴名
     """
-    stable_mask = np.equal(matrix, limit_significand(matrix))
+    # 检查乘积结果是否在 `kernel_dtype` 精度范围内
+    digits = np.finfo(kernel_dtype).precision
+    relations = receiver_locations - receiver_locations[0]  # 网格间关系，即 网格长度 乘以 间隔网格数
+    stable_mask = np.equal(relations, limit_significand(relations, tol=10 ** -digits))
     axes_ratio = np.count_nonzero(stable_mask, axis=0) / stable_mask.shape[0]
+
+    # 推算乘以 网格数 导致额外消耗的有效位数上界
+    required_digits = np.log10(max_cells_along_axes)
+    tol_hint = 10 ** -(digits - required_digits)
+
     for axis, rate in enumerate(axes_ratio):
         if rate < threshold:
             if axes_names is not None:
@@ -728,7 +768,7 @@ def check_binary_floats_stability(matrix, threshold=0.95, axes_names=None):
                           f' ({rate:.2%} < {threshold:.2%}),'
                           f' which may severely affect compression rate.'
                           f' Consider adjusting mesh cell sizes by'
-                          f' `limit_significand(your_cell_sizes)`.'
+                          f' `limit_significand(<your_cell_sizes>, tol={tol_hint:.4})`.'
                           f'\n'
                           f' See `metalpy.utils.numeric.limit_significand`'
                           f' for more details.')

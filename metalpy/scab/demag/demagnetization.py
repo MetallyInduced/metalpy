@@ -35,9 +35,10 @@ class Demagnetization:
             method=None,
             compressed_size: int | float | None = None,
             deterministic: bool | str = True,
-            quantized: bool = False,
+            quantized: bool | None = None,
             symmetric: bool | None = None,
-            progress=False
+            progress=False,
+            kernel_dtype=None
     ):
         """
         通过共轭梯度法求解计算退磁作用下的三轴等效磁化率
@@ -64,17 +65,21 @@ class Demagnetization:
             采用确定性模式并行哈希，默认为True，牺牲一定计算效率和空间确保核矩阵正确。
             指定为CompressedForward.Optimal时直接采用unique函数计算理想压缩结果
         quantized
-            采用量化模式压缩核矩阵，默认为False。
+            采用量化模式压缩核矩阵。
             True则启用压缩，使用更小位宽来存储核矩阵，减少一定的空间需求，略微牺牲计算效率。
-            （可能会报要求尺寸为2的幂的性能警告）
+            （可能会报要求尺寸为2的幂的性能警告）。
+            在CPU模式下会对性能造成较大影响，因此默认不启用。
+            在GPU模式下性能影响较小，因此默认启用
         symmetric
             指示是否启用对称模式（当网格为规则网格时可以启用）。
             True则在检测到网格符合条件时启用对称模式，以对称矩阵形式存储核矩阵，减少一定的空间需求。
             False则禁用对称模式，无论是否符合条件。
             在CPU模式下会对性能造成较大影响，因此默认不启用。
-            在GPU模式下性能影响较小，因此默认启用。
+            在GPU模式下性能影响较小，因此默认启用
         progress
             是否输出求解进度条，默认为False不输出
+        kernel_dtype
+            核矩阵数据类型，默认为None，自动从输入数据推断
 
         Notes
         -----
@@ -101,6 +106,7 @@ class Demagnetization:
         self.compressed_size = compressed_size
         self.deterministic = deterministic
         self.quantized = quantized
+        self.symmetric = symmetric
         self.progress = progress
 
         cell_centers = mesh.cell_centers
@@ -130,14 +136,6 @@ class Demagnetization:
 
         self.is_cpu = ti_cfg().arch == ti.cpu
 
-        is_symmetric = np.allclose(h_gridded, h_gridded[0])
-        if symmetric is None:
-            symmetric = not self.is_cpu
-        elif symmetric is True:
-            if not is_symmetric:
-                warnings.warn('`symmetric` mode is enabled, but the mesh is not symmetric.')
-        self.symmetric = symmetric and is_symmetric
-
         # CPU后端可以直接判断内存是否足够
         # 但CUDA后端不能在没有额外依赖的情况下查询内存，并且内存不足时会抛出异常，无法通过再次ti.init还原
         # 因此留一个错误信息以供参考
@@ -149,16 +147,20 @@ class Demagnetization:
                 compressed_size=self.compressed_size, deterministic=self.deterministic,
                 quantized=self.quantized,
                 symmetric=self.symmetric,
-                progress=self.progress
+                progress=self.progress,
+                kernel_dtype=kernel_dtype
             )
         except RuntimeError as e:
             if ti_cfg().arch == ti.cuda and 'cuStreamSynchronize' in e.args[0]:
                 raise RuntimeError(f'Failed to build kernel matrix.'
                                    f' This may be resulted by insufficient memory'
                                    f' (please check log for details).'
-                                   f'\nTry specifying `method={Demagnetization.__name__}.Compressed`'
+                                   f'\nTo reduce memory consumption,'
+                                   f' try specifying `kernel_dtype=np.float32`.'
+                                   f'\nTo further improve memory efficiency,'
+                                   f' use `method={Demagnetization.__name__}.Compressed`'
                                    f' with proper `compressed_size` and'
-                                   f' enabling `quantized` and `symmetric` when necessary.')
+                                   f' enable `quantized=True` and `symmetric=True` when necessary.')
             else:
                 raise e
 
@@ -194,7 +196,8 @@ def dispatch_solver(
         deterministic: bool | str = True,
         quantized: bool = True,
         symmetric: bool = False,
-        progress=False
+        progress=False,
+        kernel_dtype=None
 ) -> DemagnetizationSolver:
     n_obs = receiver_locations.shape[0]
     n_cells = xn.shape[0]
@@ -217,10 +220,11 @@ def dispatch_solver(
         'yn': yn,
         'zn': zn,
         'base_cell_sizes': base_cell_sizes,
-        'source_field': source_field
+        'source_field': source_field,
+        'kernel_dtype': kernel_dtype
     }
-    kw_int = {'is_cpu': is_cpu, **common_kwargs}
-    kw_sep = {'is_cpu': is_cpu, 'progress': progress, **common_kwargs}
+    kw_int = {**common_kwargs}
+    kw_sep = {'progress': progress, **common_kwargs}
     kw_com = {
         'compressed_size': compressed_size,
         'deterministic': deterministic,

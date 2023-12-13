@@ -3,6 +3,7 @@ from typing import Union, Iterable
 import numpy as np
 import taichi as ti
 import tqdm
+from taichi.lang.util import to_taichi_type
 
 from metalpy.utils.taichi import (
     ti_size_max,
@@ -50,7 +51,9 @@ class TaichiSimulation3DIntegral:
                  row_stype: int = Layout_SoA,
                  col_stype: int = Layout_AoS,
                  tmi_projection: np.ndarray = None,
-                 magnetization: np.ndarray = None,):
+                 magnetization: np.ndarray = None,
+                 sensitivity_dtype=np.float64
+                 ):
         """用于计算磁场的积分正演
 
         Parameters
@@ -100,6 +103,7 @@ class TaichiSimulation3DIntegral:
         self.row_stype = row_stype
         self.col_stype = col_stype
         self.model_type = model_type
+        self.sensitivity_dtype = sensitivity_dtype
 
     def dpred(self,
               model: np.ndarray = None,
@@ -131,6 +135,8 @@ class TaichiSimulation3DIntegral:
         is_cpu = ti_cfg().arch == ti.cpu
 
         forward_only = model is not None
+
+        # 指定dummy变量的长度为3，方便后续reshape成vector模型
         model = not_none_or_default(model, supplier=lambda: np.empty(3, dtype=np.int8))
 
         if self.model_type == self.MType_Scalar:
@@ -144,7 +150,7 @@ class TaichiSimulation3DIntegral:
 
         n_rows = sum(receiver.n_rows for receiver in self.receivers)
         if is_cpu:
-            ret = np.zeros((n_rows, n_cols), dtype=np.float64)
+            ret = np.zeros((n_rows, n_cols), dtype=self.sensitivity_dtype)
             xn = self.xn
             yn = self.yn
             zn = self.zn
@@ -153,7 +159,7 @@ class TaichiSimulation3DIntegral:
             # According to https://docs.taichi-lang.org/docs/ndarray, or
             # https://github.com/taichi-dev/taichi/blob/8fdf7a7d/docs/lang/articles/basic/ndarray.md?plain=1#L23C35-L23C35
             # ti.ndarray-s are initialized to 0 by default.
-            ret = ti_ndarray(shape=(n_rows, n_cols), dtype=ti.f64)
+            ret = ti_ndarray(shape=(n_rows, n_cols), dtype=self.sensitivity_dtype)
             xn = ti_ndarray_from(self.xn)
             yn = ti_ndarray_from(self.yn)
             zn = ti_ndarray_from(self.zn)
@@ -858,25 +864,27 @@ class TaichiSimulation3DIntegral:
                 jy = self.in_row_index(icell, 1)
                 jz = self.in_row_index(icell, 2)
                 if ti.static(accumulative == 0):  # NonAccumulative
-                    ret[i, jx] = tx
-                    ret[i, jy] = ty
-                    ret[i, jz] = tz
+                    ret[i, jx] = self.cast_to_sens_type(tx)
+                    ret[i, jy] = self.cast_to_sens_type(ty)
+                    ret[i, jz] = self.cast_to_sens_type(tz)
                 else:
-                    ret[i, jx] += tx
-                    ret[i, jy] += ty
-                    ret[i, jz] += tz
+                    ret[i, jx] += self.cast_to_sens_type(tx)
+                    ret[i, jy] += self.cast_to_sens_type(ty)
+                    ret[i, jz] += self.cast_to_sens_type(tz)
             else:
-                ret[i, 0] += model[icell, 0] * tx + model[icell, 1] * ty + model[icell, 2] * tz
+                ret[i, 0] += self.cast_to_sens_type(
+                    model[icell, 0] * tx + model[icell, 1] * ty + model[icell, 2] * tz
+                )
         else:
             t = tx + ty + tz
 
             if ti.static(not forward_only):
                 if ti.static(accumulative == 0):  # NonAccumulative
-                    ret[i, icell] = t
+                    ret[i, icell] = self.cast_to_sens_type(t)
                 else:
-                    ret[i, icell] += t
+                    ret[i, icell] += self.cast_to_sens_type(t)
             else:
-                ret[i, 0] += t * model[icell]
+                ret[i, 0] += self.cast_to_sens_type(t * model[icell])
 
     @ti_func
     def in_col_index(self, iobs, icomponent, n_components, n_obs):
@@ -885,3 +893,7 @@ class TaichiSimulation3DIntegral:
     @ti_func
     def in_row_index(self, icell, bi):
         return ti_index(icell, bi, self.row_stype, 3, self.n_cells)
+
+    @ti_func
+    def cast_to_sens_type(self, val):
+        return ti.cast(val, to_taichi_type(self.sensitivity_dtype))

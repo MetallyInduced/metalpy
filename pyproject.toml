@@ -52,7 +52,7 @@ aero = [
 scab = [
     "metalpy[mepa, mexin, utils]",
     # scientific
-    "SimPEG >= 0.18",
+    "SimPEG >= 0.20",
     "discretize",
     "numpy",
     "pandas",
@@ -63,7 +63,7 @@ scab = [
     "matplotlib",
     "colour",
     # computational
-    "taichi == 1.6.0",
+    "taichi",
     # utils
     "properties",
     "pympler",

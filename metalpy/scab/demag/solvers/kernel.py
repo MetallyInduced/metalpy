@@ -21,6 +21,7 @@ def kernel_matrix_forward(
         mat: ti.types.ndarray(),
         write_to_mat: ti.template(),
         compressed: ti.template(),
+        kernel_dtype: ti.template()
 ):
     # calculates A = I - X @ T, where T is the forward kernel, s.t. T @ m_v = B_v
     # m_v and B_v are both channel first (Array of Structure in taichi)
@@ -180,7 +181,7 @@ def kernel_matrix_forward(
         arg40 = dz1 + r8
 
         # 判断观测点是否在网格内，如果在网格内，则对角线元素+1
-        inside = (
+        inside: ti.i8 = (
             + ti.math.sign(dx1 * dx2)
             + ti.math.sign(dy1 * dy2)
             + ti.math.sign(dz1 * dz2)
@@ -241,27 +242,27 @@ def kernel_matrix_forward(
         neg_sus = -susc_model[icell]
 
         if ti.static(compressed):
-            Txx[i] = neg_sus * txx + inside
-            Txy[i] = neg_sus * txy
-            Txz[i] = neg_sus * txz
-            Tyy[i] = neg_sus * tyy + inside
-            Tyz[i] = neg_sus * tyz
-            Tzz[i] = neg_sus * tzz + inside
+            Txx[i] = ti.cast(neg_sus * txx + inside, kernel_dtype)
+            Txy[i] = ti.cast(neg_sus * txy, kernel_dtype)
+            Txz[i] = ti.cast(neg_sus * txz, kernel_dtype)
+            Tyy[i] = ti.cast(neg_sus * tyy + inside, kernel_dtype)
+            Tyz[i] = ti.cast(neg_sus * tyz, kernel_dtype)
+            Tzz[i] = ti.cast(neg_sus * tzz + inside, kernel_dtype)
         else:
             if ti.static(write_to_mat):
-                mat[iobs * 3 + 0, icell * 3 + 0] = neg_sus * txx + inside
-                mat[iobs * 3 + 0, icell * 3 + 1] = neg_sus * txy
-                mat[iobs * 3 + 0, icell * 3 + 2] = neg_sus * txz
-                mat[iobs * 3 + 1, icell * 3 + 0] = neg_sus * tyx
-                mat[iobs * 3 + 1, icell * 3 + 1] = neg_sus * tyy + inside
-                mat[iobs * 3 + 1, icell * 3 + 2] = neg_sus * tyz
-                mat[iobs * 3 + 2, icell * 3 + 0] = neg_sus * tzx
-                mat[iobs * 3 + 2, icell * 3 + 1] = neg_sus * tzy
-                mat[iobs * 3 + 2, icell * 3 + 2] = neg_sus * tzz + inside
+                mat[iobs * 3 + 0, icell * 3 + 0] = ti.cast(neg_sus * txx + inside, kernel_dtype)
+                mat[iobs * 3 + 0, icell * 3 + 1] = ti.cast(neg_sus * txy, kernel_dtype)
+                mat[iobs * 3 + 0, icell * 3 + 2] = ti.cast(neg_sus * txz, kernel_dtype)
+                mat[iobs * 3 + 1, icell * 3 + 0] = ti.cast(neg_sus * tyx, kernel_dtype)
+                mat[iobs * 3 + 1, icell * 3 + 1] = ti.cast(neg_sus * tyy + inside, kernel_dtype)
+                mat[iobs * 3 + 1, icell * 3 + 2] = ti.cast(neg_sus * tyz, kernel_dtype)
+                mat[iobs * 3 + 2, icell * 3 + 0] = ti.cast(neg_sus * tzx, kernel_dtype)
+                mat[iobs * 3 + 2, icell * 3 + 1] = ti.cast(neg_sus * tzy, kernel_dtype)
+                mat[iobs * 3 + 2, icell * 3 + 2] = ti.cast(neg_sus * tzz + inside, kernel_dtype)
             else:
-                Txx[iobs, icell] = neg_sus * txx + inside
-                Txy[iobs, icell] = neg_sus * txy
-                Txz[iobs, icell] = neg_sus * txz
-                Tyy[iobs, icell] = neg_sus * tyy + inside
-                Tyz[iobs, icell] = neg_sus * tyz
-                Tzz[iobs, icell] = neg_sus * tzz + inside
+                Txx[iobs, icell] = ti.cast(neg_sus * txx + inside, kernel_dtype)
+                Txy[iobs, icell] = ti.cast(neg_sus * txy, kernel_dtype)
+                Txz[iobs, icell] = ti.cast(neg_sus * txz, kernel_dtype)
+                Tyy[iobs, icell] = ti.cast(neg_sus * tyy + inside, kernel_dtype)
+                Tyz[iobs, icell] = ti.cast(neg_sus * tyz, kernel_dtype)
+                Tzz[iobs, icell] = ti.cast(neg_sus * tzz + inside, kernel_dtype)

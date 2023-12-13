@@ -14,7 +14,7 @@ from metalpy.scab.utils.misc import Field
 
 
 class DemagedMapping(maps.IdentityMap):
-    def __init__(self, simulation: Simulation3DIntegral, factor=None, **kwargs):
+    def __init__(self, simulation: Simulation3DIntegral, factor=None, kernel_dtype=None, **kwargs):
         assert simulation.model_type == 'scalar', '`Demaged` needs `scalar` model to work.'
 
         chiMap = simulation.chiMap
@@ -25,12 +25,20 @@ class DemagedMapping(maps.IdentityMap):
         self.factor = factor
         self.chiMap = chiMap
 
+        if kernel_dtype is None:
+            try:
+                # simulation.sensitivity_dtype是 SimPEG 0.20 新增加的属性
+                kernel_dtype = simulation.sensitivity_dtype
+            except AttributeError:
+                kernel_dtype = np.float64  # SimPEG < 0.20，默认使用float64
+
         if factor is not None:
             self.demag_solver = FactoredDemagnetization(n=factor)
         else:
             self.demag_solver = Demagnetization(
                 mesh=self.simulation.mesh,
                 active_ind=self.simulation.ind_active,
+                kernel_dtype=kernel_dtype,
                 **kwargs
             )
 

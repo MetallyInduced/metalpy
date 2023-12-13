@@ -109,6 +109,12 @@ def bicgstab(
         for I in ti.grouped(p):
             s[I] = r[I] - alpha[None] * Ap[I]
 
+    @ti.kernel
+    def update(dst: ti.template(), val: solver_dtype):
+        # 防止在1.7.0下直接python scope执行赋值
+        # dst[None] = val  # 警告信息：Assign may lose precision: unknown <- f64
+        dst[None] = val
+
     def solve():
         init()
         initial_rTr = reduce(r, r)
@@ -124,18 +130,18 @@ def bicgstab(
         # -- Main loop --
         for i in range(maxiter):
             A._matvec(p, Ap)  # compute Ap = A x p
-            alpha[None] = old_rrstar / reduce(rstar, Ap)
+            update(alpha, old_rrstar / reduce(rstar, Ap))
 
             update_s()
 
             A._matvec(s, As)  # compute As = A x s
-            omega[None] = reduce(As, s) / reduce(As, As)  # np.inner(AMs.conjugate(), s)/np.inner(AMs.conjugate(), AMs)
+            update(omega, reduce(As, s) / reduce(As, As))  # np.inner(AMs.conjugate(), s)/np.inner(AMs.conjugate(), AMs)
 
             update_x()
             update_r()
 
             new_rrstar = reduce(rstar, r)
-            beta[None] = (new_rrstar / old_rrstar) * (alpha[None] / omega[None])
+            update(beta, (new_rrstar / old_rrstar) * (alpha[None] / omega[None]))
             old_rrstar = new_rrstar
 
             update_p()

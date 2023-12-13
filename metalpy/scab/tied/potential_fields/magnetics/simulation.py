@@ -57,19 +57,23 @@ class TiedSimulation3DIntegralMixin(TiedMixin):
         ]
 
         if self.model_type == 'scalar':
+            model_type = TaichiSimulation3DIntegral.MType_Scalar
             magnetization = self.M  # (nC, 3)的矩阵
         else:
+            model_type = TaichiSimulation3DIntegral.MType_Vector
+            if forward_only:
+                model = model.reshape(3, -1).T  # vector模式下将model reshape为n行3列
+
             # 输入向量，TaichiSimulation3DIntegral内部会自动转换为(nC, 3)的矩阵
             # 向量模式下（model_type='vector'），dpred输入为三轴等效磁化率，乘以地磁场幅值得到磁化矩阵（地磁场方向此时不参与计算）
             # 与Simulation3DIntegral.evaluate_integral中`if self.model_type == "vector"`分支行为一致
             magnetization = self.survey.source_field.amplitude
 
-        if self.model_type == 'scalar':
-            model_type = TaichiSimulation3DIntegral.MType_Scalar
-        else:
-            model_type = TaichiSimulation3DIntegral.MType_Vector
-            if forward_only:
-                model = model.reshape(3, -1).T
+        try:
+            # simulation.sensitivity_dtype是 SimPEG 0.20 新增加的属性
+            sensitivity_dtype = self.sensitivity_dtype
+        except AttributeError:
+            sensitivity_dtype = np.float64  # SimPEG < 0.20，默认使用float64
 
         receivers = [Receiver(rx.locations, rx.components) for rx in self.survey.source_field.receiver_list]
 
@@ -81,6 +85,7 @@ class TiedSimulation3DIntegralMixin(TiedMixin):
             base_cell_sizes=base_cell_sizes,
             model_type=model_type,
             magnetization=magnetization,
+            sensitivity_dtype=sensitivity_dtype,
             row_stype=TaichiSimulation3DIntegral.Layout_SoA,
             col_stype=TaichiSimulation3DIntegral.Layout_AoS,
             tmi_projection=self.tmi_projection,

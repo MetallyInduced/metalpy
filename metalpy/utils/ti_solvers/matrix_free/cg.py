@@ -93,6 +93,12 @@ def cg(
         for I in ti.grouped(p):
             p[I] = r[I] + beta[None] * p[I]
 
+    @ti.kernel
+    def update(dst: ti.template(), val: solver_dtype):
+        # 防止在1.7.0下直接python scope执行赋值
+        # dst[None] = val  # 警告信息：Assign may lose precision: unknown <- f64
+        dst[None] = val
+
     def solve():
         init()
         initial_rTr = reduce(r, r)
@@ -108,7 +114,7 @@ def cg(
         for i in range(maxiter):
             A._matvec(p, Ap)  # compute Ap = A x p
             pAp = reduce(p, Ap)
-            alpha[None] = old_rTr / pAp
+            update(alpha, old_rTr / pAp)
             update_x()
             update_r()
             new_rTr = reduce(r, r)
@@ -120,7 +126,7 @@ def cg(
             if residual < tol:
                 break
 
-            beta[None] = new_rTr / old_rTr
+            update(beta, new_rTr / old_rTr)
             update_p()
             old_rTr = new_rTr
 

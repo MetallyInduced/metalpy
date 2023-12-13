@@ -11,7 +11,7 @@ from metalpy.utils.sensor_array import get_grids_ex
 
 
 magnetic_background_field = (50000, 78, 3)
-magnetic_permeability = 2
+chi = 2
 
 
 def create_forward_settings():
@@ -40,6 +40,7 @@ def create_simulation_builder(taichi=True):
     builder.active_mesh(model_mesh)
     builder.source_field(*magnetic_background_field)
     builder.model_type(scalar=True)
+    builder.sensitivity_dtype(np.float64)
 
     if taichi:
         from metalpy.scab import Tied
@@ -79,11 +80,11 @@ def create_simpeg_simulation():
 def test_taichi_patch():
     # Taichi and Builder
     builder, model = create_simulation_builder(taichi=True)
-    pred_taichi = builder.build().dpred(model * magnetic_permeability)
+    pred_taichi = builder.build().dpred(model * chi)
 
     # SimPEG
     simulation, model = create_simpeg_simulation()
-    pred_simpeg = simulation.dpred(model * magnetic_permeability)
+    pred_simpeg = simulation.dpred(model * chi)
 
     # SimPEG新旧算法偏差最大能到千分之一 （Tied插件使用的是旧版本正演算法）
     assert_almost_equal(pred_taichi / pred_simpeg, 1, decimal=4)
@@ -95,13 +96,13 @@ def test_vector_model():
     # scalar model
     builder, model = create_simulation_builder(taichi=True)
     builder.model_type(scalar=True)
-    pred_scalar = builder.build().dpred(model * magnetic_permeability)
+    pred_scalar = builder.build().dpred(model * chi)
 
     # vector model
     builder, model = create_simulation_builder(taichi=True)
     builder.model_type(vector=True)
     pred_vector = builder.build().dpred(mkvc(
-        model[:, np.newaxis] * field.unit_vector * magnetic_permeability
+        model[:, np.newaxis] * field.unit_vector * chi
     ))
 
     assert_almost_equal(pred_vector / pred_scalar, 1, decimal=7)
