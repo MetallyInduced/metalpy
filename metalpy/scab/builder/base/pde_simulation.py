@@ -10,12 +10,12 @@ from ..simulation import BaseSimulationBuilder
 
 
 class BasePDESimulationBuilder(BaseSimulationBuilder):
-    def __init__(self, sim_cls: base.BasePDESimulation):
+    def __init__(self, sim_cls: type[base.BasePDESimulation]):
         super().__init__(sim_cls)
 
 
 class BaseMagneticPDESimulationBuilder(BasePDESimulationBuilder):
-    def __init__(self, sim_cls: base.BaseMagneticPDESimulation):
+    def __init__(self, sim_cls: type[base.BaseMagneticPDESimulation]):
         super().__init__(sim_cls)
         self._mu_map = None
         self._chi_map = None

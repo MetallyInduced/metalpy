@@ -78,7 +78,7 @@ class LazyClassFactory:
                         self.argspecs.remove(argspec)
                     break
 
-        if ret == undefined:
+        if undefined == ret:
             raise ValueError('Bound arg not found.')
 
         return ret

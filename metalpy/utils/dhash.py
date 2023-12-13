@@ -111,7 +111,7 @@ class DHash:
         t = type(obj)
         hasher = get_or_default(DHash.hashers, t, None)
 
-        if hasher == undefined:
+        if undefined == hasher:
             hasher = None  # 已确认不存在lazy hasher
         else:
             if hasher is None:

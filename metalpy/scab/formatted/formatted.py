@@ -57,6 +57,7 @@ def __implements(target):
     return decorator
 
 
+@__implements('metalpy.scab.potential_fields.magnetics.simulation.Simulation3DDipoles')
 @__implements('SimPEG.potential_fields.magnetics.simulation.Simulation3DIntegral')
 def _():
     from .potential_fields.magnetics.simulation import FormattedSimulation3DIntegralMixin

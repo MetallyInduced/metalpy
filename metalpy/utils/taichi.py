@@ -154,11 +154,6 @@ def ti_data_oriented(cls):
     return ti.data_oriented(cls)
 
 
-def ti_ndarray(dtype, shape):
-    ti_init_once()
-    return ti.ndarray(dtype, shape)
-
-
 def ti_zeros_like(arr, *, dtype=None):
     ti_init_once()
     if dtype is None:
@@ -345,14 +340,23 @@ def ti_ndarray_like(arr, sdim=0, dtype=None, field=False, builder: ti.FieldsBuil
     else:
         raise ValueError(f"Unsupported structure dim: {sdim}")
 
-    if builder is None:
-        if field:
-            container = ti.field(dtype=dt, shape=shape)
+    return ti_ndarray(shape, dtype=dt, field=field, builder=builder)
+
+
+def ti_ndarray(shape, dtype=np.float32, field=False, builder: ti.FieldsBuilder = None):
+    ti_init_once()
+
+    dt = to_taichi_type(dtype)
+    if field:
+        if builder is not None:
+            container = ti.field(dt)
+            builder.dense(ti.axes(*range(len(shape))), shape).place(container)
         else:
-            container = ti.ndarray(dtype=dt, shape=shape)
+            container = ti.field(dtype=dt, shape=shape)
     else:
-        container = ti.field(dt)
-        builder.dense(ti.axes(*range(len(shape))), shape).place(container)
+        if builder is not None:
+            warnings.warn('Cannot make ti.ndarray from builder, ignoring it.')
+        container = ti.ndarray(dtype=dt, shape=shape)
 
     return container
 

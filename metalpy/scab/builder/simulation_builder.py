@@ -37,7 +37,7 @@ from metalpy.scab import simpeg_patched
 from metalpy.mexin import Patch
 from metalpy.mexin.utils import TypeMap
 from metalpy.mexin.utils.misc import reget_object
-from metalpy.utils.arg_specs import ArgSpecs
+from metalpy.utils.arg_specs import ArgSpecs, Arg, MissingArgError
 from metalpy.utils.object_path import ObjectPath, get_full_qualified_path
 from metalpy.utils.string import format_string_list
 from metalpy.utils.type import undefined
@@ -46,6 +46,7 @@ from .utils import MissingArgsException, MissingArgException
 if TYPE_CHECKING:
     # 用于类型检查时前向声明，运行时`TYPE_CHECKING` == False，import代码不会执行
     from SimPEG.potential_fields import magnetics
+    from metalpy.scab.potential_fields import magnetics as metalpy_magnetics
     from .potential_fields import magnetics as _magnetics
 
 
@@ -54,7 +55,7 @@ class SimulationBuilder:
     _all_assemblers = {}
     _all_suppliers = {}
 
-    def __init__(self, sim_cls):
+    def __init__(self, sim_cls: type):
         """用于将任意对象的构建包装为builder模式，
         并通过提供合理的默认值来简化对象创建流程
 
@@ -92,7 +93,7 @@ class SimulationBuilder:
             try:
                 ret = self.args.call(reget_object(self.sim_cls))
                 return ret
-            except ValueError as e:
+            except MissingArgError as e:
                 ex = MissingArgsException()
                 for arg in e.args[1] + e.args[2]:
                     ex.append(self.report_missing(arg.name))
@@ -101,12 +102,50 @@ class SimulationBuilder:
     def report_missing(self, name, methods=None):
         return MissingArgException(name, methods if methods is not None else self.get_suppliers(name))
 
+    def configure_kwarg(self, name, required=True):
+        """配置关键字参数的相关属性
+
+        Parameters
+        ----------
+        name
+            参数名
+        required
+            是否为必要参数
+        """
+        arg = Arg(name)
+        try:
+            if not required:
+                self.args.required_kwargs.remove(arg)
+        finally:
+            self.args.append_arg_spec(name, kwonly=True, required=required)
+
+    def require_kwarg(self, **required: bool):
+        """配置关键字参数是否为必要参数
+
+        Parameters
+        ----------
+        required
+            是否为必要参数
+        """
+        for name, b in required.items():
+            self.configure_kwarg(name, required=b)
+
     def __new__(cls, sim_cls: type):
-        builder_cls = cast(type[SimulationBuilder], SimulationBuilder._registry.get(sim_cls))
-        if builder_cls is None:
-            raise NotImplementedError(f'SimulationBuilder does not support {sim_cls.__name__} for now.')
+        if cls is SimulationBuilder:
+            # 如果用户直接调用具体的builder，则跳过校验
+            builder_cls = cast(type[SimulationBuilder], SimulationBuilder._registry.get(sim_cls))
+            if builder_cls is None:
+                raise NotImplementedError(f'SimulationBuilder does not support {sim_cls.__name__} for now.')
+        else:
+            builder_cls = cls
+
         ret = super(SimulationBuilder, cls).__new__(builder_cls)
         return ret
+
+    @staticmethod
+    @overload
+    def of(sim_cls: 'type[metalpy_magnetics.Simulation3DDipoles]') -> '_magnetics.Simulation3DDipolesBuilder':
+        ...
 
     @staticmethod
     @overload
@@ -351,6 +390,12 @@ def __register_builder(key_cls_path):
         SimulationBuilder._registry.map(key_cls_path, func)
         return func
     return decorator
+
+
+@__register_builder('metalpy.scab.potential_fields.magnetics.simulation.Simulation3DDipoles')
+def _():
+    from .potential_fields.magnetics.simulation import Simulation3DDipolesBuilder
+    return Simulation3DDipolesBuilder
 
 
 @__register_builder('SimPEG.potential_fields.magnetics.simulation.Simulation3DIntegral')

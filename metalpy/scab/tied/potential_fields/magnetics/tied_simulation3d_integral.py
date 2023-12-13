@@ -153,7 +153,7 @@ class TaichiSimulation3DIntegral:
             # According to https://docs.taichi-lang.org/docs/ndarray, or
             # https://github.com/taichi-dev/taichi/blob/8fdf7a7d/docs/lang/articles/basic/ndarray.md?plain=1#L23C35-L23C35
             # ti.ndarray-s are initialized to 0 by default.
-            ret = ti_ndarray(dtype=ti.f64, shape=(n_rows, n_cols))
+            ret = ti_ndarray(shape=(n_rows, n_cols), dtype=ti.f64)
             xn = ti_ndarray_from(self.xn)
             yn = ti_ndarray_from(self.yn)
             zn = ti_ndarray_from(self.zn)

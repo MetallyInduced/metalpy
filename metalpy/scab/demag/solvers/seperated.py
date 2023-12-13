@@ -83,7 +83,7 @@ class SeperatedSolver(DemagnetizationSolver):
             self.receiver_locations,
             self.xn, self.yn, self.zn,
             self.base_cell_sizes, model,
-            *self.Tmat6, np.empty(0),
+            *self.Tmat6, mat=np.empty(0),
             write_to_mat=False, compressed=False
         )
 

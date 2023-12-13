@@ -10,7 +10,7 @@ from ..simulation import LinearSimulationBuilder
 
 
 class BasePFSimulationBuilder(LinearSimulationBuilder):
-    def __init__(self, sim_cls: BasePFSimulation):
+    def __init__(self, sim_cls: type[BasePFSimulation]):
         super().__init__(sim_cls)
 
     @SimulationBuilder._supplies(['ind_active', 'actInd'])

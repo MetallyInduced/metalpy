@@ -1,7 +1,7 @@
 import numpy as np
 
 from metalpy.scab.utils.misc import Field
-from metalpy.utils.taichi import ti_FieldsBuilder
+from metalpy.utils.taichi import ti_ndarray
 from metalpy.utils.type import notify_package
 from .kernel import kernel_matrix_forward
 from .solver import DemagnetizationSolver
@@ -48,22 +48,16 @@ class IntegratedSolver(DemagnetizationSolver):
         nObs = receiver_locations.shape[0]
 
         if is_cpu:
-            self.builder = builder = None
             self.A = np.empty((3 * nObs, 3 * nC), dtype=self.kernel_type)
         else:
-            self.builder = builder = ti_FieldsBuilder()
-            self.A = builder.place_dense((3 * nObs, 3 * nC), self.kernel_type)
-
-        if builder is not None:
-            builder.finalize()
+            self.A = ti_ndarray((3 * nObs, 3 * nC), dtype=self.kernel_type)
 
     def build_kernel(self, model):
-        # TODO: 实现进度条
         kernel_matrix_forward(
             self.receiver_locations,
             self.xn, self.yn, self.zn,
             self.base_cell_sizes, model,
-            *[0] * 6, self.A,
+            *[None] * 6, mat=self.A,
             write_to_mat=True, compressed=False
         )
 

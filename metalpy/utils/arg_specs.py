@@ -275,7 +275,7 @@ class ArgSpecs:
         self._bind_or_get_value_unsafe(name_or_index, value)
 
     def get_bound_arg(self, name_or_index: IndexType, default=undefined, pop=False):
-        name_or_index = self.find_arg_key(name_or_index, default=None, raises=default == undefined)
+        name_or_index = self.find_arg_key(name_or_index, default=None, raises=undefined == default)
         if name_or_index is None:
             return default
         else:
@@ -310,16 +310,18 @@ class ArgSpecs:
 
         if len(missing_posargs) + len(missing_kwargs) > 0:
             missing_str = f'Missing required {" and ".join(missing_tips)}.'
-            raise ValueError(missing_str, missing_posargs, missing_kwargs)
+            raise MissingArgError(missing_str, missing_posargs, missing_kwargs)
 
         for i in range(self.contiguous_posargs_count):
             posargs.append(self.bound_posargs[i])
 
         if self.accepts_varargs and self.n_varargs > 0:
             if not self.is_all_posargs_provided:
-                raise ValueError('Cannot bind varargs when posargs are not all specified.',
-                                 self.posarg_specs[self.contiguous_posargs_count:self.n_posargs],
-                                 [])
+                raise MissingArgError(
+                    'Cannot bind varargs when posargs are not all specified.',
+                    self.posarg_specs[self.contiguous_posargs_count:self.n_posargs],
+                    []
+                )
             else:
                 posargs += self.bound_varargs
 
@@ -423,7 +425,7 @@ class ArgSpecs:
 
     def _bind_arg_by_index_unsafe(self, index, val=undefined):
         if index < self.n_posargs:
-            if val == undefined:
+            if undefined == val:
                 return self.bound_posargs[index]
             else:
                 self.bound_posargs[index] = val
@@ -431,7 +433,7 @@ class ArgSpecs:
             if index - self.n_posargs != self.n_varargs:
                 warnings.warn('Varargs do not support binding uncontiguously by index. The value will be appended.')
 
-            if val == undefined:
+            if undefined == val:
                 return self.bound_varargs[index]
             else:
                 self.bound_varargs.append(val)
@@ -539,3 +541,7 @@ class ArgSpecs:
             args.append(f'{key}={repr(arg)}')
 
         return f'{func}({", ".join(args)})'
+
+
+class MissingArgError(ValueError):
+    pass
