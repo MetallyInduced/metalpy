@@ -583,142 +583,121 @@ def cshift(key, b):
 
 
 def solve_Tx_b_compressed(Tmat321, indices_mat, m, progress: bool = False):
-    with ti_FieldsBuilder() as builder:
-        x = builder.place_dense_like(m[:, None])
-        b = builder.place_dense_like(m[:, None])
+    dtype = to_taichi_type(m.dtype)
 
-        builder.finalize()
+    @ti_func
+    def extract(r, c):
+        ind = indices_mat[r, c]
+        return (
+            Tmat321[0][0][ind], Tmat321[0][1][ind], Tmat321[0][2][ind],
+            Tmat321[1][0][ind], Tmat321[1][1][ind],
+            Tmat321[2][0][ind]
+        )
 
-        copy_from(b, m[:, None])
+    @ti_kernel
+    def linear(x: ti.template(), Ax: ti.template()):
+        n_obs = Ax.shape[0] // 3
+        n_cells = x.shape[0] // 3
 
-        dtype = x.dtype
+        for r in range(n_obs):
+            row = r * 3
 
-        @ti_func
-        def extract(r, c):
-            ind = indices_mat[r, c]
-            return (
-                Tmat321[0][0][ind], Tmat321[0][1][ind], Tmat321[0][2][ind],
-                Tmat321[1][0][ind], Tmat321[1][1][ind],
-                Tmat321[2][0][ind]
-            )
+            bx: dtype = 0
+            by: dtype = 0
+            bz: dtype = 0
 
-        @ti_kernel
-        def linear(x: ti.template(), Ax: ti.template()):
-            n_obs = Ax.shape[0] // 3
-            n_cells = x.shape[0] // 3
+            for c in range(0, n_cells):
+                col = c * 3
 
-            for r in range(n_obs):
-                row = r * 3
+                txx, txy, txz, tyy, tyz, tzz = extract(r, c)
+                mx, my, mz = x[col + 0], x[col + 1], x[col + 2]
 
-                bx: dtype = 0
-                by: dtype = 0
-                bz: dtype = 0
+                bx += txx * mx + txy * my + txz * mz
+                by += txy * mx + tyy * my + tyz * mz
+                bz += txz * mx + tyz * my + tzz * mz
 
-                for c in range(0, n_cells):
-                    col = c * 3
+            Ax[row + 0] = bx
+            Ax[row + 1] = by
+            Ax[row + 2] = bz
 
-                    txx, txy, txz, tyy, tyz, tzz = extract(r, c)
-                    mx, my, mz = x[col + 0, 0], x[col + 1, 0], x[col + 2, 0]
-
-                    bx += txx * mx + txy * my + txz * mz
-                    by += txy * mx + tyy * my + tyz * mz
-                    bz += txz * mx + tyz * my + tzz * mz
-
-                Ax[row + 0, 0] = bx
-                Ax[row + 1, 0] = by
-                Ax[row + 2, 0] = bz
-
-        matrix_free.cg(ti.linalg.LinearOperator(linear), b, x, progress=progress)
-
-        return x.to_numpy()
+    return matrix_free.cg(ti.linalg.LinearOperator(linear), m, progress=progress).to_numpy()
 
 
 def solve_Tx_b_compressed_symmetric(Tmat321, indices_mat, m, progress: bool = False):
-    with ti_FieldsBuilder() as builder:
-        x = builder.place_dense_like(m[:, None])
-        b = builder.place_dense_like(m[:, None])
+    dtype = to_taichi_type(m.dtype)
+    n_cells = m.shape[0] // 3
 
-        builder.finalize()
+    @ti_func
+    def extract_by_index(i):
+        ind = indices_mat[i]
+        return (
+            Tmat321[0][0][ind], Tmat321[0][1][ind], Tmat321[0][2][ind],
+            Tmat321[1][0][ind], Tmat321[1][1][ind],
+            Tmat321[2][0][ind]
+        )
 
-        copy_from(b, m[:, None])
+    @ti_func
+    def extract(r, c):
+        i = index_mat2triu(r, c, n_cells)
+        return extract_by_index(i)
 
-        dtype = x.dtype
+    @ti_func
+    def extract_diag():
+        return extract_by_index(0)
 
+    @ti_kernel
+    def linear(x: ti.template(), Ax: ti.template()):
+        n_obs = Ax.shape[0] // 3
         n_cells = x.shape[0] // 3
 
-        @ti_func
-        def extract_by_index(i):
-            ind = indices_mat[i]
-            return (
-                Tmat321[0][0][ind], Tmat321[0][1][ind], Tmat321[0][2][ind],
-                Tmat321[1][0][ind], Tmat321[1][1][ind],
-                Tmat321[2][0][ind]
-            )
+        # 对角线和上三角部分
+        txx_, txy_, txz_, tyy_, tyz_, tzz_ = extract_diag()
+        for r in range(n_obs):
+            row = r * 3
 
-        @ti_func
-        def extract(r, c):
-            i = index_mat2triu(r, c, n_cells)
-            return extract_by_index(i)
+            mx_, my_, mz_ = x[row + 0], x[row + 1], x[row + 2]
 
-        @ti_func
-        def extract_diag():
-            return extract_by_index(0)
+            bx_u: dtype = txx_ * mx_ + txy_ * my_ + txz_ * mz_
+            by_u: dtype = txy_ * mx_ + tyy_ * my_ + tyz_ * mz_
+            bz_u: dtype = txz_ * mx_ + tyz_ * my_ + tzz_ * mz_
 
-        @ti_kernel
-        def linear(x: ti.template(), Ax: ti.template()):
-            n_obs = Ax.shape[0] // 3
-            n_cells = x.shape[0] // 3
-
-            # 对角线和上三角部分
-            txx_, txy_, txz_, tyy_, tyz_, tzz_ = extract_diag()
-            for r in range(n_obs):
-                row = r * 3
-
-                mx_, my_, mz_ = x[row + 0, 0], x[row + 1, 0], x[row + 2, 0]
-
-                bx_u: dtype = txx_ * mx_ + txy_ * my_ + txz_ * mz_
-                by_u: dtype = txy_ * mx_ + tyy_ * my_ + tyz_ * mz_
-                bz_u: dtype = txz_ * mx_ + tyz_ * my_ + tzz_ * mz_
-
-                for c in range(r + 1, n_cells):
-                    col = c * 3
-
-                    txx, txy, txz, tyy, tyz, tzz = extract(r, c)
-                    mx, my, mz = x[col + 0, 0], x[col + 1, 0], x[col + 2, 0]
-
-                    bx_u += txx * mx + txy * my + txz * mz
-                    by_u += txy * mx + tyy * my + tyz * mz
-                    bz_u += txz * mx + tyz * my + tzz * mz
-
-                Ax[row + 0, 0] = bx_u
-                Ax[row + 1, 0] = by_u
-                Ax[row + 2, 0] = bz_u
-
-            # 下三角部分
-            for c in range(1, n_cells):
+            for c in range(r + 1, n_cells):
                 col = c * 3
 
-                bx_l: dtype = 0
-                by_l: dtype = 0
-                bz_l: dtype = 0
+                txx, txy, txz, tyy, tyz, tzz = extract(r, c)
+                mx, my, mz = x[col + 0], x[col + 1], x[col + 2]
 
-                for r in range(c):
-                    row = r * 3
+                bx_u += txx * mx + txy * my + txz * mz
+                by_u += txy * mx + tyy * my + tyz * mz
+                bz_u += txz * mx + tyz * my + tzz * mz
 
-                    txx, txy, txz, tyy, tyz, tzz = extract(r, c)
-                    mx, my, mz = x[row + 0, 0], x[row + 1, 0], x[row + 2, 0]
+            Ax[row + 0] = bx_u
+            Ax[row + 1] = by_u
+            Ax[row + 2] = bz_u
 
-                    bx_l += txx * mx + txy * my + txz * mz
-                    by_l += txy * mx + tyy * my + tyz * mz
-                    bz_l += txz * mx + tyz * my + tzz * mz
+        # 下三角部分
+        for c in range(1, n_cells):
+            col = c * 3
 
-                Ax[col + 0, 0] += bx_l
-                Ax[col + 1, 0] += by_l
-                Ax[col + 2, 0] += bz_l
+            bx_l: dtype = 0
+            by_l: dtype = 0
+            bz_l: dtype = 0
 
-        matrix_free.cg(ti.linalg.LinearOperator(linear), b, x, progress=progress)
+            for r in range(c):
+                row = r * 3
 
-        return x.to_numpy()
+                txx, txy, txz, tyy, tyz, tzz = extract(r, c)
+                mx, my, mz = x[row + 0], x[row + 1], x[row + 2]
+
+                bx_l += txx * mx + txy * my + txz * mz
+                by_l += txy * mx + tyy * my + tyz * mz
+                bz_l += txz * mx + tyz * my + tzz * mz
+
+            Ax[col + 0] += bx_l
+            Ax[col + 1] += by_l
+            Ax[col + 2] += bz_l
+
+    return matrix_free.cg(ti.linalg.LinearOperator(linear), m, progress=progress).to_numpy()
 
 
 @ti_kernel

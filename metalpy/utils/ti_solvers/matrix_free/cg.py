@@ -1,20 +1,21 @@
 from math import sqrt
 
 import taichi as ti
-from taichi import TaichiTypeError, TaichiRuntimeError
+from taichi.lang.util import to_taichi_type
 
-from ..solver_progress import SolverProgress
+from metalpy.utils.taichi import copy_from
+from metalpy.utils.ti_solvers.solver_progress import SolverProgress
 
 
 def cg(
         A: ti.linalg.LinearOperator,
         b,
-        x,
+        x0=None,
         tol=1e-6,
         maxiter=5000,
         progress=False
 ):
-    """基于线性算符的线性求解器
+    """基于线性算符的共轭梯度法求解器
 
     基于ti.linalg.taichi_cg_solver修改而来，实现进度条，并处理精度丢失警告信息
 
@@ -24,8 +25,8 @@ def cg(
         线性算符，通过LinearOperator包装
     b
         常数项
-    x
-        未知量，同时用于存储求解结果
+    x0
+        初始解，默认为None，自动初始化为0
     tol
         收敛容差
     maxiter
@@ -33,29 +34,29 @@ def cg(
     progress
         是否启用进度条
 
+    Returns
+    -------
+    x
+        求解结果，以 `ti.field` 形式返回，调用方可以根据需要转换为numpy、torch或其它数组形式
+
     Notes
     -----
     注意到正常收敛情形下， `残差的对数` 与 `迭代代数` 呈线性关系，可以作为进度条依据。
 
     如果残差出现波动无法正常减少，则改为基于迭代次数的进度条，以 `maxiter` 为总代数。
     """
-    if b.dtype != x.dtype:
-        raise TaichiTypeError(f"Dtype mismatch b.dtype({b.dtype}) != x.dtype({x.dtype}).")
-    if str(b.dtype) == "f32":
-        solver_dtype = ti.f32
-    elif str(b.dtype) == "f64":
-        solver_dtype = ti.f64
-    else:
-        raise TaichiTypeError(f"Not supported dtype: {b.dtype}")
-    if b.shape != x.shape:
-        raise TaichiRuntimeError(f"Dimension mismatch b.shape{b.shape} != x.shape{x.shape}.")
-
+    solver_dtype = to_taichi_type(b.dtype)
     size = b.shape
+
+    x = ti.field(dtype=solver_dtype, shape=size)
+
     vector_fields_builder = ti.FieldsBuilder()
+    b, _b = ti.field(dtype=solver_dtype), b
     p = ti.field(dtype=solver_dtype)
     r = ti.field(dtype=solver_dtype)
     Ap = ti.field(dtype=solver_dtype)
-    vector_fields_builder.dense(ti.ij, size).place(p, r, Ap)
+    vector_fields_builder.dense(ti.i, size).place(b)
+    vector_fields_builder.dense(ti.i, size).place(p, r, Ap)
     vector_fields_snode_tree = vector_fields_builder.finalize()
 
     scalar_builder = ti.FieldsBuilder()
@@ -64,12 +65,23 @@ def cg(
     scalar_builder.place(alpha, beta)
     scalar_snode_tree = scalar_builder.finalize()
 
+    copy_from(b, _b)
+    has_initial = x0 is not None
+
     @ti.kernel
+    def _init():
+        if ti.static(has_initial):
+            for I in ti.grouped(x):
+                p[I] = r[I] = b[I] - Ap[I]
+        else:
+            for I in ti.grouped(x):
+                p[I] = r[I] = b[I]
+
     def init():
-        for I in ti.grouped(x):
-            r[I] = b[I]
-            p[I] = 0.0
-            Ap[I] = 0.0
+        if has_initial:
+            copy_from(x, x0)
+            A._matvec(x, Ap)  # compute Ap = A x p
+        _init()
 
     @ti.kernel
     def reduce(p: ti.template(), q: ti.template()) -> solver_dtype:
@@ -109,7 +121,7 @@ def cg(
             progress_bar = None
 
         old_rTr = initial_rTr
-        update_p()
+
         # -- Main loop --
         for i in range(maxiter):
             A._matvec(p, Ap)  # compute Ap = A x p
@@ -134,5 +146,8 @@ def cg(
             progress_bar.close()
 
     solve()
+
     vector_fields_snode_tree.destroy()
     scalar_snode_tree.destroy()
+
+    return x

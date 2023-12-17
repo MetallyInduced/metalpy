@@ -1,6 +1,7 @@
 import numpy as np
 import psutil
 import taichi as ti
+from taichi.lang.util import to_taichi_type
 
 from metalpy.scab.utils.misc import Field
 from metalpy.utils.ti_solvers import matrix_free
@@ -94,53 +95,43 @@ class SeperatedSolver(DemagnetizationSolver):
 
 
 def solve_Tx_b(Tmat321, m, progress: bool = False):
-    with ti_FieldsBuilder() as builder:
-        x = builder.place_dense_like(m[:, None])
-        b = builder.place_dense_like(m[:, None])
+    dtype = to_taichi_type(m.dtype)
 
-        builder.finalize()
+    @ti_func
+    def extract(r, c):
+        return (
+            Tmat321[0][0][r, c], Tmat321[0][1][r, c], Tmat321[0][2][r, c],
+            Tmat321[1][0][r, c], Tmat321[1][1][r, c],
+            Tmat321[2][0][r, c]
+        )
 
-        copy_from(b, m[:, None])
+    @ti_kernel
+    def linear(x: ti.template(), Ax: ti.template()):
+        n_obs = Ax.shape[0] // 3
+        n_cells = x.shape[0] // 3
 
-        dtype = x.dtype
+        for r in range(n_obs):
+            row = r * 3
 
-        @ti_func
-        def extract(r, c):
-            return (
-                Tmat321[0][0][r, c], Tmat321[0][1][r, c], Tmat321[0][2][r, c],
-                Tmat321[1][0][r, c], Tmat321[1][1][r, c],
-                Tmat321[2][0][r, c]
-            )
+            bx: dtype = 0
+            by: dtype = 0
+            bz: dtype = 0
 
-        @ti_kernel
-        def linear(x: ti.template(), Ax: ti.template()):
-            n_obs = Ax.shape[0] // 3
-            n_cells = x.shape[0] // 3
+            for c in range(0, n_cells):
+                col = c * 3
 
-            for r in range(n_obs):
-                row = r * 3
+                txx, txy, txz, tyy, tyz, tzz = extract(r, c)
+                mx, my, mz = x[col + 0], x[col + 1], x[col + 2]
 
-                bx: dtype = 0
-                by: dtype = 0
-                bz: dtype = 0
+                bx += txx * mx + txy * my + txz * mz
+                by += txy * mx + tyy * my + tyz * mz
+                bz += txz * mx + tyz * my + tzz * mz
 
-                for c in range(0, n_cells):
-                    col = c * 3
+            Ax[row + 0] = bx
+            Ax[row + 1] = by
+            Ax[row + 2] = bz
 
-                    txx, txy, txz, tyy, tyz, tzz = extract(r, c)
-                    mx, my, mz = x[col + 0, 0], x[col + 1, 0], x[col + 2, 0]
-
-                    bx += txx * mx + txy * my + txz * mz
-                    by += txy * mx + tyy * my + tyz * mz
-                    bz += txz * mx + tyz * my + tzz * mz
-
-                Ax[row + 0, 0] = bx
-                Ax[row + 1, 0] = by
-                Ax[row + 2, 0] = bz
-
-        matrix_free.cg(ti.linalg.LinearOperator(linear), b, x, progress=progress)
-
-        return x.to_numpy()
+    return matrix_free.cg(ti.linalg.LinearOperator(linear), m, progress=progress).to_numpy()
 
 
 def merge_Tmat_as_A(Tmat33, direct_to_host=True):
@@ -162,32 +153,3 @@ def tensor_to_ext_arr(tensor: ti.template(), arr: ti.types.ndarray(),
                       y0: ti.template(), ystride: ti.template()):
     for I in ti.grouped(tensor):
         arr[I[0] * xstride + x0, I[1] * ystride + y0] = tensor[I]
-
-
-@ti_func
-def multiply_with_row_stride_3(
-        out: ti.template(),
-        A: ti.template(),
-        B: ti.template(),
-        C: ti.template(),
-        v: ti.template(),
-        row0: ti.template(), row_stride: ti.template()
-):
-    for r in range(A.shape[0]):
-        row = r * row_stride + row0
-
-        summed = (
-                A[r, 0] * v[0, 0]
-                + B[r, 0] * v[1, 0]
-                + C[r, 0] * v[2, 0]
-        )
-
-        for c in range(1, A.shape[1]):
-            col = c * 3
-            summed += (
-                    A[r, c] * v[col + 0, 0]
-                    + B[r, c] * v[col + 1, 0]
-                    + C[r, c] * v[col + 2, 0]
-            )
-
-        out[row, 0] = summed
