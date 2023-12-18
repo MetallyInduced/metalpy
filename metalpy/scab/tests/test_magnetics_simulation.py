@@ -18,16 +18,16 @@ def create_forward_settings():
     scene = Scene.of(
         Ellipsoid.spheroid(10, 30, 0),
     )
-    model_mesh = scene.build(cell_size=1, cache=True)
+    model_mesh = scene.build(cell_size=7, cache=True)
     bounds = scene.bounds
 
     # observation
     obs = get_grids_ex(
         origin=[bounds.xmin, bounds.ymin, 50],
         end=[bounds.xmax, bounds.ymax, 50],
-        n=[10 + 1, 10 + 1, 1]
+        n=[7 + 1, 7 + 1, 1]
     ).pts
-    components = ['tmi']
+    components = ['tmi', 'bx', 'by', 'bz', 'bxx', 'bxy', 'bxz', 'byy', 'byz']
 
     return model_mesh, obs, components
 

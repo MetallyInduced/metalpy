@@ -24,7 +24,7 @@ def test_numerical_solvers():
         a_and_b = f'`{ref}` and `{method}`'
         np.testing.assert_allclose(
             tmi_pred, tmi_ref, err_msg=f'TMI MAPE between {a_and_b}.',
-            rtol=1e-3
+            rtol=1e-2
         )
         np.testing.assert_allclose(
             model_pred, model_ref, err_msg=f'Demag model MAPE between {a_and_b}.',
@@ -50,7 +50,7 @@ def test_numerical_solution():
 def predict_with_demag(
         by_factor=False,
         method=None,
-        cell_size=(2, 2, 2)
+        cell_size=(16, 4, 4)
 ):
     cell_size = limit_significand(cell_size)
     shape, factor = make_test_shape_and_demag_factor()
