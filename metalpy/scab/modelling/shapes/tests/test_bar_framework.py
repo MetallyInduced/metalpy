@@ -18,8 +18,8 @@ def _test_bar_framework(inherit_transform):
 
 
 def test_bar_framework():
-    _test_bar_framework(True)
+    _test_bar_framework(False)
 
 
 def test_bar_framework_inherit_transform():
-    _test_bar_framework(False)
+    _test_bar_framework(True)

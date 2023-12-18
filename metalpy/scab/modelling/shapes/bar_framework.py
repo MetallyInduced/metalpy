@@ -82,7 +82,7 @@ class BarFramework(Composition):
             bounds = Bounds.copy(bounds)
             if inherit_transform:
                 # 通过 `Cuboid` 做坐标转换
-                bounds = Cuboid(bounds=bounds).apply(outline.transforms, inplace=True).bounds
+                bounds = Cuboid(bounds=bounds).apply_transform(outline.transforms, inplace=True).bounds
 
             self.outline_bounds = bounds
 

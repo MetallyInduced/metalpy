@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from abc import ABC, abstractmethod
 from functools import reduce
 from typing import Iterable, TYPE_CHECKING
@@ -7,10 +8,9 @@ from typing import Iterable, TYPE_CHECKING
 import numpy as np
 import tqdm
 
-from metalpy.utils.dhash import dhash
 from metalpy.utils.bounds import Bounds, union
-from metalpy.utils.type import Self
-from ..transform import CompositeTransform, Transform, Translation, Rotation
+from metalpy.utils.dhash import dhash
+from ..transform import Transformable
 from ..utils.mesh import is_inside_bounds
 
 if TYPE_CHECKING:
@@ -19,9 +19,9 @@ if TYPE_CHECKING:
     import pyvista as pv
 
 
-class Shape3D(ABC):
+class Shape3D(Transformable, ABC):
     def __init__(self):
-        self.transforms = CompositeTransform()
+        super().__init__()
 
     @property
     def prune_mesh(self):
@@ -51,14 +51,14 @@ class Shape3D(ABC):
         """
         progress = self._check_progress(progress)
 
-        mesh_cell_centers = self.before_place(mesh_cell_centers, progress)
+        transformed_mesh_cell_centers = self.before_place(mesh_cell_centers, progress)
 
         indices = None
         if self.prune_mesh:
-            indices = is_inside_bounds(mesh_cell_centers, self.local_bounds)
-            mesh_cell_centers = mesh_cell_centers[indices]
+            indices = is_inside_bounds(transformed_mesh_cell_centers, self.local_bounds)
+            transformed_mesh_cell_centers = transformed_mesh_cell_centers[indices]
 
-        ind = self.do_place(mesh_cell_centers, progress)
+        ind = self.do_place(transformed_mesh_cell_centers, progress=progress)
 
         if indices is not None:
             indices[indices] = ind
@@ -68,6 +68,40 @@ class Shape3D(ABC):
         return indices
 
     def compute_implicit_distance(self, mesh_cell_centers, progress=False):
+        """计算模型体到空间中任一点的隐式距离，且小于0代表在模型内
+
+        Parameters
+        ----------
+        mesh_cell_centers
+            3维网格中心点坐标
+        progress
+            进度条实例或None，当子类的n_task属性不为1时，需自行更新进度条
+
+        Returns
+        -------
+        ret
+            浮点数组，指示空间中任意一点到模型体表面的隐式距离，且小于0代表在模型内
+        """
+        return self.compute_signed_distance(mesh_cell_centers, progress=progress)
+
+    def compute_unsigned_distance(self, mesh_cell_centers, progress=False):
+        """计算模型体到空间中任一点的无向距离
+
+        Parameters
+        ----------
+        mesh_cell_centers
+            3维网格中心点坐标
+        progress
+            进度条实例或None，当子类的n_task属性不为1时，需自行更新进度条
+
+        Returns
+        -------
+        ret
+            浮点数组，指示空间中任意一点到模型体表面的无向距离
+        """
+        return self.compute_distance(mesh_cell_centers, signed=False, progress=progress)
+
+    def compute_signed_distance(self, mesh_cell_centers, progress=False):
         """计算模型体到空间中任一点的有向距离，且小于0代表在模型内
 
         Parameters
@@ -81,20 +115,48 @@ class Shape3D(ABC):
         -------
         ret
             浮点数组，指示空间中任意一点到模型体表面的有向距离，且小于0代表在模型内
+        """
+        return self.compute_distance(mesh_cell_centers, signed=True, progress=progress)
+
+    def compute_distance(self, mesh_cell_centers, signed=True, progress=False):
+        """计算模型体到空间中任一点的距离
+
+        Parameters
+        ----------
+        mesh_cell_centers
+            3维网格中心点坐标
+        signed
+            指示是否计算有向距离（Shape内为负数）
+        progress
+            进度条实例或None，当子类的n_task属性不为1时，需自行更新进度条
+
+        Returns
+        -------
+        ret
+            浮点数组，指示空间中任意一点到模型体表面的无向距离 / 有向距离
 
         Notes
         -----
-        内部同时负责对坐标点进行变换，保证`do_compute_implicit_distance`内部只需要按局部坐标系计算
+        内部同时负责对坐标点进行变换，保证`do_compute_unsigned_distance`内部只需要按局部坐标系计算
         """
         progress = self._check_progress(progress)
 
-        mesh_cell_centers = self.before_place(mesh_cell_centers, progress)
-        return self.do_compute_implicit_distance(mesh_cell_centers, progress)
+        transformed_mesh_cell_centers = self.before_place(mesh_cell_centers, progress)
+        if signed:
+            return self.do_compute_signed_distance(transformed_mesh_cell_centers, progress=progress)
+        else:
+            return self.do_compute_unsigned_distance(transformed_mesh_cell_centers, progress=progress)
 
     def before_place(self, mesh_cell_centers, progress):
-        return self.transforms.inverse_transform(mesh_cell_centers)
+        if isinstance(mesh_cell_centers, TransformedArray) and mesh_cell_centers.verify(self):
+            return mesh_cell_centers
 
-    def do_place(self, mesh_cell_centers, progress):
+        ret = self.transforms.inverse_transform(mesh_cell_centers)
+        ret = TransformedArray(ret, self)
+
+        return ret
+
+    def do_place(self, mesh_cell_centers: TransformedArray, progress):
         """计算模型体所占用的网格的实现函数，所有Shape3D的子类应当重写该函数
 
         默认实现依赖to_local_polydata()，基于PyVista的select_enclosed_points，存在性能问题
@@ -116,25 +178,19 @@ class Shape3D(ABC):
         -----
         在Scene.build_mesh_worker中假定了0代表非活动网格，不参与模型间重叠部分的计算，请避免将0作为一个有意义的值输出
 
-        外部`place`通过`before_place`对坐标点进行了逆变换，只需要按局部坐标系计算即可
+        外部 `place` 通过 `before_place` 对坐标点进行了逆变换，只需要按局部坐标系计算即可
+
+        `mesh_cell_centers` 参数隐含原始坐标信息，可以直接用于调用 `self.place` 或 `self.compute_distance`
         """
-        import pyvista as pv
-
-        mesh = pv.PolyData(mesh_cell_centers).cast_to_unstructured_grid()
-        surface = self.to_local_polydata().extract_surface()
-
-        selection = mesh.select_enclosed_points(surface, tolerance=0.0, check_surface=True)
+        ret = self._do_place_pyvista(mesh_cell_centers)
 
         if progress and self.progress_manually:
             progress.update(self.n_tasks)
 
-        return selection['SelectedPoints'].view(bool, np.ndarray)
+        return ret
 
-    def do_compute_implicit_distance(self, mesh_cell_centers, progress):
+    def do_compute_signed_distance(self, mesh_cell_centers: TransformedArray, progress):
         """计算模型体到空间中任一点的有向距离的具体实现
-
-        默认实现依赖to_local_polydata()，基于PyVista的compute_implicit_distance，
-        需要进一步优化可以重载此函数
 
         Parameters
         ----------
@@ -150,26 +206,58 @@ class Shape3D(ABC):
 
         Notes
         -----
-        外部`compute_implicit_distance`通过`before_place`对坐标点进行了逆变换，只需要按局部坐标系计算即可
+        外部 `compute_distance` 通过 `before_place` 对坐标点进行了逆变换，只需要按局部坐标系计算即可
+
+        `mesh_cell_centers` 参数隐含原始坐标信息，可以直接用于调用 `self.place` 或 `self.compute_distance`
         """
-        import pyvista as pv
-
-        poly = pv.PolyData(mesh_cell_centers)
-        surface = self.to_local_polydata().extract_surface()
-
-        poly = poly.compute_implicit_distance(surface, inplace=True)
+        ret = self.compute_unsigned_distance(mesh_cell_centers, progress=False)
+        ret[self.place(mesh_cell_centers, progress=False)] *= -1
 
         if progress and self.progress_manually:
             progress.update(self.n_tasks)
 
-        return poly['implicit_distance'].view(np.ndarray)
+        return ret
+
+    def do_compute_unsigned_distance(self, mesh_cell_centers: TransformedArray, progress):
+        """计算模型体到空间中任一点的无向距离的具体实现
+
+        默认实现依赖to_local_polydata()，基于PyVista的compute_implicit_distance，结果的方向可能出错，因此只用于计算无向距离，
+        需要进一步优化可以重载此函数
+
+        Parameters
+        ----------
+        mesh_cell_centers
+            3维网格中心点坐标
+        progress
+            进度条实例或None，当子类的n_task属性不为1时，需自行更新进度条
+
+        Returns
+        -------
+        ret
+            浮点数组，指示空间中任意一点到模型体表面的无向距离，且小于0代表在模型内
+
+        Notes
+        -----
+        外部 `compute_distance` 通过 `before_place` 对坐标点进行了逆变换，只需要按局部坐标系计算即可
+
+        `mesh_cell_centers` 参数隐含原始坐标信息，可以直接用于调用 `self.place` 或 `self.compute_distance`
+        """
+        if not self.has_implemented_do_compute_signed_distance:
+            ret = self._do_compute_unsigned_distance_pyvista(mesh_cell_centers)
+        else:
+            ret = abs(self.compute_signed_distance(mesh_cell_centers, progress=False))
+
+        if progress and self.progress_manually:
+            progress.update(self.n_tasks)
+
+        return ret
 
     def __hash__(self):
         return dhash(self).digest()
 
     @abstractmethod
     def __dhash__(self):
-        return dhash(self.transforms)
+        return super().__dhash__()
 
     def clone(self, deep=True):
         ret = self.do_clone(deep=deep)
@@ -355,7 +443,7 @@ class Shape3D(ABC):
         ret : array(6)
             Shape在局部坐标系下的长方体包围盒[x0, x1, y0, y1, z0, z1]
         """
-        if type(self).local_oriented_bounds is Shape3D.local_oriented_bounds:
+        if not self.has_implemented_local_oriented_bounds:
             return Bounds(self.to_local_polydata().bounds)
         else:
             bounds = self.local_oriented_bounds
@@ -393,105 +481,6 @@ class Shape3D(ABC):
         x, y, z = np.meshgrid(xrng, yrng, zrng, indexing='ij')
         return np.c_[x.ravel(), y.ravel(), z.ravel()]
 
-    def apply(self, trans: Transform, inplace=False) -> Self:
-        """逻辑上对空间体位置进行变换，目前通过对网格点进行逆变换实现
-
-        Parameters
-        ----------
-        trans
-            待应用的变换
-        inplace
-            指示操作是否应用在当前实例上
-
-        Returns
-        -------
-        ret
-            当inplace为True，返回当前实例，否则返回一个变换后的新对象
-        """
-        if inplace:
-            ret = self
-        else:
-            ret = self.clone()
-
-        ret.transforms.add(trans)
-        return ret
-
-    def translate(self, x, y, z, inplace=False) -> Self:
-        """对Shape进行平移
-
-        Parameters
-        ----------
-        x, y, z
-            三个方向的位移量
-        inplace
-            指示操作是否应用在当前实例上
-
-        Returns
-        -------
-        ret
-            当inplace为True，返回当前实例，否则返回一个平移后的新对象
-        """
-        return self.apply(Translation(x, y, z), inplace=inplace)
-
-    def rotate(self, y, a, b, degrees=False, seq='xyz', inplace=False) -> Self:
-        """对Shape进行旋转，方向遵循右手准则
-
-        Parameters
-        ----------
-        seq
-            旋转顺序
-        y, a, b
-            对应于seq的旋转量
-        degrees
-            指示y，a，b是否为角度制
-        inplace
-            指示操作是否应用在当前实例上
-
-        Returns
-        -------
-        ret
-            当inplace为True，返回当前实例，否则返回一个旋转后的新对象
-        """
-        return self.apply(Rotation(y, a, b, degrees=degrees, seq=seq), inplace=inplace)
-
-    def translated(self, x, y, z, inplace=True) -> Self:
-        """对Shape进行平移
-
-        Parameters
-        ----------
-        x, y, z
-            三个方向的位移量
-        inplace
-            指示操作是否应用在当前实例上
-
-        Returns
-        -------
-        ret
-            默认应用与当前对象，并返回当前对象
-        """
-        return self.translate(x, y, z, inplace=inplace)
-
-    def rotated(self, y, a, b, degrees=False, seq='xyz', inplace=True) -> Self:
-        """对Shape进行旋转，方向遵循右手准则
-
-        Parameters
-        ----------
-        seq
-            旋转顺序
-        y, a, b
-            对应于seq的旋转量
-        degrees
-            指示y，a，b是否为角度制
-        inplace
-            指示操作是否应用在当前实例上
-
-        Returns
-        -------
-        ret
-            默认应用与当前对象，并返回当前对象
-        """
-        return self.rotate(y, a, b, degrees=degrees, seq=seq, inplace=inplace)
-
     @property
     def volume(self):
         """获取该几何体的体积
@@ -523,6 +512,21 @@ class Shape3D(ABC):
         """
         return self.n_tasks != 1
 
+    def has_implemented(self, func):
+        if isinstance(func, property):
+            return getattr(type(self), func.__name__, None) is not func
+        else:
+            method = getattr(self, func.__name__, None)
+            return getattr(method, '__func__', func) is not func
+
+    @property
+    def has_implemented_local_oriented_bounds(self):
+        return self.has_implemented(Shape3D.local_oriented_bounds)
+
+    @property
+    def has_implemented_do_compute_signed_distance(self):
+        return self.has_implemented(Shape3D.do_compute_signed_distance)
+
     def _check_progress(self, progress):
         if progress is True and self.progress_manually:
             return tqdm.tqdm(total=self.n_tasks)
@@ -531,6 +535,78 @@ class Shape3D(ABC):
         else:
             return None
 
+    def _do_place_pyvista(self, mesh_cell_centers: TransformedArray):
+        """place函数默认实现
+        """
+        import pyvista as pv
+
+        mesh = pv.PolyData(mesh_cell_centers).cast_to_unstructured_grid()
+        surface = self.to_local_polydata().extract_surface()
+
+        selection = mesh.select_enclosed_points(surface, tolerance=0.0, check_surface=True)
+
+        return selection['SelectedPoints'].view(bool, np.ndarray)
+
+    def _do_compute_unsigned_distance_pyvista(self, mesh_cell_centers: TransformedArray):
+        """无向距离默认实现
+        """
+        import pyvista as pv
+
+        poly = pv.PolyData(mesh_cell_centers)
+        surface = self.to_local_polydata().extract_surface()
+
+        poly = poly.compute_implicit_distance(surface, inplace=True)
+
+        return abs(poly['implicit_distance'].view(np.ndarray))
+
+    def _do_compute_signed_distance_pyvista(self, mesh_cell_centers: TransformedArray):
+        """有向距离默认实现（仅测试用）
+        """
+        ret = self._do_compute_unsigned_distance_pyvista(mesh_cell_centers)
+        ret[self.place(mesh_cell_centers, progress=False)] *= -1
+
+        return ret
+
+    def __copy__(self):
+        return self.clone(deep=False)
+
+    def __deepcopy__(self, memo):
+        return self.clone(deep=True)
+
 
 def bounding_box_of(shapes: Iterable[Shape3D]):
     return reduce(union, (shape.bounds for shape in shapes))
+
+
+class TransformedArray(np.ndarray):
+    """转换后的坐标点信息，附带转换前的坐标点为元信息
+
+    仅限于在 `Shape3D.do_xxx` 系列函数中用于调用 `place` 、 `compute_distance` 等函数，
+    规避多余的坐标转换。
+    """
+    def __new__(cls, arr, shape: Shape3D):
+        ret = np.asarray(arr).view(TransformedArray)
+
+        ret.parent = arr
+        ret.transformer = shape
+        ret.transform_hash = dhash(shape.transforms).digest()
+
+        return ret
+
+    def __array_finalize__(self, obj, **_):
+        self.parent = getattr(obj, 'parent', None)
+        self.transformer = getattr(obj, 'transformer', None)
+        self.transform_hash = getattr(obj, 'transform_hash', None)
+
+    def verify(self, shape):
+        """验证 `shape` 是否为变换的执行者，且变换未被修改
+        """
+        if self.transformer is shape:
+            if dhash(shape.transforms).digest() == self.transform_hash:
+                return True
+            else:
+                warnings.warn(
+                    "`TransformedArray` is passed with its transformer having modified its transforms,"
+                    " which may lead to unexpected result."
+                )
+        return False

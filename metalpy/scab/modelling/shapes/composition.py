@@ -48,7 +48,7 @@ class Composition(Shape3D):
 
         return ret
 
-    def do_compute_implicit_distance(self, mesh_cell_centers, progress):
+    def do_compute_signed_distance(self, mesh_cell_centers, progress):
         if self.mix_mode == Composition.Intersects:
             mixer = MixMode.max
         else:
@@ -56,7 +56,7 @@ class Composition(Shape3D):
 
         ret = None
         for shape in self.shapes:
-            distances = shape.compute_implicit_distance(mesh_cell_centers, progress)
+            distances = shape.compute_signed_distance(mesh_cell_centers, progress)
             if ret is None:
                 ret = distances
             else:

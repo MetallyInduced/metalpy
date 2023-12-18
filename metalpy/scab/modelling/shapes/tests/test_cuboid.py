@@ -40,10 +40,10 @@ def test_cuboid_implicit_distance():
     shape = Cuboid(corner=[0, 0, 0], corner2=[1, 1, 1])
     mesh = shape.to_scene().create_mesh(cell_size=0.25, bounds=shape.bounds.expand(increment=1))
 
-    dist_true = Shape3D.do_compute_implicit_distance(shape, mesh.cell_centers, progress=False)
+    dist_true = shape._do_compute_signed_distance_pyvista(mesh.cell_centers)
 
-    dist_ti = shape._compute_implicit_distance_taichi(mesh.cell_centers)
+    dist_ti = shape._do_compute_signed_distance_taichi(mesh.cell_centers)
     np.testing.assert_allclose(dist_ti, dist_true, err_msg='`taichi` version failed.')
 
-    dist_np = shape._compute_implicit_distance_numpy(mesh.cell_centers)
+    dist_np = shape._do_compute_signed_distance_numpy(mesh.cell_centers)
     np.testing.assert_allclose(dist_np, dist_true, err_msg='`numpy` version failed.')

@@ -10,7 +10,7 @@ def main():
     scene = Scene.of(
         BarFramework(Cuboid([1, 1, 1], size=2), 0.2, n_rooms=2),
         Prism([[0, 0], [-2, 0], [-2, 1], [-1, 1]], 1, 3),
-        Prism([[0, 0], [-2, 0], [-2, 1], [-1, 1]], 1, 3).rotated(90, 0, 0, degrees=True),
+        Prism([[0, 0], [-2, 0], [-2, 1], [-1, 1]], 1, 3).rotated(90, 0, 0),
         Ellipsoid.spheroid(1, 3, 0).translated(0, -2, 2),
         Tunnel([-3, 2, 2], 0.5, 1, 3),
         Obj2('./stl_models/mine.stl', scale=0.03, surface_thickness=0.4, subdivide=True).translated(1, -2, -1),

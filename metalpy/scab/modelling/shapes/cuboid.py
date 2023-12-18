@@ -97,11 +97,11 @@ class Cuboid(Shape3D):
     def do_place(self, mesh_cell_centers, progress):
         return np.full(len(mesh_cell_centers), True)
 
-    def do_compute_implicit_distance(self, mesh_cell_centers, progress):
+    def do_compute_signed_distance(self, mesh_cell_centers, progress):
         if is_serial():
-            return self._compute_implicit_distance_taichi(mesh_cell_centers)
+            return self._do_compute_signed_distance_taichi(mesh_cell_centers)
         else:
-            return self._compute_implicit_distance_numpy(mesh_cell_centers)
+            return self._do_compute_signed_distance_numpy(mesh_cell_centers)
 
     @property
     def x0(self): return self.origin[0]
@@ -199,13 +199,13 @@ class Cuboid(Shape3D):
     def area(self):
         return 2 * (self.lengths * np.roll(self.lengths, 1)).sum()
 
-    def _compute_implicit_distance_taichi(self, mesh_cell_centers):
+    def _do_compute_signed_distance_taichi(self, mesh_cell_centers):
         dist = np.empty(mesh_cell_centers.shape[0], dtype=mesh_cell_centers.dtype)
-        _compute_implicit_distance_kernel(mesh_cell_centers, self.origin, self.end, dist)
+        _compute_signed_distance_kernel(mesh_cell_centers, self.origin, self.end, dist)
 
         return dist
 
-    def _compute_implicit_distance_numpy(self, mesh_cell_centers):
+    def _do_compute_signed_distance_numpy(self, mesh_cell_centers):
         d0 = self.origin - mesh_cell_centers
         d1 = self.end - mesh_cell_centers
         outer_dist = np.min([abs(d0), abs(d1)], axis=0)
@@ -225,7 +225,7 @@ class Cuboid(Shape3D):
 
 
 @lazy_kernel
-def _compute_implicit_distance_kernel():
+def _compute_signed_distance_kernel():
     import taichi as ti
     from metalpy.utils.taichi import ti_kernel
 
