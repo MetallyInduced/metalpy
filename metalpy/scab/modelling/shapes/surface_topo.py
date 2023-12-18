@@ -134,7 +134,7 @@ class SurfaceTopo(InfiniteShape):
 
     @staticmethod
     def from_polydata(poly, loc_axes=None, alt_axis=None, inverse=False, sample=None):
-        from metalpy.utils.pyvista_dataset_wrappers.universal_dataset import UniversalDataSet
+        from metalpy.utils.pv_datasets import UniversalDataSet
         points = UniversalDataSet(poly).points
 
         if loc_axes is None and alt_axis is None:

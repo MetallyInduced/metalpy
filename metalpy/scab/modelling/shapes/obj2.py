@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 import os.path
 from functools import cached_property
 from typing import Union, Iterable
@@ -51,19 +52,33 @@ def check_scalar_or_list(val, size, _default):
         return list(val)
 
 
+class SubdivideScheme(enum.Enum):
+    InMemory = 'memory'
+    ByFile = 'file'
+
+
+class OriginScheme(enum.Enum):
+    Corner = 'corner'
+    Center = 'center'
+
+
 class Obj2(Shape3D):
-    SUBDIVIDE_IN_MEMORY = 'memory'
-    SUBDIVIDE_FILE = 'file'
-    SUBDIVIDE_NONE = False
+    InMemory = SubdivideScheme.InMemory
+    ByFile = SubdivideScheme.ByFile
+
+    Corner = OriginScheme.Corner
+    Center = OriginScheme.Center
 
     def __init__(self, model: Union[str, "pv.DataSet", None],
                  xsize=None, ysize=None, zsize=None, size=None,
                  xscale=None, yscale=None, zscale=None, scale=None,
                  surface_thickness=None, surface_range: float | list[float] | None = None,
-                 subdivide: str | bool | None = SUBDIVIDE_NONE,
+                 subdivide: SubdivideScheme | False = False,
                  reset_axes: AxesLabels | None = None,
                  ignore_surface_check=False,
                  keep_original_model=True,
+                 reset_origin: OriginScheme | False = Corner,
+                 keep_origin_transform: bool = False,
                  verbose=True):
         """定义一个基于通用格式的模型
 
@@ -82,20 +97,41 @@ class Obj2(Shape3D):
             小于0表示模型内，大于0表示模型外，None表示不作判断，
             如果为单个数r，则自动设置为[0, r]或[r, 0]。
         subdivide
-            是否模型细分（非通用）。
-            SUBDIVIDE_IN_MEMORY 载入后根据点连接性来模型细分。
-            SUBDIVIDE_FILE 对模型文件进行组分割（仅限obj文件）再载入。
+            是否模型细分（非通用），选项包括：
+            1. `Obj2.InMemory` 载入后根据点连接性来模型细分。
+            2. `Obj2.ByFile` 对模型文件进行组分割（仅限obj文件）再载入。
+            3. `False` 不细分。
         reset_axes
             是否重设模型三轴顺序。
             使用一个长度为3的字符或整数数组，指示每个新轴分别对应的原坐标轴。
             例如：交换y和z轴，则指定"xzy"
         ignore_surface_check
-            代表使用内置体素化算法时跳过检测模型封闭性
+            代表使用内置体素化算法时跳过检测模型封闭性（但不封闭模型仍可能导致错误的结果）
         keep_original_model
             代表是否保留最初导入的未分割的模型，如果为`False`则不会保留，to_polydata()等涉及获取原始模型的操作会通过pv.merge获得。
             适用于不需要再次访问原始模型的情形。
+        reset_origin
+            平移模型原点与坐标系原点对齐，默认为 `Obj2.Corner` ，可选选项包括：
+            1. `Obj2.Corner` 平移模型左下角与原点对齐，
+            2. `Obj2.Center` 平移模型中心点与原点对齐，
+            3. `False` 不重置原点。
+        keep_origin_transform
+            配合 `reset_origin` 使用，重置原点时，将平移信息保存为shape的初始变换，
+            保证shape本身在空间位置不发生变化
+            （即全局坐标系下位置不变，局部坐标系采用0为原点）
         verbose
             控制是否输出相关信息
+
+        Notes
+        -----
+        1. 默认会采用PyVista的 `select_enclosed_points` 进行体素化，但是该方法仅限闭合流形模型，
+        对于非闭合模型，可以通过设置 `ignore_surface_check=True` 来跳过检测，但结果仍然大概率会出错。
+
+        2. 如果默认的体素化方法出现问题，可以尝试启用 `subdivide` 选项，该选项会将模型分割为多个连通子模型，
+        可以消除一部分非流形模型的问题。
+
+        3. 如果还有问题，下一步可以采用 `隐式距离/有向距离场` 进行体素化，通过指定 `surface_thickness`
+        或 `surface_range` 来启用，可以进一步规避部分复杂模型的影响。
         """
         super().__init__()
 
@@ -118,7 +154,7 @@ class Obj2(Shape3D):
             self.surface_range = None
 
         if subdivide is True:
-            subdivide = Obj2.SUBDIVIDE_IN_MEMORY
+            subdivide = Obj2.InMemory
 
         models = None
         did_subdivision = False
@@ -131,11 +167,11 @@ class Obj2(Shape3D):
                 if not subdivide:
                     model = load_model_file(model_path, verbose=verbose)
                     models = [model]
-                elif subdivide == Obj2.SUBDIVIDE_IN_MEMORY:  # 导入后通过连通性分析分割模型
+                elif subdivide == Obj2.InMemory:  # 导入后通过连通性分析分割模型
                     model = load_model_file(model_path, verbose=verbose)
                     models = split_models_in_memory(model, verbose=verbose)
                     did_subdivision = True
-                elif subdivide == Obj2.SUBDIVIDE_FILE:  # 从文件层面切割得到的子模型文件导入到models
+                elif subdivide == Obj2.ByFile:  # 从文件层面切割得到的子模型文件导入到models
                     models = load_grouped_file(model_path, verbose=verbose)
                     if models is None:
                         raise NotImplementedError(
@@ -148,7 +184,7 @@ class Obj2(Shape3D):
                 # then model should be PyVista object
                 if not subdivide:
                     models = [model]
-                elif subdivide == Obj2.SUBDIVIDE_IN_MEMORY:  # 导入后通过连通性分析分割模型
+                elif subdivide == Obj2.InMemory:  # 导入后通过连通性分析分割模型
                     models = split_models_in_memory(model, verbose=verbose)
                     did_subdivision = True
 
@@ -191,13 +227,23 @@ class Obj2(Shape3D):
 
                 bounds = extract_model_list_bounds(models)
 
-            # 保证载入的模型起始点为0
-            for i in range(len(models)):
-                models[i] = models[i].translate(-bounds[::2], inplace=owns_parts)
-            owns_parts = True
-            if did_subdivision and keep_original_model:
-                model = model.translate(-bounds[::2], inplace=owns_model)
-                owns_model = True
+            delta = [0, 0, 0]
+            if reset_origin:
+                if reset_origin == Obj2.Corner:
+                    delta = bounds[::2]
+                else:
+                    delta = Bounds(bounds).center
+
+                for i in range(len(models)):
+                    models[i] = models[i].translate(-delta, inplace=owns_parts)
+                owns_parts = True
+                if did_subdivision and keep_original_model:
+                    model = model.translate(-delta, inplace=owns_model)
+                    owns_model = True
+
+            if keep_origin_transform:
+                # 将重置原点的平移信息保存为Shape的transform
+                self.translated(*delta)
 
         self.models = models
 

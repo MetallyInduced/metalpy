@@ -156,6 +156,9 @@ class BarFramework(Composition):
 
         return self
 
+    def cast_to(self, framework_type):
+        return self.extract(framework_type=framework_type)
+
     def __getitem__(self, indices):
         full = slice(None, None, None)
 
@@ -190,14 +193,17 @@ class BarFramework(Composition):
         na = self.n_bars[axis]
         return np.linspace(a0 + ra, a1 - ra, na)
 
-    def extract(self, *, n_rooms=None, bounds=None):
+    def extract(self, *, n_rooms=None, bounds=None, framework_type=None):
         if n_rooms is None:
             n_rooms = self.n_rooms
 
         if bounds is None:
             bounds = self.bounds
 
-        return type(self)(
+        if framework_type is None:
+            framework_type = type(self)
+
+        return framework_type(
             outline=self.outline,
             spec=self.spec,
             n_rooms=n_rooms,
