@@ -1,3 +1,4 @@
+import math
 from typing import Iterable, Union
 
 import numpy as np
@@ -5,7 +6,7 @@ import numpy as np
 from metalpy.mepa.utils import is_serial
 from metalpy.utils.bounds import Bounds
 from metalpy.utils.dhash import dhash
-from metalpy.utils.taichi_lazy import lazy_kernel
+from metalpy.utils.ti_lazy import ti_lazy_kernel, ti
 from . import Shape3D
 
 
@@ -201,7 +202,7 @@ class Cuboid(Shape3D):
 
     def _do_compute_signed_distance_taichi(self, mesh_cell_centers):
         dist = np.empty(mesh_cell_centers.shape[0], dtype=mesh_cell_centers.dtype)
-        _compute_signed_distance_kernel(mesh_cell_centers, self.origin, self.end, dist)
+        _compute_signed_distance_element_wise.kernel(mesh_cell_centers, self.origin, self.end, dist=dist)
 
         return dist
 
@@ -224,42 +225,35 @@ class Cuboid(Shape3D):
         return dist
 
 
-@lazy_kernel
-def _compute_signed_distance_kernel():
-    import taichi as ti
-    from metalpy.utils.taichi import ti_kernel
+@ti_lazy_kernel
+def _compute_signed_distance_element_wise(
+        cells_centers: ti.types.ndarray(),
+        origin: ti.types.ndarray(),
+        end: ti.types.ndarray(),
+        dist: ti.types.ndarray()
+):
+    for i in range(dist.shape[0]):
+        dx0, dx1 = origin[0] - cells_centers[i, 0], end[0] - cells_centers[i, 0]
+        dy0, dy1 = origin[1] - cells_centers[i, 1], end[1] - cells_centers[i, 1]
+        dz0, dz1 = origin[2] - cells_centers[i, 2], end[2] - cells_centers[i, 2]
 
-    @ti_kernel
-    def _kernel(
-            cells_centers: ti.types.ndarray(),
-            origin: ti.types.ndarray(),
-            end: ti.types.ndarray(),
-            dist: ti.types.ndarray()
-    ):
-        for i in range(dist.shape[0]):
-            dx0, dx1 = origin[0] - cells_centers[i, 0], end[0] - cells_centers[i, 0]
-            dy0, dy1 = origin[1] - cells_centers[i, 1], end[1] - cells_centers[i, 1]
-            dz0, dz1 = origin[2] - cells_centers[i, 2], end[2] - cells_centers[i, 2]
+        cx: ti.i8 = dx0 <= 0 <= dx1
+        cy: ti.i8 = dy0 <= 0 <= dy1
+        cz: ti.i8 = dz0 <= 0 <= dz1
 
-            cx: ti.i8 = dx0 <= 0 <= dx1
-            cy: ti.i8 = dy0 <= 0 <= dy1
-            cz: ti.i8 = dz0 <= 0 <= dz1
+        state = cx + cy + cz
 
-            state = cx + cy + cz
+        dx = abs(min(-dx0, dx1))
+        dy = abs(min(-dy0, dy1))
+        dz = abs(min(-dz0, dz1))
 
-            dx = ti.abs(ti.min(-dx0, dx1))
-            dy = ti.abs(ti.min(-dy0, dy1))
-            dz = ti.abs(ti.min(-dz0, dz1))
-
-            if state == 3:
-                dist[i] = -ti.min(dx, dy, dz)
+        if state == 3:
+            dist[i] = -min(dx, dy, dz)
+        else:
+            dx *= not cx
+            dy *= not cy
+            dz *= not cz
+            if state == 2:
+                dist[i] = dx + dy + dz
             else:
-                dx *= not cx
-                dy *= not cy
-                dz *= not cz
-                if state == 2:
-                    dist[i] = dx + dy + dz
-                else:
-                    dist[i] = ti.sqrt(dx * dx + dy * dy + dz * dz)
-
-    return _kernel
+                dist[i] = math.sqrt(dx * dx + dy * dy + dz * dz)

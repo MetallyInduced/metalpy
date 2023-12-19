@@ -67,6 +67,20 @@ class Shape3D(Transformable, ABC):
 
         return indices
 
+    def place2d(self, mesh_cell_centers, z=None, progress=False):
+        if isinstance(mesh_cell_centers, TransformedArray) and mesh_cell_centers.verify(self):
+            mesh_cell_centers = mesh_cell_centers.parent
+
+        if z is None:
+            z = self.center[2]
+
+        if np.ndim(z) == 0:
+            z = np.full(mesh_cell_centers.shape[0], z)
+
+        mesh_cell_centers = np.c_[mesh_cell_centers[:, :2], z]
+
+        return self.place(mesh_cell_centers, progress=progress)
+
     def compute_implicit_distance(self, mesh_cell_centers, progress=False):
         """计算模型体到空间中任一点的隐式距离，且小于0代表在模型内
 

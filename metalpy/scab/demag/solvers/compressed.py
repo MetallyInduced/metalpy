@@ -9,7 +9,7 @@ from taichi.lang.util import to_taichi_type
 
 from metalpy.scab.utils.misc import Field
 from metalpy.utils.numeric import limit_significand
-from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, copy_from, ti_size_t, ti_size_dtype, \
+from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, ti_size_t, ti_size_dtype, \
     ti_pyfunc
 from metalpy.utils.ti_solvers import matrix_free
 from .kernel import kernel_matrix_forward

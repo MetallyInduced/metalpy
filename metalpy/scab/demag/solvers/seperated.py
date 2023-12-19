@@ -4,8 +4,8 @@ import taichi as ti
 from taichi.lang.util import to_taichi_type
 
 from metalpy.scab.utils.misc import Field
+from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func
 from metalpy.utils.ti_solvers import matrix_free
-from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, copy_from
 from .integrated import solve_Ax_b
 from .kernel import kernel_matrix_forward
 from .solver import DemagnetizationSolver
