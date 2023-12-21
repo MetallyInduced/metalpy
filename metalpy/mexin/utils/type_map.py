@@ -90,6 +90,8 @@ class TypeMap:
             if self.allow_match_parent and isinstance(type_key, type):
                 for parent_type in inspect.getmro(type_key)[1:]:
                     ret = self.strict_get(parent_type, default=default)
+                    if ret is not None:
+                        break
             else:
                 ret = default
 

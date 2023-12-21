@@ -39,6 +39,8 @@ class PoolExecutor(Executor):
         return self._queue is not None
 
     def map(self, func, *iterables, worker=None, workers=None, chunksize=None):
+        if chunksize is None:
+            chunksize = 1
         with self.monitor_events():
             return list(self.pool.map(func, *iterables, chunksize=chunksize))
 

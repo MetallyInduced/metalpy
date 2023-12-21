@@ -59,7 +59,7 @@ def predict_with_demag(
     if by_factor:
         demag = Demaged(factor=factor)
     else:
-        demag = Demaged(method=method)
+        demag = Demaged(method=method, compressed_size=0.0316)
 
     builder = SimulationBuilder.of(magnetics.simulation.Simulation3DIntegral)
     builder.patched(Tied(arch='cpu'), demag)

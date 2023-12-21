@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
 
 class SimulationBuilder:
-    _registry = TypeMap(allow_match_parent=True)
+    _registry = TypeMap()
     _all_assemblers = {}
     _all_suppliers = {}
 
@@ -73,6 +73,10 @@ class SimulationBuilder:
         self.args = ArgSpecs.from_class_mro(self.sim_cls)
         self._assemblers = {}
         self._patches: list[Patch] = []
+
+    @property
+    def patches(self):
+        return self._patches
 
     def patched(self, *patches: Patch):
         self._patches.extend(patches)

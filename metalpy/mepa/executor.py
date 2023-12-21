@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Collection
@@ -76,10 +77,34 @@ class Executor(ABC):
         return ret
 
     def map(self, func, *iterables, worker=None, workers=None, chunksize=None):
+        """内置函数 `map()` 的并行版本，但支持同时传入多个长度相同的 `iterables` 参数
+
+        所有 `iterables` 的第一个元素构成第一个 `func` 调用的参数，后同。
+
+        Examples
+        --------
+        >>> executor.map(operatoe.add, [1, 2, 3], [4, 5, 6])
+        <<< [5, 7, 9]
+        """
+        return self.gather(self.map_async(
+            func,
+            *iterables,
+            worker=worker,
+            workers=workers,
+            chunksize=chunksize)
+        )
+
+    def map_async(self, func, *iterables, worker=None, workers=None, chunksize=None):
+        # TODO: 优化分块策略？但是好像也没有必要，因为主要的执行器都会继承并实现分块策略
         workers = check_workers(worker, workers)
+        if workers is None:
+            workers = list(self.get_workers())
 
         futures = []
         n_workers = len(workers)
+
+        if chunksize is None:
+            chunksize = n_workers
 
         for i, task in enumerate(zip(*iterables)):
             if workers is not None:
@@ -89,6 +114,39 @@ class Executor(ABC):
             futures.append(self.do_submit(func, *task, workers=w))
 
         return futures
+
+    def starmap(self, func, iterables, worker=None, workers=None, chunksize=None):
+        """类似于 `map()` ，但是 `iterables` 的每个元素都是一个完整参数
+
+        Examples
+        --------
+        >>> executor.starmap(operatoe.add, [(1, 4), (2, 5), (3, 6)])
+        <<< [5, 7, 9]
+        """
+        @functools.wraps(func)
+        def star_mapper(arg):
+            return func(*arg)
+
+        return self.map(
+            star_mapper,
+            iterables,
+            worker=worker,
+            workers=workers,
+            chunksize=chunksize
+        )
+
+    def starmap_async(self, func, iterables, worker=None, workers=None, chunksize=None):
+        @functools.wraps(func)
+        def star_mapper(arg):
+            return func(*arg)
+
+        return self.map_async(
+            star_mapper,
+            iterables,
+            worker=worker,
+            workers=workers,
+            chunksize=chunksize
+        )
 
     def extract_by_name(self, pat: str | re.Pattern | Callable):
         """筛选符合条件的worker构成子执行器

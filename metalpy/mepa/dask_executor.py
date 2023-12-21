@@ -74,9 +74,9 @@ class DaskExecutor(Executor):
     def has_sub(self):
         return self._sub is not None
 
-    def map(self, func, *iterables, worker=None, workers=None, chunksize=None):
+    def map_async(self, func, *iterables, worker=None, workers=None, chunksize=None):
         kwargs = _extract_workers(None, workers)
-        return self.gather(self.client.map(func, *iterables, **kwargs, batch_size=chunksize))
+        return self.client.map(func, *iterables, **kwargs, batch_size=chunksize)
 
     def do_submit(self, func, *args, workers=None, **kwargs):
         option_kwargs = _extract_workers(None, workers)

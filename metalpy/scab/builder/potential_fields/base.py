@@ -12,6 +12,16 @@ from ..simulation import LinearSimulationBuilder
 class BasePFSimulationBuilder(LinearSimulationBuilder):
     def __init__(self, sim_cls: type[BasePFSimulation]):
         super().__init__(sim_cls)
+        self._n_processes = 1
+
+    def build(self):
+        if self._n_processes != 1:
+            assert len(self.patches) == 0, (
+                f'Patches are not available under multiprocessing mode.'
+                f' Consider using `Distributed(...)` patch for parallel simulation instead.'
+            )
+
+        return super().build()
 
     @SimulationBuilder._supplies(['ind_active', 'actInd'])
     def active_mesh(self, mesh, ind_active=undefined):
@@ -57,4 +67,5 @@ class BasePFSimulationBuilder(LinearSimulationBuilder):
         if n < 0:
             n = os.cpu_count() + n
 
+        self._n_processes = n
         return n

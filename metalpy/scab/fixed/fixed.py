@@ -8,7 +8,7 @@ from metalpy.scab.distributed.policies import Distributable
 
 
 class FixedContext(Mixin):
-    _implementations = TypeMap()
+    _implementations = TypeMap(allow_match_parent=True)
 
     def __init__(self, this, **kwargs):
         super().__init__(this)

@@ -55,7 +55,7 @@ class TaggedMethod:
 
     def __new__(cls, func, *args, **kwargs):
         if func is not None:
-            return TaggedMethod(*args, **kwargs)(func)
+            return TaggedMethod(None, *args, **kwargs)(func)
         else:
             return super().__new__(cls)
 

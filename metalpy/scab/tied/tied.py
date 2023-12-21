@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import os
+import sys
 import warnings
 
+import numpy as np
 from SimPEG.simulation import BaseSimulation
+from discretize import TreeMesh
 
 from metalpy.mexin import Mixin
 from metalpy.mexin import Patch
-from metalpy.utils.type import get_params_dict
-from metalpy.utils.object_path import get_full_qualified_path
 from metalpy.mexin.utils import TypeMap
+from metalpy.mexin.injectors import replaces
 from metalpy.scab.distributed.policies import Distributable
-
+from metalpy.utils.object_path import get_full_qualified_path
+from metalpy.utils.type import get_params_dict
 from .taichi_kernel_base import Profiler
 
 
@@ -72,6 +75,27 @@ class Tied(Patch, Distributable):
 
     def apply(self):
         self.add_mixin(BaseSimulation, TaichiContext, **self.params)
+
+        if 'SimPEG.potential_fields.base' in sys.modules:
+            # BasePFSimulation构造函数中会预先计算node unique，而目前的Taichi版本正演不需要相关信息，因此禁用以提高性能
+            from SimPEG.potential_fields.base import BasePFSimulation
+            self.add_injector(
+                replaces(BasePFSimulation.__init__, keep_orig='orig'),
+                Tied.disable_pf_sim_node_preprocessing
+            )
+
+    @staticmethod
+    def disable_pf_sim_node_preprocessing(this, mesh, ind_active=None, *args, orig, **kwargs):
+        # 使用空网格替换原网格，快速跳过初始化步骤
+        _mesh = TreeMesh([[1, 0]] * 3)
+        _ind_active = np.ones(_mesh.n_cells, dtype=bool)
+
+        orig(this, _mesh, _ind_active, *args, **kwargs)
+
+        # 还原为原网格和有效索引
+        this.mesh = mesh
+        this._ind_active = ind_active
+        this.nC = int(ind_active.sum())
 
 
 def __implements(target):
