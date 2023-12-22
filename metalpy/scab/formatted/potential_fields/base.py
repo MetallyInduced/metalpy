@@ -45,3 +45,8 @@ class BasePFDataFormatterMixin(FormatterMixin):
     def to_pandas_dataframe(self, _, data, components):
         import pandas as pd
         return pd.DataFrame(data, columns=components)
+
+
+class FormattedBasePFSimulationMixin(BasePFDataFormatterMixin):
+    def format_numpy_data(self, this, data, components):
+        return data.reshape(-1, len(components))

@@ -1,7 +1,4 @@
-import functools
-import warnings
-
-from metalpy.utils.string import format_string_list
+from metalpy.mexin.tagged_method import TaggedMethod
 
 
 class Mixin:
@@ -27,57 +24,18 @@ class Mixin:
     def post_apply(self, this):
         pass
 
-
-def before(func=None, *, target=None):
-    return TaggedMethod(func, tag=TaggedMethod.Before, target=target)
-
-
-def after(func=None, *, keep_retval=False, target=None):
-    return TaggedMethod(func, tag=TaggedMethod.After, keep_retval=keep_retval, target=target)
-
-
-def replaces(func=None, *, keep_orig=False, target=None):
-    return TaggedMethod(func, tag=TaggedMethod.Replaces, keep_orig=keep_orig, target=target)
-
-
-class TaggedMethod:
-    Before = 'before'
-    After = 'after'
-    Replaces = 'replaces'
-    All = {Before, After, Replaces}
-
-    def __init__(self, func, tag, target=None, keep_orig=False, keep_retval=False):
-        self.func = func
-        self.tag = tag
-        self.target = target
-        self.keep_orig = keep_orig
-        self.keep_retval = keep_retval
-
-    def __new__(cls, func, *args, **kwargs):
-        if func is not None:
-            return TaggedMethod(None, *args, **kwargs)(func)
-        else:
-            return super().__new__(cls)
-
-    def __call__(self, func):
-        self.func = func
-
-        @functools.wraps(self.func)
-        def wrapper(*args, **kwargs):
-            return self.func(*args, **kwargs)
-
-        wrapper.__tags__ = self
-        return wrapper
+    @staticmethod
+    def before(func=None, *, target=None):
+        return TaggedMethod(func, tag=TaggedMethod.Before, target=target)
 
     @staticmethod
-    def verify(tag):
-        if tag not in TaggedMethod.All:
-            warnings.warn(f'Unknown mixin method type {tag},'
-                          f' must be one of {format_string_list(TaggedMethod.All)}.'
-                          f' Defaults to `{TaggedMethod.Replaces}`.')
-            return TaggedMethod.Replaces
-        return tag
+    def after(func=None, *, keep_retval=False, target=None):
+        return TaggedMethod(func, tag=TaggedMethod.After, keep_retval=keep_retval, target=target)
 
     @staticmethod
-    def check(meth):
-        return getattr(meth, '__tags__', None)
+    def replaces(func=None, *, keep_orig=False, target=None):
+        return TaggedMethod(func, tag=TaggedMethod.Replaces, keep_orig=keep_orig, target=target)
+
+    @staticmethod
+    def ignores(func=None):
+        return TaggedMethod(func, tag=TaggedMethod.Ignore)

@@ -6,17 +6,15 @@ import tqdm
 from SimPEG.simulation import BaseSimulation
 
 from metalpy.mepa import Executor, Worker, ParallelProgress
-from metalpy.mexin.patch import Patch, Mixin
-from metalpy.mexin.utils import TypeMap
+from metalpy.mexin.mixins import DispatcherMixin
+from metalpy.mexin.patch import Patch
 from metalpy.scab import Fixed
 from metalpy.scab.distributed.policies import Distributable
 
 ProgressContext = Union[tqdm.tqdm, ParallelProgress, None]
 
 
-class Progress(Mixin):
-    _implementations = TypeMap(allow_match_parent=True)
-
+class Progress(DispatcherMixin, allow_match_parent=True):
     def __init__(self, this: BaseSimulation, patch: Progressed):
         super().__init__(this)
         self.patch = patch
@@ -36,14 +34,6 @@ class Progress(Mixin):
     def close(self, _):
         self.get_progress_ctx().close()
 
-    def post_apply(self, this):
-        impl = Progress._implementations.get(type(this))
-
-        if impl is None:
-            return
-
-        this.mixins.add(impl)
-
 
 class Progressed(Patch, Distributable):
     Priority = Fixed.Priority + 1
@@ -53,7 +43,7 @@ class Progressed(Patch, Distributable):
         'smoothing': 0.1,
     }
 
-    def __init__(self, _progress_ctx: ProgressContext = None, **tqdm_kw):
+    def __init__(self, _progress_ctx: Progress = None, **tqdm_kw):
         """进度条插件，为正演添加进度条机制（目前）
 
         Parameters
@@ -64,7 +54,7 @@ class Progressed(Patch, Distributable):
             用于 `tqdm` 的进度条参数
         """
         super().__init__()
-        self.progress_ctx: ProgressContext = _progress_ctx
+        self.progress_ctx: Progress = _progress_ctx
         self.tqdm_kw = {**Progressed.BaseProgressStyles, **tqdm_kw}
 
     def apply(self):
@@ -90,14 +80,7 @@ class Progressed(Patch, Distributable):
         return Progressed(_progress_ctx=self.get_context(executor, allow_restart=True))
 
 
-def __implements(target):
-    def decorator(func):
-        Progress._implementations.map(target, func)
-        return func
-    return decorator
-
-
-@__implements('SimPEG.potential_fields.base.BasePFSimulation')
+@Progress.implements('SimPEG.potential_fields.base.BasePFSimulation')
 def _():
     from .potential_fields.base import ProgressedBasePFSimulationMixin
     return ProgressedBasePFSimulationMixin

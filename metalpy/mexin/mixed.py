@@ -43,7 +43,9 @@ class MixinManager:
                 # 跳过1. 魔术方法 2. 私有方法 3. post_apply等mixin类的方法
                 continue
 
-            obj.__dict__[name] = self.bind_method(method, name=name)
+            bound_method = self.bind_method(method, name=name)
+            if bound_method is not None:
+                obj.__dict__[name] = bound_method
 
         self._mixins[mixin_type] = obj
         obj.post_apply(target)
@@ -61,8 +63,6 @@ class MixinManager:
         return self.get(mixin_type, sentinel=True)
 
     def bind_method(self, method, name=None):
-        # TODO: 引入注解来标记是否需要替换，或者标记替换别的目标
-        # TODO: 标记是否需要保留原函数
         tag = TaggedMethod.Replaces
         keep_orig = False
         keep_retval = False
@@ -73,6 +73,9 @@ class MixinManager:
         mixing_config = TaggedMethod.check(method)
         if mixing_config:
             tag = TaggedMethod.verify(mixing_config.tag)
+            if tag == TaggedMethod.Ignore:
+                # 检测到 `Ignore` 标签，跳过绑定过程
+                return None
 
             keep_orig = mixing_config.keep_orig
             keep_retval = mixing_config.keep_retval
@@ -113,6 +116,8 @@ class MixinManager:
                 method = before(target_method, nest=target)(method)
             elif tag == TaggedMethod.After:
                 method = after(target_method, nest=target, keep_retval=keep_retval)(method)
+            else:
+                raise TypeError(f'Unknown tag `{tag}`.')
 
         return method
 

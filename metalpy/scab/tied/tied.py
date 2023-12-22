@@ -2,40 +2,22 @@ from __future__ import annotations
 
 import os
 import sys
-import warnings
 
 import numpy as np
 from SimPEG.simulation import BaseSimulation
 from discretize import TreeMesh
 
-from metalpy.mexin import Mixin
 from metalpy.mexin import Patch
-from metalpy.mexin.utils import TypeMap
 from metalpy.mexin.injectors import replaces
+from metalpy.mexin.mixins import DispatcherMixin
 from metalpy.scab.distributed.policies import Distributable
-from metalpy.utils.object_path import get_full_qualified_path
 from metalpy.utils.type import get_params_dict
 from .taichi_kernel_base import Profiler
 
 
-class TaichiContext(Mixin):
-    _implementations = TypeMap()
-
+class _Tied(DispatcherMixin, allow_match_parent=True, warns_when_not_matched=True):
     def __init__(self, this, max_cpu_threads=None, profile: Profiler | bool = False, **kwargs):
-        """初始化taichi上下文
-
-        Parameters
-        ----------
-        this
-            Simulation类指针，由mixin manager传递
-        arch
-            taichi架构，例如ti.cpu或ti.gpu，默认ti.cpu
-        max_cpu_threads
-            cpu arch下的最大线程数，taichi默认为cpu核心数
-        """
         from metalpy.utils.taichi import ti_init
-
-        super().__init__(this)
 
         params = {}
 
@@ -54,27 +36,34 @@ class TaichiContext(Mixin):
             params['cpu_max_num_threads'] = max_cpu_threads
 
         ti_init(**params, **kwargs)
-
-    def post_apply(self, this):
-        impl = TaichiContext._implementations.get(type(this))
-
-        if impl is None:
-            warnings.warn(
-                f'Taichi support for {get_full_qualified_path(type(this))} is not implemented.'
-                f' Ignoring it.'
-            )
-            return
-
-        this.mixins.add(impl, profile=self.profile)
+        super().__init__(this, profile=self.profile)
 
 
 class Tied(Patch, Distributable):
-    def __init__(self, arch=None, max_cpu_threads=None, **kwargs):
+    def __init__(self, arch=None, max_cpu_threads=None, profile: Profiler | bool = False, **kwargs):
+        """将正演算子替换为基于Taichi的并行正演方法
+
+        Parameters
+        ----------
+        arch
+            taichi的运行设备，默认为 `cpu` ，
+            可以通过字符串指定（例如 `'cpu'` 或 `'gpu'` ），
+            也可以通过 `ti.cpu` 或 `ti.gpu` 指定
+        max_cpu_threads
+            cpu arch下的最大线程数，taichi默认为cpu核心数
+        profile
+            指示是否启用profiler，详见 :class:`Profiler`
+        """
         super().__init__()
-        self.params = get_params_dict(arch=arch, max_cpu_threads=max_cpu_threads, **kwargs)
+        self.params = get_params_dict(
+            arch=arch,
+            max_cpu_threads=max_cpu_threads,
+            profile=profile,
+            **kwargs
+        )
 
     def apply(self):
-        self.add_mixin(BaseSimulation, TaichiContext, **self.params)
+        self.add_mixin(BaseSimulation, _Tied, **self.params)
 
         if 'SimPEG.potential_fields.base' in sys.modules:
             # BasePFSimulation构造函数中会预先计算node unique，而目前的Taichi版本正演不需要相关信息，因此禁用以提高性能
@@ -98,14 +87,7 @@ class Tied(Patch, Distributable):
         this.nC = int(ind_active.sum())
 
 
-def __implements(target):
-    def decorator(func):
-        TaichiContext._implementations.map(target, func)
-        return func
-    return decorator
-
-
-@__implements('SimPEG.potential_fields.magnetics.simulation.Simulation3DIntegral')
+@_Tied.implements('SimPEG.potential_fields.magnetics.simulation.Simulation3DIntegral')
 def _():
     from .potential_fields.magnetics.simulation import TiedSimulation3DIntegralMixin
     return TiedSimulation3DIntegralMixin

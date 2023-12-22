@@ -1,34 +1,14 @@
 from __future__ import annotations
 
-import warnings
-
 from SimPEG.simulation import BaseSimulation
 
-from metalpy.mexin import Patch, Mixin
-from metalpy.mexin.utils import TypeMap
+from metalpy.mexin import Patch
+from metalpy.mexin.mixins import DispatcherMixin
 from metalpy.scab.distributed.policies import NotDistributable
-from metalpy.utils.object_path import get_full_qualified_path
 
 
-class FormattedContext(Mixin):
-    _implementations = TypeMap()
-
-    def __init__(self, this, pandas=False, locations=False):
-        super().__init__(this)
-        self.pandas = pandas
-        self.locations = locations
-
-    def post_apply(self, this):
-        impl = FormattedContext._implementations.get(type(this))
-
-        if impl is None:
-            warnings.warn(
-                f'Formatter support for {get_full_qualified_path(type(this))} is not implemented.'
-                f' Ignoring it.'
-            )
-            return
-
-        this.mixins.add(impl, pandas=self.pandas, locations=self.locations)
+class _Formatted(DispatcherMixin, allow_match_parent=True):
+    pass
 
 
 class Formatted(Patch, NotDistributable):
@@ -47,24 +27,16 @@ class Formatted(Patch, NotDistributable):
         self.locations = locations
 
     def apply(self):
-        self.add_mixin(BaseSimulation, FormattedContext, pandas=self.pandas, locations=self.locations)
+        self.add_mixin(BaseSimulation, _Formatted, pandas=self.pandas, locations=self.locations)
 
 
-def __implements(target):
-    def decorator(func):
-        FormattedContext._implementations.map(target, func)
-        return func
-    return decorator
-
-
-@__implements('metalpy.scab.potential_fields.magnetics.simulation.Simulation3DDipoles')
-@__implements('SimPEG.potential_fields.magnetics.simulation.Simulation3DIntegral')
+@_Formatted.implements('SimPEG.potential_fields.base.BasePFSimulation')
 def _():
-    from .potential_fields.magnetics.simulation import FormattedSimulation3DIntegralMixin
-    return FormattedSimulation3DIntegralMixin
+    from .potential_fields.base import FormattedBasePFSimulationMixin
+    return FormattedBasePFSimulationMixin
 
 
-@__implements('SimPEG.potential_fields.magnetics.simulation.Simulation3DDifferential')
+@_Formatted.implements('SimPEG.potential_fields.magnetics.simulation.Simulation3DDifferential')
 def _():
     from .potential_fields.magnetics.simulation import FormattedSimulation3DDifferentialMixin
     return FormattedSimulation3DDifferentialMixin

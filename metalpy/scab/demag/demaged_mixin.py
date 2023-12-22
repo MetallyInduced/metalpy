@@ -7,7 +7,7 @@ from SimPEG import maps
 from SimPEG.potential_fields.magnetics import Simulation3DIntegral
 from discretize.utils import mkvc
 
-from metalpy.mexin import Mixin, mixin
+from metalpy.mexin import Mixin
 from metalpy.scab.demag.demagnetization import Demagnetization
 from metalpy.scab.demag.factored_demagnetization import FactoredDemagnetization
 from metalpy.scab.utils.misc import Field
@@ -100,7 +100,7 @@ class DemagedMixin(Mixin):
         super().__init__(this)
         this.chiMap = DemagedMapping(this, factor=factor, **kwargs)
 
-    @mixin.replaces(keep_orig='orig_fn')
+    @Mixin.replaces(keep_orig='orig_fn')
     def linear_operator(self, _, orig_fn):
         with self._switch_model_type():
             return orig_fn()

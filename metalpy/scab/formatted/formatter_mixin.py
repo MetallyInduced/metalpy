@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from metalpy.mexin import Mixin, mixin
+from metalpy.mexin import Mixin
 
 
 class FormatterMixin(Mixin):
@@ -30,6 +30,6 @@ class FormatterMixin(Mixin):
     def format_data(self, this, data):
         raise NotImplementedError()
 
-    @mixin.after(keep_retval='ret')
+    @Mixin.after(keep_retval='ret')
     def dpred(self, *_, ret, **__):
         return self.format_data(ret)
