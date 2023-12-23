@@ -35,6 +35,9 @@ class LinearExecutor(Executor):
     def is_local(self):
         return True
 
+    def shares_memory(self):
+        return True
+
     def _gather_single(self, future):
         return future.result()
 

@@ -27,7 +27,7 @@ class Fixed(Patch, Distributable):
         self.add_mixin(BaseSimulation, _Fixed, dpred=self.dpred)
 
 
-@_Fixed.implements('SimPEG.potential_fields.magnetics.simulation.Simulation3DDifferential')
+@_Fixed.implements('SimPEG.potential_fields.magnetics.simulation:Simulation3DDifferential')
 def _():
     # 给 Simulation3DDifferential 实现了一个更合理的 dpred 方法
     from .potential_fields.magnetics.simulation import FixedSimulation3DDifferentialMixin

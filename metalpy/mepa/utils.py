@@ -1,5 +1,7 @@
 import traceback
 
+from typing_extensions import Protocol
+
 
 def traverse_args(args, kwargs, func):
     # 对所有的参数进行处理
@@ -48,3 +50,8 @@ def is_main_thread_of_main_process():
 
 def is_serial():
     return is_main_thread_of_main_process()
+
+
+class OutputArray(Protocol):
+    def __setitem__(self, key, value): pass
+    def __getitem__(self, key): pass

@@ -4,11 +4,11 @@ from typing import Union
 
 from metalpy.mexin import Patch
 from metalpy.scab import Tied
-from metalpy.scab.distributed.policies import Distributable
+from metalpy.scab.distributed.policies import NotDistributable
 from metalpy.utils.type import get_params_dict
 
 
-class Demaged(Patch, Distributable):
+class Demaged(Patch, NotDistributable):
     Priority = Tied.Priority + 1  # 保证在Tied后面注入mixin
 
     def __init__(

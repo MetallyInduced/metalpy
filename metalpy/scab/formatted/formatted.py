@@ -30,13 +30,13 @@ class Formatted(Patch, NotDistributable):
         self.add_mixin(BaseSimulation, _Formatted, pandas=self.pandas, locations=self.locations)
 
 
-@_Formatted.implements('SimPEG.potential_fields.base.BasePFSimulation')
+@_Formatted.implements('SimPEG.potential_fields.base:BasePFSimulation')
 def _():
     from .potential_fields.base import FormattedBasePFSimulationMixin
     return FormattedBasePFSimulationMixin
 
 
-@_Formatted.implements('SimPEG.potential_fields.magnetics.simulation.Simulation3DDifferential')
+@_Formatted.implements('SimPEG.potential_fields.magnetics.simulation:Simulation3DDifferential')
 def _():
     from .potential_fields.magnetics.simulation import FormattedSimulation3DDifferentialMixin
     return FormattedSimulation3DDifferentialMixin

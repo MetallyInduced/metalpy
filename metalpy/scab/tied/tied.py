@@ -87,7 +87,7 @@ class Tied(Patch, Distributable):
         this.nC = int(ind_active.sum())
 
 
-@_Tied.implements('SimPEG.potential_fields.magnetics.simulation.Simulation3DIntegral')
+@_Tied.implements('SimPEG.potential_fields.magnetics.simulation:Simulation3DIntegral')
 def _():
     from .potential_fields.magnetics.simulation import TiedSimulation3DIntegralMixin
     return TiedSimulation3DIntegralMixin

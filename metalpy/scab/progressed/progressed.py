@@ -80,7 +80,7 @@ class Progressed(Patch, Distributable):
         return Progressed(_progress_ctx=self.get_context(executor, allow_restart=True))
 
 
-@Progress.implements('SimPEG.potential_fields.base.BasePFSimulation')
+@Progress.implements('SimPEG.potential_fields.base:BasePFSimulation')
 def _():
     from .potential_fields.base import ProgressedBasePFSimulationMixin
     return ProgressedBasePFSimulationMixin

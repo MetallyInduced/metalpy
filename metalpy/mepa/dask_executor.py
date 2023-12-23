@@ -87,9 +87,6 @@ class DaskExecutor(Executor):
     def get_workers(self):
         return self.workers
 
-    def is_local(self):
-        return False
-
     def _gather_single(self, future):
         return self.client.gather(future)
 

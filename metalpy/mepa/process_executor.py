@@ -2,6 +2,7 @@ import psutil
 from loky import get_reusable_executor
 
 from .pool_executor import PoolExecutor
+from .utils import OutputArray
 from .worker import Worker
 
 
@@ -25,6 +26,26 @@ class ProcessExecutor(PoolExecutor):
         workers = [Worker(f'proc-{i}', 1) for i in range(n_units)]
 
         super().__init__(pool_executor=pool, workers=workers)
+
+    def needs_serialization(self):
+        return True
+
+    def shares_memory(self):
+        return True
+
+    def create_shared_array(self, shape, dtype) -> OutputArray:
+        from multiprocessing import shared_memory
+
+        import numpy as np
+
+        from metalpy.mepa.shared_array import SharedArray
+
+        mem = shared_memory.SharedMemory(
+            create=True,
+            size=int(np.prod(shape) * np.dtype(dtype).itemsize)
+        )
+
+        return SharedArray(shape, dtype=dtype, shared_memory=mem)
 
     def _get_queue(self):
         return self.pool._context.Manager().Queue()

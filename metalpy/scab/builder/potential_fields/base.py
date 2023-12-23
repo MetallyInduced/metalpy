@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 
 from SimPEG.potential_fields.base import BasePFSimulation
 
@@ -16,10 +17,20 @@ class BasePFSimulationBuilder(LinearSimulationBuilder):
 
     def build(self):
         if self._n_processes != 1:
-            assert len(self.patches) == 0, (
-                f'Patches are not available under multiprocessing mode.'
-                f' Consider using `Distributed(...)` patch for parallel simulation instead.'
-            )
+            if len(self.patches) != 0:
+                from metalpy.scab import Distributed
+
+                has_distributed = any(isinstance(patch, Distributed) for patch in self.patches)
+                if not has_distributed:
+                    self.patched(Distributed(self._n_processes))
+                else:
+                    warnings.warn(
+                        f'Parallel simulation are enabled both by'
+                        f' `builder.n_processes(...)` and `{Distributed.__name__}` patch,'
+                        f' where `n_processes` will be ignored.'
+                    )
+
+                self.n_processes(1)  # 重设Simulation的 `n_processes` 参数为1
 
         return super().build()
 

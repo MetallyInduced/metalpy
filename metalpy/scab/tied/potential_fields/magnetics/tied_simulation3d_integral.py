@@ -179,7 +179,7 @@ class TaichiSimulation3DIntegral:
 
         monitor = None
         if progress is not None:
-            progress.reset(total=n_rows * n_cols)
+            # progress会在Progressed插件中完成初始化，因此Tied插件中不需要管理他的初始化，后面也不需要负责关闭
 
             # 用于配合正演的分批计算
             check_start_row = 0  # 该批正演的起点行号
@@ -248,7 +248,6 @@ class TaichiSimulation3DIntegral:
 
         if monitor is not None:
             monitor.stop()
-            progress.close()
 
         if not is_cpu:
             ret = ret.to_numpy()

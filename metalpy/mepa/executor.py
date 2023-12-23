@@ -9,7 +9,7 @@ from typing import Callable, Any
 
 from .parallel_progress import ParallelProgress
 from .task_allocator import TaskAllocator, BoundTaskAllocator, ShuffleChoice
-from .utils import structured_traverse
+from .utils import structured_traverse, OutputArray
 from .worker import Worker
 from .worker_context import WorkerContext, BoundWorkerContext, IndexedBoundWorkerContext
 
@@ -266,9 +266,35 @@ class Executor(ABC):
         """
         return sum([w.get_weight() for w in self.get_workers()])
 
-    @abstractmethod
     def is_local(self):
-        return True
+        """指示是否所有worker都在本机上
+        """
+        return False
+
+    def needs_serialization(self):
+        """指示在worker间传递数据时是否需要序列化
+        """
+        return not self.shares_memory()
+
+    def shares_memory(self):
+        """指示worker间是否共享内存空间
+        """
+        return False
+
+    def create_shared_array(self, shape, dtype) -> OutputArray | None:
+        """获取数组包装的共享内存对象
+
+        Notes
+        -----
+        应假设返回值支持且只支持索引操作，并支持所有numpy风格的索引方式
+
+        返回的数组不会进行初始化，调用者不应对其初始值有任何假设
+        """
+        if self.shares_memory():
+            import numpy as np
+            return np.empty(shape, dtype=dtype)
+        else:
+            return None
 
     def gather(self, futures):
         """收集futures的结果

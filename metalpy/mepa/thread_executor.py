@@ -24,5 +24,8 @@ class ThreadExecutor(PoolExecutor):
 
         super().__init__(pool_executor=pool, workers=workers)
 
+    def shares_memory(self):
+        return True
+
     def _get_queue(self):
         return queue.Queue()

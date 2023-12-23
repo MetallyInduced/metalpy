@@ -388,27 +388,27 @@ class SimulationBuilder:
             setattr(result, k, copy.deepcopy(v, memo))
         return result
 
+    @classmethod
+    def implements(cls, key_cls_path):
+        def decorator(func):
+            cls._registry.map(key_cls_path, func)
+            return func
+        return decorator
 
-def __register_builder(key_cls_path):
-    def decorator(func):
-        SimulationBuilder._registry.map(key_cls_path, func)
-        return func
-    return decorator
 
-
-@__register_builder('metalpy.scab.potential_fields.magnetics.simulation.Simulation3DDipoles')
+@SimulationBuilder.implements('metalpy.scab.potential_fields.magnetics.simulation:Simulation3DDipoles')
 def _():
     from .potential_fields.magnetics.simulation import Simulation3DDipolesBuilder
     return Simulation3DDipolesBuilder
 
 
-@__register_builder('SimPEG.potential_fields.magnetics.simulation.Simulation3DIntegral')
+@SimulationBuilder.implements('SimPEG.potential_fields.magnetics.simulation:Simulation3DIntegral')
 def _():
     from .potential_fields.magnetics.simulation import Simulation3DIntegralBuilder
     return Simulation3DIntegralBuilder
 
 
-@__register_builder('SimPEG.potential_fields.magnetics.simulation.Simulation3DDifferential')
+@SimulationBuilder.implements('SimPEG.potential_fields.magnetics.simulation:Simulation3DDifferential')
 def _():
     from .potential_fields.magnetics.simulation import Simulation3DDifferentialBuilder
     return Simulation3DDifferentialBuilder
