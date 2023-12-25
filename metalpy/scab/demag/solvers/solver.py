@@ -17,7 +17,8 @@ class DemagnetizationSolver(abc.ABC):
             zn: np.ndarray,
             base_cell_sizes: np.ndarray,
             source_field: Field,
-            kernel_dtype=None
+            kernel_dtype=None,
+            progress=False
     ):
         self.receiver_locations = receiver_locations
         self.xn = xn
@@ -28,6 +29,8 @@ class DemagnetizationSolver(abc.ABC):
 
         self.model = None
         self._kernel_dtype = kernel_dtype
+
+        self.progress = progress
 
     @property
     def kernel_dtype(self):

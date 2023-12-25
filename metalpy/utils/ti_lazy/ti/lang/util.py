@@ -1,7 +1,8 @@
+# 对应 taichi.lang.util
 from abc import abstractmethod, ABC
 
 
-def to_taichi_type(dtype):
+def cast_to_taichi_type(dtype):
     magic = getattr(dtype, '__to_taichi_type__', None)
 
     if magic is not None:

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 
 import numpy as np
@@ -5,15 +7,12 @@ from SimPEG.potential_fields.magnetics import Simulation3DIntegral
 from discretize.utils import mkvc
 
 from metalpy.scab.progressed import Progress
-
 from .tied_simulation3d_integral import TaichiSimulation3DIntegral, Receiver
-from ...taichi_kernel_base import TiedMixin, tied_profile
+from .tied_sparse_solver import TiedSparseSolver
+from ...taichi_kernel_base import TiedMixin, tied_profile, Profiler
 
 
 class TiedSimulation3DIntegralMixin(TiedMixin):
-    def __init__(self, this, **kwargs):
-        super().__init__(this, **kwargs)
-
     @tied_profile
     def linear_operator(this, self: Simulation3DIntegral):
         n_cells = self.nC
@@ -100,3 +99,14 @@ class TiedSimulation3DIntegralMixin(TiedMixin):
             np.save(sens_name, kernel)
 
         return kernel
+
+
+class TiedSimulation3DDifferentialMixin(TiedMixin):
+    def __init__(self, this, profile: Profiler | bool):
+        super().__init__(this, profile)
+        this.solver_opts = {
+            'fallback': this.solver,
+            'fallback_opts': this.solver_opts,
+            'rtol': 1e-5
+        }
+        this.solver = TiedSparseSolver

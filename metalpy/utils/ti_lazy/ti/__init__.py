@@ -3,5 +3,6 @@ from . import types
 from . import lang
 from . import math
 
+from .lang import *
 from .math import *
 from .primitive_types import *

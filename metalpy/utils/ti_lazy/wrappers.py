@@ -83,7 +83,7 @@ def ti_annotate(fn):
         else:
             if isinstance(annotation, str):
                 annotation = eval(annotation, fn.__globals__)  # TODO: 可能导致安全隐患? 限制允许的类型?
-            fn.__annotations__[arg] = ti_dummy.lang.to_taichi_type(annotation)
+            fn.__annotations__[arg] = ti_dummy.lang.util.cast_to_taichi_type(annotation)
 
     for key in fn.__globals__.keys():
         var = fn.__globals__[key]

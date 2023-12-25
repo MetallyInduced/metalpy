@@ -2,6 +2,7 @@ import numpy as np
 
 from metalpy.scab.utils.misc import Field
 from metalpy.utils.taichi import ti_ndarray
+from metalpy.utils.ti_solvers.solver_progress import ProgressList
 from metalpy.utils.type import notify_package
 from .kernel import kernel_matrix_forward
 from .solver import DemagnetizationSolver
@@ -16,7 +17,8 @@ class IntegratedSolver(DemagnetizationSolver):
             zn: np.ndarray,
             base_cell_sizes: np.ndarray,
             source_field: Field,
-            kernel_dtype=None
+            kernel_dtype=None,
+            progress=False
     ):
         """该函数直接计算核矩阵
 
@@ -43,7 +45,7 @@ class IntegratedSolver(DemagnetizationSolver):
 
         - 存在taichi的int32索引限制
         """
-        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field, kernel_dtype)
+        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field, kernel_dtype, progress)
 
         shape = (3 * self.n_obs, 3 * self.n_cells)
         if self.is_cpu:
@@ -65,13 +67,20 @@ class IntegratedSolver(DemagnetizationSolver):
             Amat = self.A
         else:
             Amat = self.A.to_numpy()
-        return solve_Ax_b(Amat, magnetization)
+        return solve_Ax_b(Amat, magnetization, progress=self.progress)
 
 
-def solve_Ax_b(A, m):
+def solve_Ax_b(A, m, progress: bool = False):
+    tol = 1e-5
+
     try:
         import pyamg
-        x, _ = pyamg.krylov.bicgstab(A, m)
+
+        norm = np.linalg.norm(m)
+        x, _ = pyamg.krylov.bicgstab(
+            A, m, tol=tol,
+            residuals=ProgressList(tol * norm) if progress else None
+        )
     except ModuleNotFoundError:
         notify_package(
             pkg_name='pyamg',

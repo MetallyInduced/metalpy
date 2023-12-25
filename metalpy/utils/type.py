@@ -5,8 +5,7 @@ import functools
 import sys
 import types
 import warnings
-from typing import Iterable, Callable
-
+from typing import Iterable, Callable, TypeVar
 
 if sys.version_info >= (3, 11):
     from typing import Self
@@ -14,6 +13,8 @@ else:
     from typing_extensions import Self
 
 Self = Self
+
+T = TypeVar('T')
 
 
 class Dummy:
@@ -207,11 +208,11 @@ def is_numeric_array(obj):
     return True
 
 
-def notify_package(pkg_name, reason, install=None):
+def make_package_notification(pkg_name, reason, install=None):
     if install is None:
         install = f'pip install {pkg_name}'
 
-    warnings.warn(
+    return (
         f'{reason}'
         f'\nConsider install `{pkg_name}` with following command:'
         f'\n'
@@ -220,7 +221,11 @@ def notify_package(pkg_name, reason, install=None):
     )
 
 
-def copy_func(f, globals=None, module=None):
+def notify_package(pkg_name, reason, install=None):
+    warnings.warn(make_package_notification(pkg_name, reason, install))
+
+
+def copy_func(f: T, globals=None, module=None) -> T:
     """Based on:
         https://stackoverflow.com/a/6528148 (@Glenn Maynard)
         https://stackoverflow.com/a/13503277 (@unutbu)

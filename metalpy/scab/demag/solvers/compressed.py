@@ -28,11 +28,11 @@ class CompressedSolver(DemagnetizationSolver):
             base_cell_sizes: np.ndarray,
             source_field: Field,
             kernel_dtype=None,
+            progress: bool = False,
             compressed_size: Union[int, float, None] = None,
             deterministic: Union[bool, str] = True,
             quantized: bool = False,
-            symmetric: bool = False,
-            progress: bool = False
+            symmetric: bool = False
     ):
         """该函数将核矩阵通过哈希表进行压缩，以计算效率为代价换取大幅降低内存需求量
 
@@ -105,10 +105,9 @@ class CompressedSolver(DemagnetizationSolver):
         - 例如使用 0.375 或 0.4375 替代 0.4
         - 可以使用 `metalpy.utils.numeric.limit_significand` 来搜索合适的网格尺寸
         """
-        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field, kernel_dtype)
+        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field, kernel_dtype, progress)
 
         self.deterministic = deterministic
-        self.progress = progress
 
         # 检查二进制小数的稳定性，例如 `0.4` 无法使用二进制小数精确表示，因此在其上的加减法会引入误差
         # 而CompressedSolver依赖数值的绝对相等来实现去重，对这种误差较为敏感，需要进行检查

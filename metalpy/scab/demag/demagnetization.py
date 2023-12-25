@@ -221,15 +221,15 @@ def dispatch_solver(
         'zn': zn,
         'base_cell_sizes': base_cell_sizes,
         'source_field': source_field,
-        'kernel_dtype': kernel_dtype
+        'kernel_dtype': kernel_dtype,
+        'progress': progress,
     }
     kw_int = {**common_kwargs}
-    kw_sep = {'progress': progress, **common_kwargs}
+    kw_sep = {**common_kwargs}
     kw_com = {
         'compressed_size': compressed_size,
         'deterministic': deterministic,
         'quantized': quantized,
-        'progress': progress,
         'symmetric': symmetric,
         **common_kwargs
     }

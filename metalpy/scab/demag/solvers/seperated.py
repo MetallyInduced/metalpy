@@ -21,8 +21,8 @@ class SeperatedSolver(DemagnetizationSolver):
             base_cell_sizes: np.ndarray,
             source_field: Field,
             kernel_dtype=None,
-            direct_to_host: bool = False,
-            progress: bool = False
+            progress: bool = False,
+            direct_to_host: bool = False
     ):
         """该函数将矩阵分为9个部分，从而实现一些优化
 
@@ -55,9 +55,8 @@ class SeperatedSolver(DemagnetizationSolver):
         - 网格规模仍然受到taichi的int32索引限制
         - 相比于 `Integrated` 方法，内存需求并不会降低，并且如果矩阵规模较小，计算效率可能会低于 `Integrated` 方法
         """
-        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field, kernel_dtype)
+        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field, kernel_dtype, progress)
         self.direct_to_host = direct_to_host
-        self.progress = progress
 
         self.builder = builder = ti_FieldsBuilder()
 

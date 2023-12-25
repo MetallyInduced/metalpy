@@ -13,6 +13,7 @@ from taichi.lang.kernel_impl import _kernel_impl
 from taichi.lang.util import to_taichi_type, to_numpy_type
 
 from .file import make_cache_directory, make_cache_file
+from .type import make_package_notification
 
 ti_cache_prefix = 'taichi_cache'
 
@@ -44,7 +45,7 @@ def ti_prepare(**kwargs) -> bool:
     """
     arch = kwargs.pop('arch', None)
     if arch is not None:
-        kwargs['arch'] = ti_arch(arch)
+        kwargs['arch'] = to_ti_arch(arch)
 
     conflicts = False
     for k, v in kwargs.items():
@@ -111,7 +112,7 @@ def ti_config(**kwargs):
     return WrappedTaichiContext(**kwargs)
 
 
-def ti_arch(arch):
+def to_ti_arch(arch):
     arch_type = type(ti.cpu)
     if isinstance(arch, str):
         return getattr(ti, arch)
@@ -122,6 +123,11 @@ def ti_arch(arch):
     else:
         raise ValueError(f"Unknown architecture, "
                          f"should be one of 'cpu', 'gpu' or specific backends like 'cuda' or 'vulkan'. ")
+
+
+def get_arch():
+    ti_init_once()
+    return ti.lang.impl.get_runtime().prog.config().arch
 
 
 def ti_func(fn, is_real_function=None):
@@ -296,6 +302,63 @@ def ti_ndarray_from(arr, sdim=0, dtype=None, field=False):
     container = ti_ndarray_like(arr, sdim=sdim, dtype=dtype, field=field)
     copy_from(container, arr)
     return container
+
+
+def ti_sparse_from(matrix, dtype=None):
+    """将其它稀疏矩阵类型转换为Taichi稀疏矩阵
+
+    目前只支持 `scipy.sparse` 稀疏矩阵类型
+
+    目前只支持 `coo` ， `csr` 和 `csc` 三种格式
+
+    Parameters
+    ----------
+    matrix
+        外部稀疏矩阵
+    dtype
+        指定taichi数组的数据类型，支持使用taichi或numpy的dtype标识
+
+    Returns
+    -------
+    ret
+        构造的Taichi稀疏矩阵
+    """
+    if dtype is None:
+        dtype = to_taichi_type(matrix.dtype)
+    else:
+        dtype = to_taichi_type(dtype)
+
+    matrix_builder = ti.linalg.SparseMatrixBuilder(
+        num_rows=matrix.shape[0],
+        num_cols=matrix.shape[1],
+        max_num_triplets=matrix.nnz,
+        dtype=dtype
+    )
+
+    if matrix.format == 'coo':
+        from metalpy.utils.taichi_kernels import from_sparse_coo
+        from_sparse_coo(matrix_builder, matrix.row, matrix.col, matrix.data)
+    elif matrix.format == 'csr':
+        from metalpy.utils.taichi_kernels import from_sparse_csr
+        from_sparse_csr(matrix_builder, matrix.indptr, matrix.indices, matrix.data)
+    elif matrix.format == 'csc':
+        from metalpy.utils.taichi_kernels import from_sparse_csc
+        from_sparse_csc(matrix_builder, matrix.indptr, matrix.indices, matrix.data)
+    else:
+        raise ValueError(f'Unsupported sparse matrix format: {matrix.format}')
+
+    try:
+        return matrix_builder.build()
+    except RuntimeError as e:
+        if 'load cusparse' in str(e).lower():
+            notification = make_package_notification(
+                pkg_name='cudatoolkit',
+                reason=f'Taichi sparse feature requires `cuSPARSE` to function properly,'
+                       f' which is part of `CUDA` toolkit.',
+                install='conda install cudatoolkit'
+            )
+            e.args = (e.args[0] + '\n' + notification,)
+        raise
 
 
 def ti_ndarray_like(arr, sdim=0, dtype=None, field=False, builder: ti.FieldsBuilder = None):

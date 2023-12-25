@@ -4,7 +4,7 @@
 
 import taichi as ti
 
-from .taichi import ti_func, ti_pyfunc
+from .taichi import ti_func, ti_pyfunc, ti_kernel
 
 
 @ti_pyfunc
@@ -39,3 +39,49 @@ def ti_index(i, j, stype: ti.template(), struct_size, array_size):
         return i * struct_size + j  # [x, y, z, x, y, z, ..., x, y, z]
     else:
         return j * array_size + i  # [x, x, ..., x, y, y, ..., y, z, z, ..., z]
+
+
+@ti_kernel
+def from_sparse_coo(
+        mat: ti.types.sparse_matrix_builder(),
+        row: ti.types.ndarray(),
+        col: ti.types.ndarray(),
+        val: ti.types.ndarray(),
+):
+    for i in range(val.shape[0]):
+        mat[row[i], col[i]] += val[i]
+
+
+@ti_kernel
+def from_sparse_coo(
+        mat: ti.types.sparse_matrix_builder(),
+        row: ti.types.ndarray(),
+        col: ti.types.ndarray(),
+        data: ti.types.ndarray(),
+):
+    for i in range(data.shape[0]):
+        mat[row[i], col[i]] += data[i]
+
+
+@ti_kernel
+def from_sparse_csr(
+        mat: ti.types.sparse_matrix_builder(),
+        indptr: ti.types.ndarray(),
+        indices: ti.types.ndarray(),
+        data: ti.types.ndarray(),
+):
+    for i in range(indptr.shape[0] - 1):
+        for j in range(indptr[i], indptr[i + 1]):
+            mat[i, indices[j]] += data[j]
+
+
+@ti_kernel
+def from_sparse_csc(
+        mat: ti.types.sparse_matrix_builder(),
+        indptr: ti.types.ndarray(),
+        indices: ti.types.ndarray(),
+        data: ti.types.ndarray(),
+):
+    for i in range(indptr.shape[0] - 1):
+        for j in range(indptr[i], indptr[i + 1]):
+            mat[indices[j], i] += data[j]

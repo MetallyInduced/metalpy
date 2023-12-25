@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from math import log10, inf
 
+import numpy as np
 import tqdm
 
 from metalpy.utils.numeric import limit_significand
 
 
 class SolverProgress:
-    def __init__(self, tol, maxiter, *, divergence_tol=27, mapper=log10, unit='logRES'):
+    def __init__(self, tol, maxiter: int | None = None, *, divergence_tol=27, mapper=log10, unit='logRES'):
         """通过残差来计算进度
 
         默认采用残差对数，不难注意到一些优化算法下，残差的对数呈线性下降趋势
@@ -18,7 +19,7 @@ class SolverProgress:
         tol
             目标残差
         maxiter
-            最大运行代数
+            最大运行代数，为None时代表不限制最大代数
         divergence_tol
             发散检测阈值，当残差大于初始残差次数超过 `divergence_tol` 时，改为按迭代代数统计进度
         mapper
@@ -26,6 +27,9 @@ class SolverProgress:
         unit
             残差单位，如果修改了 `mapper` 应该也要改一下单位
         """
+        if maxiter is None:
+            divergence_tol = maxiter = np.iinfo(np.int32).max
+
         self.mapper = mapper
         self.unit = unit
 
@@ -65,7 +69,7 @@ class SolverProgress:
                 if total > self.total:
                     total = self.total
                 delta = total - self.progress_bar.n
-                self.progress_bar.set_postfix(self.postfixes, refresh=False)
+                self.progress_bar.set_postfix(self.postfixes, refresh=delta == 0)
                 self.progress_bar.update(delta)
             else:
                 # 就要发散就要发散，给您改为基于迭代代数的进度条
@@ -114,3 +118,32 @@ class SolverProgress:
         self.log_res = log_res
 
         return log_res
+
+
+class ProgressList(list):
+    def __init__(self, tol, maxiter: int | None = None, *, divergence_tol=27, mapper=log10, unit='logRES'):
+        """通过残差来计算进度
+
+        默认采用残差对数，不难注意到一些优化算法下，残差的对数呈线性下降趋势
+
+        Parameters
+        ----------
+        tol
+            目标残差
+        maxiter
+            最大运行代数，为None时代表不限制最大代数
+        divergence_tol
+            发散检测阈值，当残差大于初始残差次数超过 `divergence_tol` 时，改为按迭代代数统计进度
+        mapper
+            残差转换函数，默认为限制有效位数下的对数函数
+        unit
+            残差单位，如果修改了 `mapper` 应该也要改一下单位
+        """
+        super().__init__()
+        self.tol = tol
+        self.progress = SolverProgress(tol, maxiter, divergence_tol=divergence_tol, mapper=mapper, unit=unit)
+
+    def append(self, residual):
+        self.progress.sync(residual)
+        if residual < self.tol:
+            self.progress.close()
