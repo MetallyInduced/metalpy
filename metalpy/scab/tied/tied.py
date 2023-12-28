@@ -89,11 +89,11 @@ class Tied(Patch, Distributable):
 
 @_Tied.implements('SimPEG.potential_fields.magnetics.simulation:Simulation3DIntegral')
 def _():
-    from .potential_fields.magnetics.simulation import TiedSimulation3DIntegralMixin
+    from .potential_fields.magnetics.simulation_3d_integral import TiedSimulation3DIntegralMixin
     return TiedSimulation3DIntegralMixin
 
 
 @_Tied.implements('SimPEG.potential_fields.magnetics.simulation:Simulation3DDifferential')
 def _():
-    from .potential_fields.magnetics.simulation import TiedSimulation3DDifferentialMixin
+    from .potential_fields.magnetics.simulation_3d_differential import TiedSimulation3DDifferentialMixin
     return TiedSimulation3DDifferentialMixin

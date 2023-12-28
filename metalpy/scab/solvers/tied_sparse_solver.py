@@ -49,21 +49,7 @@ class TiedSparseSolver(Base):
                 f'`TiedSparseSolver` for `ti.cpu` has only limited support.'
                 f' Falling back to `{self.fallback.__name__}`.'
             )
-
-            fallback = self.fallback
-            if fallback is None:
-                try:
-                    from pymatsolver import Pardiso as DefaultSolver
-                except ImportError:
-                    from SimPEG.utils.solver_utils import SolverLU as DefaultSolver
-                    notify_package(
-                        pkg_name='pydiso',
-                        reason=f'Consider using `Pardiso` for better performance'
-                               f' (currently `{DefaultSolver.__name__}`).',
-                        install='conda install pydiso'
-                    )
-                fallback = DefaultSolver
-
+            fallback = check_solver(self.fallback)
             return fallback(self.A, **self.fallback_opts) * rhs
         else:
             dtype = np.float32
@@ -82,3 +68,20 @@ class TiedSparseSolver(Base):
 
     def _solveM(self, rhs):
         return np.vstack([self._solve1(r)[:, np.newaxis] for r in rhs.T])
+
+
+def check_solver(solver):
+    if solver is None:
+        try:
+            from pymatsolver import Pardiso as DefaultSolver
+        except ImportError:
+            from SimPEG.utils.solver_utils import SolverLU as DefaultSolver
+            notify_package(
+                pkg_name='pydiso',
+                reason=f'Consider using `Pardiso` for better performance'
+                       f' (currently `{DefaultSolver.__name__}`).',
+                install='conda install pydiso'
+            )
+        solver = DefaultSolver
+
+    return solver

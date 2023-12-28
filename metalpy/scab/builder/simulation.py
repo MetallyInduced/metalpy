@@ -56,6 +56,10 @@ class BaseSimulationBuilder(SimulationBuilder):
 
         return mesh
 
+    @SimulationBuilder._supplies('solver', 'solver_opts')
+    def solver(self, solver_cls, **kwargs):
+        return solver_cls, kwargs
+
 
 class LinearSimulationBuilder(BaseSimulationBuilder):
     def __init__(self, sim_cls: type[LinearSimulation]):

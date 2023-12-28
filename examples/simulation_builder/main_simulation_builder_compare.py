@@ -10,6 +10,7 @@ from metalpy.carto.utils.mpl import plot_compare
 from metalpy.scab import Tied, Demaged, Formatted, Fixed
 from metalpy.scab.builder.simulation_builder import SimulationBuilder
 from metalpy.scab.modelling.shapes import Ellipsoid
+from metalpy.scab.solvers import AMGSolver
 from metalpy.utils.time import timed
 
 
@@ -57,6 +58,7 @@ def main():
     # differential simulation
     builder = SimulationBuilder.of(Simulation3DDifferential)
     builder.patched(Formatted(), Fixed())
+    builder.solver(AMGSolver, progress=True)
     builder.source_field(Btot, Inc, Dec)
     builder.receivers(rxLoc, components)
     builder.chi_map()
