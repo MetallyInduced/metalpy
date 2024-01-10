@@ -1,6 +1,6 @@
 import numpy as np
 
-from metalpy.utils.ear_clip import is_inside_convex_polygon
+from metalpy.utils.polygon.ear_clip import is_inside_convex_polygon
 
 
 def test_inside_polygon_tester():

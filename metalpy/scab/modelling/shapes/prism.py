@@ -4,12 +4,11 @@ import math
 from typing import TypeVar
 
 import numpy as np
-from scipy.stats import linregress
 
 from metalpy.mepa.utils import is_serial
 from metalpy.utils.bounds import Bounds
 from metalpy.utils.dhash import dhash
-from metalpy.utils.ear_clip import ear_clip
+from metalpy.utils.polygon import ear_clip, re_intersect, Edge
 from metalpy.utils.geometry import gen_random_convex_polygon
 from metalpy.utils.numeric import limit_significand
 from metalpy.utils.rand import check_random_state
@@ -21,69 +20,15 @@ from .shape3d import TransformedArray
 PrismT = TypeVar('PrismT', bound='Prism')
 
 
-def is_abs_distance_in(arr, x0, r):
-    return np.abs(arr - x0) < r
-
-
-def is_in_multipoints_or_point(pt, mp_or_pt):
-    if mp_or_pt.geom_type == 'Point':
-        return pt == mp_or_pt
-    else:
-        return pt in mp_or_pt.geoms
-
-
-class Edge:
-    def __init__(self, p1, p2):
-        self.p1, self.p2 = p1, p2
-        self.ymin = min(p1[1], p2[1])
-        self.ymax = max(p1[1], p2[1])
-        self.xmin = min(p1[0], p2[0])
-        self.xmax = max(p1[0], p2[0])
-
-        ends = np.vstack([p1, p2])
-
-        if p1[0] != p2[0]:  # 非垂直于x轴
-            slope, intercept, _, _, _ = linregress(ends[:, 0], ends[:, 1])
-            self.k, self.b = slope, intercept
-        else:
-            self.k = np.inf
-            self.x0 = p1[0]
-
-    @property
-    def signed_theta(self):
-        return np.arctan2(*(self.p2 - self.p1)[::-1])
-
-    @property
-    def length(self):
-        return np.linalg.norm(self.p2 - self.p1)
-
-    def intersects(self, pts):
-        x, y = pts[:, 0], pts[:, 1]
-        if np.isinf(self.k):
-            # 处理与垂直线相交的情形
-            # 由于是多面体，因此与该直线相交的射线一定与其重合
-            # 其所在直线会与该边的相邻两个边也存在交点
-            # 交于下端点视为相交，其余位置不视为相交
-            # 可以保证边缘点被视为多边形内
-            # 1. 点p在该线段之下，则只会与相邻边有2个交点
-            # 2. 点p在该线段与下方邻边交点，则会与相邻边和该边有3个交点
-            # 3. 点p在该线段中间及上方邻边交点，则只会与上方邻边有1个交点
-            indices = x == self.x0
-            indices[indices] = y[indices] == self.ymin
-            return indices
-        elif self.k == 0:
-            return (x >= self.xmin) & (x <= self.xmax) & (y <= self.ymin)
-        else:
-            y_intersection = self.k * x + self.b
-            return (y_intersection >= self.ymin) & (y_intersection <= self.ymax) & (y <= y_intersection)
-
-
 class Prism(Shape3D):
+    EdgesPerProgress = 4  # 每四条边作为一个进度单位
+
     def __init__(self,
                  pts,
                  z0: float | int = 0,
                  z1: float | int = 1,
                  cells=None,
+                 simplify=True,
                  check_non_simple=True,
                  verbose=True
                  ):
@@ -97,8 +42,13 @@ class Prism(Shape3D):
             底面和顶面高度
         cells
             array(n-2, 3)，每行包含三个属于(0, n-1)的下标，指定pts三角化后的结果
+        simplify
+            指示是否将多边形简单化。
+            默认为 `True` ，此时会自动通过重相交算法尝试检查自交点并转换为简单多边形
         check_non_simple
-            是否检查非简单多边形。为 `True` 时遇到非简单多边形会抛出异常，否则会继续执行（但大概率结果错误）
+            指示通过耳切法进行三角化时是否检查非简单多边形。
+            为 `True` 时遇到非简单多边形会抛出异常，
+            否则会直接返回部分三角化的结果（结果大概率错误）
         verbose
             是否输出辅助信息（主要为顶点数较多时导出PyVista模型会触发进度条）
         """
@@ -107,15 +57,16 @@ class Prism(Shape3D):
         self.z0 = min(z0, z1)
         self.z1 = max(z0, z1)
 
+        self.check_non_simple = check_non_simple
+        self.simplify = simplify
+        self.verbose = verbose
+
+        self._cells = None
+        self._pts = None
+        self._use_external_cells = False
+
         if cells is not None:
-            cells_shape = (len(self.pts) - 2, 3)
-            cells = np.asarray(cells)
-            assert cells.shape == cells_shape, \
-                f'`cells` must have shape {cells_shape},' \
-                f' containing triangulated polygon cells. (got {cells.shape})'
-            self.triangulated_polygon = np.asarray(cells)
-        else:
-            self.triangulated_polygon = ear_clip(self.pts, verbose=verbose, check_non_simple=check_non_simple)
+            self.triangulated_cells = cells
 
     @classmethod
     def rand(cls: type[PrismT],
@@ -199,10 +150,6 @@ class Prism(Shape3D):
 
         return cls(pts, z0, z1)
 
-    @property
-    def h(self):
-        return self.z1 - self.z0
-
     def do_place(self, mesh_cell_centers, progress):
         n_possible_grids = len(mesh_cell_centers)
 
@@ -216,9 +163,19 @@ class Prism(Shape3D):
             mesh = mesh_cell_centers[:, 0:2]
             n_intersects = np.zeros(n_possible_grids, dtype=int)
 
+            idx = 0
             for edge in edges:
                 intercepts = edge.intersects(mesh)
                 n_intersects = n_intersects + intercepts
+
+                idx += 1
+                if progress and idx % Prism.EdgesPerProgress == 0:
+                    # 每若干条边更新一次进度条
+                    progress.update(1)
+
+            if progress and idx % Prism.EdgesPerProgress != 0:
+                # 额外多出的边不足以更新进度条，在此处额外补足一次
+                progress.update(1)
 
             indices_horizontally_satisfied = (n_intersects & 1) == 1
         else:
@@ -256,15 +213,15 @@ class Prism(Shape3D):
         return Prism(pts=pts0_[:, :2], z0=pts0_[0, 2], z1=pts1_[0, 2])
 
     def do_compute_signed_distance(self, mesh_cell_centers: TransformedArray, progress):
-        return self._do_compute_signed_distance(mesh_cell_centers, kernel=is_serial())
+        return self._do_compute_signed_distance(mesh_cell_centers, kernel=is_serial(), progress=progress)
 
-    def _do_compute_signed_distance_taichi(self, mesh_cell_centers):
-        return self._do_compute_signed_distance(mesh_cell_centers, kernel=True)
+    def _do_compute_signed_distance_taichi(self, mesh_cell_centers, progress):
+        return self._do_compute_signed_distance(mesh_cell_centers, kernel=True, progress=progress)
 
-    def _do_compute_signed_distance_numpy(self, mesh_cell_centers):
-        return self._do_compute_signed_distance(mesh_cell_centers, kernel=False)
+    def _do_compute_signed_distance_numpy(self, mesh_cell_centers, progress):
+        return self._do_compute_signed_distance(mesh_cell_centers, kernel=False, progress=progress)
 
-    def _do_compute_signed_distance(self, mesh_cell_centers: TransformedArray, kernel=True):
+    def _do_compute_signed_distance(self, mesh_cell_centers: TransformedArray, progress, kernel=True):
         # 将特殊角度值常量固定下来，方便后续判断
         angle_mapping = np.arctan2(
             [0, 1, 0, -1],
@@ -325,6 +282,9 @@ class Prism(Shape3D):
             dist=dist
         )
 
+        if progress:
+            progress.update(self.n_tasks)
+
         return dist
 
     def __dhash__(self):
@@ -332,11 +292,52 @@ class Prism(Shape3D):
             super().__dhash__(),
             self.z0, self.z1,
             *self.pts.ravel(),
-            self.triangulated_polygon
+            self._cells if self._use_external_cells else None
         )
 
     def do_clone(self, deep=True):
         return Prism(self.pts.copy(), self.z0, self.z1)
+
+    def _check_triangulated(self):
+        """先检查 `pts` 是否属于简单多边形，如果为复杂多边形，则对内交点进行拆分与调整
+
+        然后再进行三角化得到最终 `cells`
+        """
+        if self._pts is None:
+            pts = self.pts
+            if self.simplify:
+                pts = re_intersect(pts, verbose=self.verbose)
+
+            self._pts = pts
+            self._cells = ear_clip(self._pts, verbose=self.verbose, check_non_simple=self.check_non_simple)
+
+    @property
+    def triangulated_points(self):
+        self._check_triangulated()
+        return self._pts
+
+    @property
+    def triangulated_cells(self):
+        self._check_triangulated()
+        return self._cells
+
+    @triangulated_cells.setter
+    def triangulated_cells(self, cells):
+        """直接指定cells，跳过复杂多边形检查
+        """
+        cells_shape = (len(self.pts) - 2, 3)
+        cells = np.asarray(cells)
+        assert cells.shape == cells_shape, \
+            f'`cells` must have shape {cells_shape},' \
+            f' containing triangulated polygon cells. (got {cells.shape})'
+
+        self._cells = np.asarray(cells)
+        self._pts = self.pts
+        self._use_external_cells = True
+
+    @property
+    def h(self):
+        return self.z1 - self.z0
 
     @property
     def local_bounds(self):
@@ -348,7 +349,7 @@ class Prism(Shape3D):
     def to_local_polydata(self):
         import pyvista as pv
 
-        pts = self.pts
+        pts = self.triangulated_points
         z0, z1 = self.z0, self.z1
         n_pts = len(pts)
         n_vertices = 2 * len(pts)
@@ -357,7 +358,7 @@ class Prism(Shape3D):
         vertices = np.c_[vh, vz]
         indices = np.arange(0, n_vertices, 1).reshape([-1, 2]).T
 
-        faces = self.triangulated_polygon
+        faces = self.triangulated_cells
         top_face = np.c_[np.repeat(3, faces.shape[0]), faces * 2].ravel()  # 上顶面
         bottom_face = np.c_[np.repeat(3, faces.shape[0]), faces * 2 + 1].ravel()  # 下底面
         edge_counts = np.ones(n_pts, dtype=np.integer) * 4
@@ -374,9 +375,10 @@ class Prism(Shape3D):
 
     @property
     def bottom_area(self):
+        pts = self.triangulated_points
         s = 0
-        for vi in self.triangulated_polygon:
-            v = self.pts[vi]
+        for vi in self.triangulated_cells:
+            v = pts[vi]
             si = np.abs(np.cross(v[1] - v[0], v[2] - v[0])) / 2
             s += si
 
@@ -393,6 +395,13 @@ class Prism(Shape3D):
         perimeter = np.linalg.norm(self.pts - rolled_pts, axis=1).sum()
 
         return 2 * ba + perimeter * self.h
+
+    def progress_manually(self):
+        return True
+
+    @property
+    def n_tasks(self):
+        return np.ceil(len(self.pts) / Prism.EdgesPerProgress).astype(int)
 
 
 @ti_lazy_kernel

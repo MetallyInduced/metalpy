@@ -307,7 +307,7 @@ class Obj2(Shape3D):
 
         indices[indices] = active_indices
 
-        if progress is not None:
+        if progress:
             progress.update(1)
 
         return indices

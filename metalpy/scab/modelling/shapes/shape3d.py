@@ -613,6 +613,19 @@ class TransformedArray(np.ndarray):
         self.transformer = getattr(obj, 'transformer', None)
         self.transform_hash = getattr(obj, 'transform_hash', None)
 
+    def __array_ufunc__(self, ufunc, method, *inputs, out=None, **kwargs):
+        typ = type(self)
+
+        inputs = tuple(np.asarray(inp) if isinstance(inp, typ) else inp for inp in inputs)
+        if out is not None:
+            out = tuple(np.asarray(o) if isinstance(o, typ) else o for o in out)
+        ret = super().__array_ufunc__(ufunc, method, *inputs, out=out, **kwargs)
+
+        if ret is NotImplemented:
+            return NotImplemented
+
+        return ret
+
     def verify(self, shape):
         """验证 `shape` 是否为变换的执行者，且变换未被修改
         """

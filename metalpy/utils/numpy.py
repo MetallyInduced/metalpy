@@ -1,4 +1,4 @@
-from typing import Mapping, Iterable
+from typing import Mapping, Iterable, Sequence
 
 import numpy as np
 
@@ -61,3 +61,54 @@ class FixedShapeNDArray(np.ndarray):
 
     def __getitem__(self, item):
         return super().__getitem__(item).view(np.ndarray)
+
+
+def is_dtype(dt):
+    if isinstance(dt, np.dtype):
+        return True
+
+    if not isinstance(dt, type):
+        return False
+
+    if dt in (bool, int, float, complex, str):
+        # Python内置类型作为numpy类型的别名
+        # https://numpy.org/devdocs/release/1.20.0-notes.html#deprecations
+        return True
+    elif issubclass(dt, np.generic):
+        # numpy 标量类型基类
+        return True
+
+    return False
+
+
+def dtype_of(arr, default=None):
+    dtype = None
+
+    if is_dtype(arr):
+        dtype = arr
+
+    if dtype is None:
+        dtype = getattr(arr, 'dtype', None)  # 如果已经是数组类型，则获取 dtype 属性
+
+    if dtype is None:
+        # 代表不是数组类型
+        if isinstance(arr, Sequence):
+            if len(arr) > 0:
+                dtype = dtype_of(arr[0])
+            else:
+                dtype = default
+        else:
+            dtype = np.asarray(arr).dtype
+
+    if dtype is None:
+        raise RuntimeError('Unable to detect the dtype of input array.')
+
+    return dtype
+
+
+def get_resolution(arr):
+    dtype = dtype_of(arr, default=float)
+    if np.issubdtype(dtype, np.integer):
+        dtype = float
+
+    return np.finfo(dtype).resolution * 10

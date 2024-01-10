@@ -2,7 +2,7 @@ import contextlib
 
 
 @contextlib.contextmanager
-def check_axis(ax, *, show=True, fig=None, figure=False, **fig_kw):
+def check_axis(ax, *, show=True, figure=False, **fig_kw):
     """检查外部传入的axis是否有效，无效则基于 `fig_kw` 的参数调用 `plt.subplots` 创建fig和ax进行绘图
 
     Parameters
@@ -36,8 +36,11 @@ def check_axis(ax, *, show=True, fig=None, figure=False, **fig_kw):
     """
     from matplotlib import pyplot as plt
 
+    fig = None
     if ax is None:
         fig, ax = plt.subplots(**fig_kw)
+    elif ax is plt:
+        fig = plt
 
     if figure:
         yield fig, ax
