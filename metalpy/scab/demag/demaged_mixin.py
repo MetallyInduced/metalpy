@@ -61,10 +61,10 @@ class DemagedMapping(maps.IdentityMap):
         return mkvc(vec_model)
 
     def inverse(self, D):
-        raise NotImplemented
+        raise NotImplementedError()
 
     def deriv(self, m, v=None):
-        raise NotImplemented
+        raise NotImplementedError()
 
     def cache(self, chi, field):
         self.cached_chi = np.copy(chi)

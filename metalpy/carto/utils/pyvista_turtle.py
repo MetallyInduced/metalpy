@@ -118,7 +118,7 @@ class PyVistaTurtle:
         self.seth((1, 0, 0))
 
     def circle(self, radius):
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def rotate(self, axes, angle, radians=False):
         angle = np.atleast_1d(angle)
@@ -131,7 +131,7 @@ class PyVistaTurtle:
     pos = position
 
     def towards(self):
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def xcor(self):
         return self.position()[0]

@@ -22,16 +22,21 @@ def is_inside_cuboid(mesh, corner, lengths):
         return np.full(mesh.shape[0], True)
 
 
-def is_inside_bounds(mesh, bounds):
+def is_inside_bounds(mesh_points, bounds):
+    mesh_points2d = np.atleast_2d(mesh_points)
+
     bounds = Bounds(bounds)
-    mask = np.ones(mesh.shape[0], dtype=bool)
+    mask = np.ones(mesh_points2d.shape[0], dtype=bool)
 
     for a in range(bounds.n_axes):
         amin, amax = bounds.get(a)
-        ax = mesh[:, a]
+        ax = mesh_points2d[:, a]
         if not np.isnan(amax):
             mask &= ax <= amax
         if not np.isnan(amin):
             mask &= ax >= amin
 
-    return mask
+    if np.ndim(mesh_points) == 1:
+        return mask[0]
+    else:
+        return mask

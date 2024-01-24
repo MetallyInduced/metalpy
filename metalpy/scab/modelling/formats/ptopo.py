@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Iterable, TYPE_CHECKING
+from typing import Iterable, TYPE_CHECKING, Sized
 
 from metalpy.scab.modelling.shapes import Prism, Cuboid, BarFramework
 from metalpy.utils.file import PathLike, openable
@@ -30,8 +30,11 @@ def dumps_ptopo(models: Iterable[Prism, Cuboid, BarFramework]) -> list:
         else:
             raise ValueError(f'Ptopo format supports only Cuboid and Prism shapes. Got {type(model)} instead.')
 
-        if pdef[1] == 0:  # hmin == 0，则隐藏
+        if pdef[1] == 0:  # hmin == 0，则隐藏下表面高度
             pdef = [pdef[0], pdef[2]]
+        if pdef[1] == 1:  # hmax == 1，则隐藏上表面高度，并移除多余的list嵌套
+            pdef = pdef[0]
+
         ret.append(pdef)
 
     return ret
@@ -91,10 +94,19 @@ def load_ptopo(ptopo: PathLike | list) -> list[Prism]:
 
     models = []
     for pdef in ptopo:
-        if len(pdef) == 2:
+        hmin, hmax = 0, 1
+        if len(pdef) == 1:
+            # [[[0, 0], [1, 0], [1, 1], [0, 1]]]
+            pts = pdef[0]
+        elif len(pdef) == 2:
+            # [[[0, 0], [1, 0], [1, 1], [0, 1]], 10]
             pts, hmax = pdef
-            hmin = 0
+        elif len(pdef) >= 3 and all(isinstance(p, Sized) and len(p) == 2 for p in pdef):
+            # 适配不附带z轴时的特殊格式，元素直接定义点列表
+            # [[0, 0], [1, 0], [1, 1], [0, 1]]
+            pts = pdef
         elif len(pdef) == 3:
+            # [[[0, 0], [1, 0], [1, 1], [0, 1]], 1, 10]
             pts, hmin, hmax = pdef
         else:
             raise ValueError('Broken prism definition! Expected to be ((pts...) [, hmin], hmax)')

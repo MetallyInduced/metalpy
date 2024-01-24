@@ -10,6 +10,7 @@ import tqdm
 
 from metalpy.utils.bounds import Bounds, union
 from metalpy.utils.dhash import dhash
+from metalpy.utils.type import Self
 from ..transform import Transformable
 from ..utils.mesh import is_inside_bounds
 
@@ -273,13 +274,13 @@ class Shape3D(Transformable, ABC):
     def __dhash__(self):
         return super().__dhash__()
 
-    def clone(self, deep=True):
+    def clone(self, deep=True) -> Self:
         ret = self.do_clone(deep=deep)
         ret.transforms = self.transforms.clone()
         return ret
 
     @abstractmethod
-    def do_clone(self, deep=True):
+    def do_clone(self, deep=True) -> Self:
         raise NotImplementedError()
 
     def to_polydata(self) -> 'pv.PolyData':

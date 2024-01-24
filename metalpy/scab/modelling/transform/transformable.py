@@ -33,7 +33,7 @@ class Transformable:
 
         return ret
 
-    def translate(self, x, y, z, inplace=False) -> Self:
+    def translate(self, x=0, y=0, z=0, inplace=False) -> Self:
         """对Shape进行平移
 
         Parameters
@@ -50,7 +50,7 @@ class Transformable:
         """
         return self.apply_transform(Translation(x, y, z), inplace=inplace)
 
-    def translated(self, x, y, z) -> Self:
+    def translated(self, x=0, y=0, z=0) -> Self:
         """对Shape进行平移
 
         同 `translate` ， 但默认启用 `inplace`
@@ -67,7 +67,7 @@ class Transformable:
         """
         return self.translate(x, y, z, inplace=True)
 
-    def rotate(self, a, b, y, degrees=True, radians=False, seq='xyz', inplace=False) -> Self:
+    def rotate(self, a=0, b=0, y=0, degrees=True, radians=False, seq='xyz', inplace=False) -> Self:
         """对Shape进行旋转，方向遵循右手准则
 
         Parameters
@@ -90,7 +90,7 @@ class Transformable:
         """
         return self.apply_transform(Rotation(a, b, y, degrees=degrees, radians=radians, seq=seq), inplace=inplace)
 
-    def rotated(self, a, b, y, degrees=True, radians=False, seq='xyz') -> Self:
+    def rotated(self, a=0, b=0, y=0, degrees=True, radians=False, seq='xyz') -> Self:
         """对Shape进行旋转，方向遵循右手准则
 
         同 `rotate` ， 但默认启用 `inplace`
@@ -132,7 +132,7 @@ class Transformable:
         ret
             返回变换后的对象，如果 `inplace=True` 则返回当前对象，否则返回拷贝对象
         """
-        return self.rotate(angle, 0, 0, degrees=degrees, radians=radians, inplace=inplace)
+        return self.rotate(a=angle, degrees=degrees, radians=radians, inplace=inplace)
 
     def rotate_y(self, angle, degrees=True, radians=False, inplace=False) -> Self:
         """对Shape的y方向进行旋转，方向遵循右手准则
@@ -153,7 +153,7 @@ class Transformable:
         ret
             返回变换后的对象，如果 `inplace=True` 则返回当前对象，否则返回拷贝对象
         """
-        return self.rotate(0, angle, 0, degrees=degrees, radians=radians, inplace=inplace)
+        return self.rotate(b=angle, degrees=degrees, radians=radians, inplace=inplace)
 
     def rotate_z(self, angle, degrees=True, radians=False, inplace=False) -> Self:
         """对Shape的z方向进行旋转，方向遵循右手准则
@@ -174,7 +174,7 @@ class Transformable:
         ret
             返回变换后的对象，如果 `inplace=True` 则返回当前对象，否则返回拷贝对象
         """
-        return self.rotate(0, 0, angle, degrees=degrees, radians=radians, inplace=inplace)
+        return self.rotate(y=angle, degrees=degrees, radians=radians, inplace=inplace)
 
     def __dhash__(self):
         return dhash(self.transforms)

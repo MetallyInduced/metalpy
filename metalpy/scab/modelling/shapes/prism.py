@@ -14,6 +14,7 @@ from metalpy.utils.geometry import gen_random_convex_polygon
 from metalpy.utils.numeric import limit_significand
 from metalpy.utils.rand import check_random_state
 from metalpy.utils.ti_lazy import ti_lazy_kernel, ti
+from metalpy.utils.type import Self
 from . import Shape3D
 from .shape3d import TransformedArray
 
@@ -224,6 +225,35 @@ class Prism(Shape3D):
             indices_horizontally_satisfied = np.full(n_possible_grids, False)
 
         return indices_horizontally_satisfied
+
+    def merge_transforms(self) -> Self:
+        """将棱柱实例上附加的空间变换（translate、rotate等）应用到其二维轮廓点上
+
+        Returns
+        -------
+        transformed_prism
+            合并变换后的新棱柱实例，且不包含附加的空间变换
+
+        Notes
+        -----
+        要求附加的空间变换不会改变坐标点的 z 轴坐标
+        """
+        z_plane_rotated_msg = (
+            f'Rotation of z-plane detected.'
+            f'Only transforms without rotating z-plane are supported for {type(self).__name__}.'
+        )
+
+        pts0 = np.c_[self.pts, np.full(len(self.pts), self.z0)]
+        pts0_ = self.transforms.transform(pts0)
+
+        assert np.allclose(pts0_[:, 2], pts0_[0, 2]), z_plane_rotated_msg
+
+        pts1 = np.c_[self.pts[:2], np.full(2, self.z1)]
+        pts1_ = self.transforms.transform(pts1)
+
+        assert np.allclose(pts1_[:, 2], pts1_[0, 2]), z_plane_rotated_msg
+
+        return Prism(pts=pts0_[:, :2], z0=pts0_[0, 2], z1=pts1_[0, 2])
 
     def do_compute_signed_distance(self, mesh_cell_centers: TransformedArray, progress):
         return self._do_compute_signed_distance(mesh_cell_centers, kernel=is_serial())
