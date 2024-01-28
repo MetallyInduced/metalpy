@@ -7,6 +7,8 @@ import types
 import warnings
 from typing import Iterable, Callable, TypeVar
 
+from .collections import OrderedSet
+
 if sys.version_info >= (3, 11):
     from typing import Self
 else:
@@ -242,6 +244,45 @@ def copy_func(f: T, globals=None, module=None) -> T:
     return g
 
 
-def get_all_subclasses(cls):
-    return set(cls.__subclasses__()).union(
-        [s for c in cls.__subclasses__() for s in get_all_subclasses(c)])
+def get_all_subclasses(cls: type) -> OrderedSet[type]:
+    subclasses: OrderedSet[type] = OrderedSet(cls.__subclasses__())
+    for c in cls.__subclasses__():
+        subclasses |= get_all_subclasses(c)
+
+    return subclasses
+
+
+def is_classmethod(meth):
+    import inspect
+    return inspect.ismethod(meth) and isinstance(meth.__self__, type)
+
+
+def is_inherited_method(impl, cls=None):
+    """检查子类的实现方法是否是继承自父类
+
+    Parameters
+    ----------
+    impl
+        子类的方法
+    cls
+        子类类型
+
+    Returns
+    -------
+    flag
+        若子类方法继承自父类，则返回True，
+        否则子类实现了自己的版本，返回False
+    """
+    if cls is None:
+        cls = getattr(impl, '__self__', None)
+
+        if cls is None:
+            raise ValueError(f'Cannot find class that owns method `{impl}`.'
+                             f' Consider specifying manually by `cls=YourClass`.')
+
+        if not isinstance(cls, type):
+            cls = type(cls)
+
+    impl = getattr(impl, '__func__', impl)
+
+    return impl.__name__ not in cls.__dict__
