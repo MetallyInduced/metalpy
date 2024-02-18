@@ -195,7 +195,7 @@ def dispatch_solver(
         compressed_size: int | float | None = None,
         deterministic: bool | str = True,
         quantized: bool = True,
-        symmetric: bool = False,
+        symmetric: bool | None = None,
         progress=False,
         kernel_dtype=None
 ) -> DemagnetizationSolver:
@@ -244,6 +244,10 @@ def dispatch_solver(
             f'Mesh with {n_cells} cells (> {max_cells_allowed_1})'
             f' requires symmetric `{CompressedSolver.__name__}` (got `{solver_name(method)}`).'
         )
+
+        if symmetric is None:
+            symmetric = 'strict'
+
         assert symmetric, (
             f'Mesh with {n_cells} cells (> {max_cells_allowed_1})'
             f' requires `symmetric` mesh.'

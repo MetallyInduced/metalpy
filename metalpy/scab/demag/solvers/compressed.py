@@ -1,6 +1,6 @@
 import math
 import warnings
-from typing import Union
+from typing import Union, Literal
 
 import numpy as np
 import taichi as ti
@@ -32,7 +32,7 @@ class CompressedSolver(DemagnetizationSolver):
             compressed_size: Union[int, float, None] = None,
             deterministic: Union[bool, str] = True,
             quantized: bool = False,
-            symmetric: bool = False
+            symmetric: Union[bool, Literal['strict']] = False
     ):
         """该函数将核矩阵通过哈希表进行压缩，以计算效率为代价换取大幅降低内存需求量
 
@@ -165,17 +165,23 @@ class CompressedSolver(DemagnetizationSolver):
         solver = not self.symmetric and solve_Tx_b_compressed or solve_Tx_b_compressed_symmetric
         return solver(self.Tmat321, self.indices_mat, magnetization, progress=self.progress)
 
-    def _create_indices_specs(self, symmetric):
+    def _create_indices_specs(self, symmetric: Union[bool, Literal['strict']]):
         h_gridded = self.h_gridded
 
         is_symmetric = np.allclose(h_gridded, h_gridded[0])
         if symmetric is None:
             symmetric = not self.is_cpu and is_symmetric
-        elif symmetric is True and not is_symmetric:
-            warnings.warn(
-                '`symmetric` mode is enabled on a non-symmetric mesh,'
-                ' which may lead to unexpected result.'
-            )
+        elif symmetric and not is_symmetric:
+            if symmetric == 'strict':
+                raise ValueError(
+                    '`symmetric` mode is not allowed on a non-symmetric mesh.'
+                    ' Try explicitly setting `symmetric=True` to force using symmetric mode.'
+                )
+            else:
+                warnings.warn(
+                    '`symmetric` mode is enabled on a non-symmetric mesh,'
+                    ' which may lead to unexpected result.'
+                )
 
         if not symmetric:
             axes = ti.ij
@@ -187,7 +193,9 @@ class CompressedSolver(DemagnetizationSolver):
         return symmetric, axes, indices_size
 
     def _build_indices(self, axes, indices_size, quantized):
+        should_warn = quantized is not None  # 如果以默认选项形式传入，则在忽略量化选项时不产生警告信息
         quantizable = is_extension_supported(self.arch, ti.extension.quant)
+
         if quantized is None:
             quantized = not self.is_cpu and quantizable
         elif quantized is True and not quantizable:
@@ -203,9 +211,10 @@ class CompressedSolver(DemagnetizationSolver):
             quantized_bits = math.ceil(np.log2(self.compressed_size))
             n_packed = primitive_bits // quantized_bits
             if n_packed <= 2:
-                warnings.warn(f'A single `uint{primitive_bits}` can pack only'
-                              f' {n_packed} quantized index type `uint{quantized_bits}`.'
-                              f' Ignoring `quantized` and using `{ti_size_dtype.__name__}` instead.')
+                if should_warn:
+                    warnings.warn(f'A single `uint{primitive_bits}` can pack only'
+                                  f' {n_packed} quantized index type `uint{quantized_bits}`.'
+                                  f' Ignoring `quantized` and using `{ti_size_dtype.__name__}` instead.')
                 break
 
             indices_type = ti.types.quant.int(

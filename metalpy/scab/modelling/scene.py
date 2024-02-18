@@ -339,7 +339,7 @@ class Scene(OSMFormat, PTopoFormat):
             active_cells,
             cell_size=None,
             iters=1,
-            limit_sig=True
+            limit_sig: bool | float = True
     ) -> ModelledMesh:
         """重新构建网格和模型，使得有效网格数接近 `active_cells`
 
@@ -352,7 +352,8 @@ class Scene(OSMFormat, PTopoFormat):
         iters
             迭代次数，每次迭代会根据上一次的结果调整网格尺寸
         limit_sig
-            是否限制网格尺寸的有效数字位数
+            是否限制网格尺寸的有效数字位数。
+            如果传入数字类型，则视为截断有效位数的容差。
 
         Returns
         -------
@@ -362,6 +363,7 @@ class Scene(OSMFormat, PTopoFormat):
         See Also
         --------
         Scene.build : 构造网格和模型
+        limit_significand : 截断有效数字
         """
         if cell_size is None:
             model_mesh = self.build(n_cells=active_cells)
@@ -372,8 +374,11 @@ class Scene(OSMFormat, PTopoFormat):
         for i in range(1, iters + 1):
             ratio = (model_mesh.n_active_cells / active_cells) ** (1 / 3)
             cell_size = [c * ratio for c in cell_size]
-            if i == iters and limit_sig:
-                cell_size = limit_significand(cell_size)
+            if i == iters and limit_sig is not False:
+                tol = None
+                if limit_sig is not True:
+                    tol = limit_sig
+                cell_size = limit_significand(cell_size, tol=tol)
             model_mesh = self.build(cell_size=cell_size)
 
         return model_mesh
