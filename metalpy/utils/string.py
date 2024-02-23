@@ -68,6 +68,8 @@ def format_string_list(strs,
     <<<     - `Mag.`
     <<<     - `EM`
     """
+    strs = [str(s) for s in strs]
+
     if quote is not None:
         if isinstance(quote, str):
             if len(quote) == 1:
@@ -84,9 +86,6 @@ def format_string_list(strs,
             warnings.warn(f'`format_string_list` got unknown `quote`: {quote}.'
                           f' Expect `str` or `Callable`.'
                           f' Ignoring it.')
-    else:
-        if not isinstance(strs, list):
-            strs = list(strs)
 
     if not isinstance(multiline, bool):
         line_limit = multiline

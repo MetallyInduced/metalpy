@@ -25,12 +25,12 @@ from .object import Object
 from .shapes import Shape3D
 from .shapes.full_space import FullSpace
 from .shapes.shape3d import bounding_box_of
-
+from .tree_mesh_builder import TreeMeshBuilder
 
 TScene = TypeVar('TScene', bound='Scene')
 
 
-class Scene(OSMFormat, PTopoFormat):
+class Scene(OSMFormat, PTopoFormat, TreeMeshBuilder):
     default_cache_dir = make_cache_directory('models')
     INACTIVE_BOOL = False
     INACTIVE_INT = 0

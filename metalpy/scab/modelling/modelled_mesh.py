@@ -145,6 +145,14 @@ class ModelledMesh:
         return self.mesh.cell_centers
 
     @property
+    def ndim(self):
+        return self.mesh.dim
+
+    @property
+    def dim(self):
+        return self.ndim
+
+    @property
     def active_cell_centers(self):
         return self.cell_centers[self.active_cells]
 
@@ -381,7 +389,8 @@ class ModelledMesh:
                     fill_inactive=None,
                     *,
                     prune: Literal[False] = False,
-                    **kwargs: ArrayLike) -> 'pv.RectilinearGrid': ...
+                    **kwargs: ArrayLike) -> 'pv.RectilinearGrid':
+        ...
 
     @overload
     def to_polydata(self,
@@ -390,7 +399,8 @@ class ModelledMesh:
                     fill_inactive=None,
                     *,
                     prune: Literal[True],
-                    **kwargs: ArrayLike) -> 'pv.UnstructuredGrid': ...
+                    **kwargs: ArrayLike) -> 'pv.UnstructuredGrid':
+        ...
 
     def to_polydata(self,
                     scalars: str | Iterable[str] | ArrayLike | bool = True,
@@ -599,10 +609,10 @@ class ModelledMesh:
             return ret
 
     def rebind(
-        self,
-        model: str | ArrayLike,
-        scalars: str | Iterable[str] | bool = False,
-        shallow=False
+            self,
+            model: str | ArrayLike,
+            scalars: str | Iterable[str] | bool = False,
+            shallow=False
     ) -> Self:
         """基于将网格重新绑定到model模型上或model作为字符串指定的模型上
 
@@ -654,15 +664,16 @@ class ModelledMesh:
 
         return ret
 
-    def expand(self,
-               new_bounds: ArrayLike | None = None,
-               *,
-               n_cells: ArrayLike | None = None,
-               ratio: ArrayLike | None = None,
-               precise: bool | None = None,
-               proportion=None,
-               increment=None
-               ) -> Self:
+    def expand(
+            self,
+            new_bounds: ArrayLike | None = None,
+            *,
+            n_cells: ArrayLike | None = None,
+            ratio: ArrayLike | None = None,
+            precise: bool | None = None,
+            proportion=None,
+            increment=None
+    ) -> Self:
         """扩张网格边界，边界网格支持指数增大网格或等距网格（指定ratio = 1）
 
         指数增长模式下，基础网格尺寸为对应方向边界网格的尺寸
@@ -694,8 +705,12 @@ class ModelledMesh:
         `ratio` 和 `n_cells` 均指定时，默认通过 `cells` 计算
 
         特殊地，如果在指定 `n_cells` 同时指定 `ratio=1` ，则采用等距网格进行扩张，否则在通过 `n_cells` 计算时无视 `ratio` 参数。
+
+        TODO: 可能可以扩展 SizedDummy 使其获得 "删除并增加" 语义，然后用 expand_cells 重写？
         """
-        assert isinstance(self.mesh, TensorMesh), '`expand` supports only `TensorMesh` for now.'
+        assert isinstance(self.mesh, TensorMesh), (
+            f'`{ModelledMesh.expand.__name__}` supports only `TensorMesh` for now.'
+        )
 
         old_bounds = self.bounds
 
@@ -708,7 +723,7 @@ class ModelledMesh:
             new_bounds.expand(proportion=proportion, increment=increment, inplace=True)
 
         bounds_delta = new_bounds - self.bounds
-        n_dims = bounds_delta.n_axes
+        ndim = self.ndim
 
         if ratio is not None:
             if np.ndim(ratio) == 0:
@@ -718,7 +733,7 @@ class ModelledMesh:
                 # 指定ratio，默认precise为False（ratio基本不可能实现精准对齐新网格边界）
                 precise = False
         else:
-            ratio = Bounds.unbounded(n_dims)
+            ratio = Bounds.unbounded(ndim)
             if precise is None:
                 # 没有指定ratio，默认precise为True
                 precise = True
@@ -728,15 +743,15 @@ class ModelledMesh:
                 n_cells = [n_cells] * 6
             n_cells = abs(Bounds(n_cells))
         else:
-            n_cells = Bounds.unbounded(n_dims)
+            n_cells = Bounds.unbounded(ndim)
 
         # 均未指定时，默认扩张区域的网格数恒定为5
         n_cells[np.isnan(n_cells) & np.isnan(ratio)] = 5
 
-        delta_origin = np.zeros(n_dims)
+        delta_origin = np.zeros(ndim)
         old_h = [np.copy(h) for h in self.mesh.h]
         new_h_spec = []
-        for axis in range(n_dims):
+        for axis in range(ndim):
             base_cell_size = self.mesh.h[axis][[0, -1]]
             delta = bounds_delta.get(axis)
             a_exps = ratio.get(axis)
@@ -771,11 +786,141 @@ class ModelledMesh:
 
             new_h_spec.append(current_h)
 
-        new_h = [np.concatenate(h) for h in new_h_spec]
-        new_mesh = TensorMesh(
-            new_h,
-            origin=new_bounds.origin + delta_origin
+        return self.reset_tensor_mesh_specs(
+            new_h_spec,
+            new_bounds.origin + delta_origin,
+            _skip_interior_checks=True
         )
+
+    def expand_cells(
+            self,
+            n_cells: ArrayLike | int = 0,
+            ratio: ArrayLike | float = 1.0,
+            cells: list[ArrayLike | SizedDummy] | None = None,
+    ) -> Self:
+        """扩张网格边界，通过直接指定新网格的参数来扩张
+
+        通过组合使用 `n_cells` 和 `ratio` 来自动计算新网格的参数
+
+        通过直接指定 `cells` 来直接添加新的网格
+
+        Parameters
+        ----------
+        n_cells
+            各个方向上增长的网格数，np.nan代表不指定，可以使用 `Bounds.bounded` 来部分指定
+        ratio
+            各个方向上增长网格的增长倍率，np.nan代表不指定，可以使用 `Bounds.bounded` 来部分指定
+        cells
+            各个方向上增长网格的网格尺寸，np.nan代表不指定，可以使用 `Bounds.bounded` 来部分指定
+
+        Returns
+        -------
+        ret
+            扩张边界后的网格
+
+        Notes
+        -----
+        特别地，可以在 `cells` 中通过指定负数长度的 :class:`SizedDummy` 来代表在对应方向上删除若干网格，例如
+
+        >>> # 删除 -x 方向边界上的 3 个网格
+        >>> model_mesh.expand_cells(cells=Bounds.bounded(xmin=SizedDummy(-3)))
+        """
+        assert isinstance(self.mesh, TensorMesh), (
+            f'`{ModelledMesh.expand_cells.__name__}` supports only `TensorMesh` for now.'
+        )
+
+        ndim = self.ndim
+
+        if np.ndim(n_cells) == 0:
+            n_cells = (np.asarray([-1, 1] * ndim) * n_cells).view(Bounds)
+        else:
+            n_cells = Bounds([0] * 2 * ndim).override(by=n_cells, inplace=True)
+
+        if np.ndim(ratio) == 0:
+            ratio = np.full(2 * ndim, ratio).view(Bounds)
+        else:
+            ratio = Bounds([1] * 2 * ndim).override(by=ratio, inplace=True)
+
+        old_h = self.mesh.h
+
+        if cells is None:
+            cells = []
+            for axis in range(ndim):
+                a_exps = ratio.get(axis)
+                a_cells = n_cells.get(axis).astype(int)
+
+                old_h_axis = old_h[axis]
+
+                if a_cells[0] < 0:
+                    # 扩张网格
+                    base = old_h_axis[0]
+                    cells.append(base * np.logspace(1, a_cells[0], num=a_cells[0], base=a_exps[0])[::-1])
+                else:
+                    # 收缩网格
+                    cells.append(SizedDummy(-a_cells[0]))
+
+                if a_cells[1] > 0:
+                    # 扩张网格
+                    base = old_h_axis[-1]
+                    cells.append(base * np.logspace(1, a_cells[1], num=a_cells[1], base=a_exps[1]))
+                else:
+                    # 收缩网格
+                    cells.append(SizedDummy(a_cells[1]))
+
+        delta_origin = np.zeros_like(self.origin)
+        new_h_spec = []
+        for axis in range(ndim):
+            ncs, pcs = cells[axis * 2], cells[axis * 2 + 1]
+            old_h_axis = old_h[axis]
+            current_h = [old_h_axis]
+
+            current_h.insert(0, ncs)
+            if ncs.shape[0] < 0:
+                delta_origin += np.sum(current_h[1][:-ncs.shape[0]])
+                current_h[1] = current_h[1][-ncs.shape[0]:]
+            else:
+                delta_origin -= np.sum(ncs)
+
+            current_h.insert(2, pcs)
+            if pcs.shape[0] < 0:
+                current_h[1] = current_h[1][:-pcs.shape[0]]
+
+            new_h_spec.append(current_h)
+
+        return self.reset_tensor_mesh_specs(
+            new_h_spec,
+            self.origin + delta_origin,
+            _skip_interior_checks=True
+        )
+
+    def reset_tensor_mesh_specs(self, hs=None, origin=None, *, _skip_interior_checks=False):
+        """重新设置结构化网格的网格参数（每个轴方向上的网格间距）
+
+        同时将旧网格上的模型参数重映射到新网格上
+
+        Parameters
+        ----------
+        hs
+            新的网格参数定义
+        origin
+            新的网格原点
+        _skip_interior_checks
+            指示是否跳过内部网格校验，检查新的网格参数是否导致了已有的非边界网格尺寸发生变化
+
+        Returns
+        -------
+        ret
+            更新定义后的网格
+
+        Notes
+        -----
+        由于需要重新映射参数，因此本函数只支持在边界增减网格或修改边界网格，
+        如果对内部的网格进行修改则会导致模型重映射给出错误的结果
+        """
+        old_h = self.mesh.h
+        new_h = [np.concatenate(h) for h in hs]
+
+        new_mesh = TensorMesh(new_h, origin=origin)
 
         # 计算新旧网格的三轴网格数
         old_mesh_shape = [len(h) for h in old_h]
@@ -787,12 +932,12 @@ class ModelledMesh:
         new_mesh_active = np.zeros(new_mesh_shape, dtype=bool, order='F')
 
         # 计算新旧网格的三轴网格数变化量
-        axis_bounds = np.asarray([(h[0].shape[0], h[-1].shape[0]) for h in new_h_spec], dtype=object)
+        axis_bounds = np.asarray([(h[0].shape[0], h[-1].shape[0]) for h in hs], dtype=object)
 
         # 计算旧网格在新网格中的三轴相交位置
         new_ind_mask_bound = axis_bounds.copy()
         new_ind_mask_bound[:, 1] *= -1
-        new_ind_mask_bound[axis_bounds < 0] = None
+        new_ind_mask_bound[axis_bounds <= 0] = None
         if np.all(new_ind_mask_bound == None):
             new_ind_mask_slices = slice(None)
         else:
@@ -801,11 +946,24 @@ class ModelledMesh:
         # 计算新网格在旧网格中的三轴相交位置
         old_ind_mask_bound = axis_bounds.copy()
         old_ind_mask_bound[:, 0] *= -1
-        old_ind_mask_bound[axis_bounds > 0] = None
+        old_ind_mask_bound[axis_bounds >= 0] = None
         if np.all(old_ind_mask_bound == None):
             old_ind_mask_slices = slice(None)
         else:
             old_ind_mask_slices = tuple(slice(*b) for b in old_ind_mask_bound)
+
+        if not _skip_interior_checks:
+            # 检查新的网格规格是否修改了内部网格的尺寸
+            for i, (old, old_mask, new, new_mask) in enumerate(zip(
+                    old_h, old_ind_mask_bound, new_h, new_ind_mask_bound
+            )):
+                if np.any(old[slice(*old_mask)][1:-1] != new[slice(*new_mask)][1:-1]):
+                    raise ValueError(
+                        f'Modification of interior cells detected on axis {i},'
+                        f' which will lead to undefined behavior when remapping model.'
+                        f' To force continuing the process,'
+                        f' try disable this check by setting `_skip_checks=True`.'
+                    )
 
         new_mesh_active[new_ind_mask_slices] = True
         old_mesh_active[old_ind_mask_slices] = old_mesh_active_[old_ind_mask_slices]
