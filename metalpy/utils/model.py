@@ -112,7 +112,7 @@ def split_models_in_memory(model, verbose=True):
         ret = []
 
         if verbose:
-            progress = tqdm.tqdm(total=model.n_faces, desc='Splitting models by edge connectivity')
+            progress = tqdm.tqdm(total=model.n_faces_strict, desc='Splitting models by edge connectivity')
         else:
             progress = None
 
@@ -123,7 +123,7 @@ def split_models_in_memory(model, verbose=True):
         with open(cache, 'wb') as f:
             if verbose:
                 print(f'Saving split models to {cache}...')
-            pickle.dump(models, f)
+            pickle.dump(ret, f)
 
     return ret
 
@@ -135,7 +135,7 @@ def split_models_in_memory_edgewisely(model, verbose=True, progress=None):
     faces_size = len(model_faces)
 
     if verbose and progress is None:
-        progress = tqdm.tqdm(total=faces_size, desc='Splitting models by edge connectivity')
+        progress = tqdm.tqdm(total=model.n_faces_strict, desc='Splitting models by edge connectivity')
 
     while i < faces_size:
         nv = model_faces[i]

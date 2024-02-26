@@ -59,7 +59,7 @@ scab = [
     "scipy",
     "scikit-learn",
     # visualization
-    "pyvista",
+    "pyvista >= 0.43.1",
     "matplotlib",
     "colour",
     # computational
