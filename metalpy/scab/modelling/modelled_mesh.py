@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Iterable, TYPE_CHECKING, Literal, overload
+from typing import Iterable, TYPE_CHECKING, Literal, overload, Sequence
 
 import numpy as np
 from discretize import TensorMesh
@@ -32,6 +32,16 @@ class ModelledMesh:
     -----
     map_xxx_to_xxx系列函数均不保证输出的向量是否为原向量的视图，
     即输出的向量有可能与输入向量共享内存空间，也有可能不是，因此仅作只读用途使用。
+
+    `ind_active` 支持通过有效网格掩码或者有效网格索引来指定，在稀疏网格中后者性能往往更好
+
+    ModelledMesh现在显式区分 `active_mask` 和 `active_indices` ：
+
+    * `active_mask` 保证返回值为可计算的有效网格掩码；
+
+    * `active_indices` 可以规避多余的网格掩码转换，但是只保证返回值可用于 `np.ndarray` 的索引操作，
+      返回值可能为切片（“:”）、有效掩码（[True, False, True,...]）或有效元素索引（[0, 2, ...]）
+      （详见[numpy索引格式](https://numpy.org/doc/stable/user/basics.indexing.html)）。
     """
 
     def __init__(self,
@@ -60,30 +70,21 @@ class ModelledMesh:
             default_key = get_first_key(converted_models)
 
         if ind_active is not None:
-            ind_active = np.asarray(ind_active)
-            if ind_active.dtype == bool:
-                assert ind_active.shape[0] == self.n_cells, \
-                    f'`ind_active` defines activeness for all mesh cells,' \
-                    f' which must have same size with mesh cells.' \
-                    f' Got {ind_active.shape[0]}, expected {self.n_cells}.'
-            else:
-                assert np.issubdtype(ind_active.dtype, np.integer), \
-                    f'`ind_active` must be array of `bool` or `integer`. Got `{ind_active.dtype}`.'
+            self.active_cells = ind_active
+        elif len(converted_models) > 0:
+            for key, model in converted_models.items():
+                assert model.shape[0] == self.n_cells, \
+                    f'`ModelledMesh`\'s constructor expects models to contain all mesh cells\'s values' \
+                    f' in order to build `active_index`.' \
+                    f' Avoid this by either specifying `ind_active` manually or' \
+                    f' converting models["{key}"] to match all the mesh cells.' \
+                    f' Got {model.shape[0]}, expected {self.n_cells}.'
+            ind_active = Scene.compute_active(converted_models.values())
+            self.active_mask = ind_active
         else:
-            if len(converted_models) > 0:
-                for key, model in converted_models.items():
-                    assert model.shape[0] == self.n_cells, \
-                        f'`ModelledMesh`\'s constructor expects models to contain all mesh cells\'s values' \
-                        f' in order to build `active_index`.' \
-                        f' Avoid this by either specifying `active_index` manually or' \
-                        f' converting models["{key}"] to match all the mesh cells.' \
-                        f' Got {model.shape[0]}, expected {self.n_cells}.'
-                ind_active = Scene.compute_active(converted_models.values())
-            else:
-                ind_active = np.ones(mesh.n_cells, dtype=bool)
+            self.active_cells = True
 
         self._models = converted_models
-        self._ind_active = ind_active
         self.default_key = default_key
 
     @property
@@ -105,18 +106,99 @@ class ModelledMesh:
 
     @property
     def active_cells(self):
-        return self._ind_active
+        """从兼容性考量，返回有效元素掩码，等价于 `active_mask`
+        """
+        return self.active_mask
 
     @active_cells.setter
     def active_cells(self, val):
+        val = np.asarray(val)
+        if val.dtype == bool:
+            self.active_mask = val
+        else:
+            self.active_indices = val
+
+    @property
+    def active_mask(self):
+        """返回有效元素掩码，如果存储的有效元素为索引形式，则可能导致额外的内存消耗和计算量
+
+        如果只是直接用于从 complete model 中提取有效元素，可以考虑使用 `active_indices` 以获得更高的效率
+        """
+        if self.is_all_active or self.is_all_inactive:
+            return np.full(self.n_cells, self._ind_active)
+        elif self.is_active_indices:
+            # 整型指定的稀疏索引格式，转换为掩码形式
+            mask = np.zeros(self.n_cells, dtype=bool)
+            mask[self._ind_active] = True
+            return mask
+        else:  # active mask形式
+            return self._ind_active
+
+    @active_mask.setter
+    def active_mask(self, val):
+        val = np.asarray(val)
+
+        if np.ndim(val) == 0:
+            # 如果val是0维标量，则取消ndarray的包装
+            val = val.item()
+
+        if val is True or val is False:
+            self._ind_active = val
+        else:
+            assert val.shape[0] == self.n_cells, \
+                f'`ind_active` defines activeness for all mesh cells,' \
+                f' which must have same size with mesh cells.' \
+                f' Got {val.shape[0]}, expected {self.n_cells}.'
+
+            self._ind_active = val
+
+    @property
+    def active_indices(self):
+        """返回有效元素索引，可以作为numpy array的索引，返回值可能为任何numpy支持的索引方式
+        """
+        if self.is_all_active:
+            return slice(None)
+        elif self.is_all_inactive:
+            return []
+        elif self.is_active_indices:
+            return self._ind_active
+        else:  # active mask形式
+            return self.active_mask
+
+    @active_indices.setter
+    def active_indices(self, val):
+        val = np.asarray(val)
+        assert np.issubdtype(val.dtype, np.integer), \
+            f'`ind_active` must be array of `bool` or `integer`. Got `{val.dtype}`.'
+
         self._ind_active = val
 
     @property
+    def is_active_indices(self):
+        """指示有效网格是否是由稀疏下标指定（而非有效掩码）
+        例如针对四个网格
+        使用 [0, 2] 作为稀疏下标等价于 [True, False, True, False] 的有效掩码
+        """
+        return np.issubdtype(self._ind_active.dtype, np.integer)
+
+    @property
+    def is_all_active(self):
+        return self._ind_active is True
+
+    @property
+    def is_all_inactive(self):
+        return self._ind_active is False
+
+    @property
     def n_active_cells(self):
-        if self._ind_active.dtype == bool:
+        if self.is_all_active:
+            return self.n_cells
+        elif self.is_all_inactive:
+            return 0
+        elif self.is_active_indices:
+            return len(self.active_indices)
+        else:  # active mask形式
             return np.count_nonzero(self._ind_active)
-        else:
-            return self._ind_active.shape[0]
 
     @property
     def n_cells(self):
@@ -153,8 +235,12 @@ class ModelledMesh:
         return self.ndim
 
     @property
+    def h(self):
+        return self.mesh.h
+
+    @property
     def active_cell_centers(self):
-        return self.cell_centers[self.active_cells]
+        return self.cell_centers[self.active_indices]
 
     @property
     def bounds(self):
@@ -201,14 +287,15 @@ class ModelledMesh:
 
     def is_subset(self, mask):
         mask = self.check_complete_mask(mask)
-        return np.all(self.active_cells | mask == self.active_cells)
+        active_mask = self.active_mask
+        return np.all(active_mask | mask == active_mask)
 
     def get_complete_model(self, key=None, **kwargs):
         if key is None:
             if self.has_default_model:
                 key = self.default_key
             else:
-                return self.active_cells
+                return self.active_mask
 
         return self.map_to_complete(self.get_raw_model(key), **kwargs)
 
@@ -260,7 +347,7 @@ class ModelledMesh:
                 ret = ret.copy()
 
             if fill_inactive is not None:
-                ret[~self.active_cells] = fill_inactive
+                ret[~self.active_mask] = fill_inactive
         elif self.is_active_model(model):
             base_type = dtype or model.dtype
             if fill_inactive is None:
@@ -268,7 +355,7 @@ class ModelledMesh:
             else:
                 inactive_val = fill_inactive
             ret = np.full(self.n_cells, inactive_val, dtype=base_type)
-            ret[self.active_cells] = model
+            ret[self.active_indices] = model
         else:
             raise self._unsupported_model_exception(model)
 
@@ -279,7 +366,7 @@ class ModelledMesh:
         if self.is_active_model(model):
             ret = model
         elif self.is_complete_model(model):
-            ret = model[self.active_cells]
+            ret = model[self.active_indices]
         else:
             raise self._unsupported_model_exception(model)
 
@@ -475,7 +562,7 @@ class ModelledMesh:
         key_active_cells = ensure_set_key(
             models,
             default_key_active_cells,
-            self._ind_active  # 保证为complete_model
+            self.active_mask  # 保证为complete_model
         )
         if key_active_cells != default_key_active_cells:
             warnings.warn(f'Conflicted key with default key `{default_key_active_cells}` detected,'
@@ -492,8 +579,8 @@ class ModelledMesh:
         ret: pv.RectilinearGrid = Scene.mesh_to_polydata(self.mesh, models)
         ret.set_active_scalars(active_scalars)
 
-        if prune:
-            return ret.extract_cells(self.active_cells)
+        if prune and not self.is_all_active:
+            return ret.extract_cells(self.active_indices)
 
         return ret
 
@@ -527,7 +614,7 @@ class ModelledMesh:
             new_active_cells = self.map_to_complete(indices)
         else:
             new_active_cells = self.check_complete_mask(indices)
-            new_active_cells &= self.active_cells
+            new_active_cells[self.active_indices] &= True
             indices = self.map_to_active(new_active_cells)
 
         scalars = self._check_scalars(scalars)
@@ -705,8 +792,6 @@ class ModelledMesh:
         `ratio` 和 `n_cells` 均指定时，默认通过 `cells` 计算
 
         特殊地，如果在指定 `n_cells` 同时指定 `ratio=1` ，则采用等距网格进行扩张，否则在通过 `n_cells` 计算时无视 `ratio` 参数。
-
-        TODO: 可能可以扩展 SizedDummy 使其获得 "删除并增加" 语义，然后用 expand_cells 重写？
         """
         assert isinstance(self.mesh, TensorMesh), (
             f'`{ModelledMesh.expand.__name__}` supports only `TensorMesh` for now.'
@@ -748,9 +833,8 @@ class ModelledMesh:
         # 均未指定时，默认扩张区域的网格数恒定为5
         n_cells[np.isnan(n_cells) & np.isnan(ratio)] = 5
 
-        delta_origin = np.zeros(ndim)
         old_h = [np.copy(h) for h in self.mesh.h]
-        new_h_spec = []
+        cells = []
         for axis in range(ndim):
             base_cell_size = self.mesh.h[axis][[0, -1]]
             delta = bounds_delta.get(axis)
@@ -758,45 +842,39 @@ class ModelledMesh:
             a_cells = n_cells.get(axis)
 
             old_h_axis = old_h[axis]
-            current_h = [old_h_axis]
+            current_h = [[], old_h_axis, []]
 
             if delta[0] < 0:
                 specs, extra = compute_exponential_cell_specs(
                     -delta[0], base_cell_size[0], a_exps[0], a_cells[0],
                     precise=precise
                 )
-                delta_origin[axis] -= extra
-                current_h.insert(0, specs[::-1])
+                current_h[0] = specs[::-1]
             else:
-                h, extra = compute_trimmed_length(delta[0], current_h[0], precise)
-                current_h.insert(0, SizedDummy(len(h) - len(current_h[0])))
-                current_h[1] = h
-                delta_origin[axis] -= extra
+                h, extra = compute_trimmed_length(delta[0], current_h[1], precise)
+                current_h[0] = DeleteAndExtend(len(current_h[1]) - len(h) + 1, arr=[h[0]])
+                current_h[1] = h[1:]
 
             if delta[1] > 0:
                 specs, extra = compute_exponential_cell_specs(
                     delta[1], base_cell_size[1], a_exps[1], a_cells[1],
                     precise=precise
                 )
-                current_h.append(specs)
+                current_h[2] = specs
             else:
                 h, extra = compute_trimmed_length(-delta[1], current_h[1][::-1], precise)
-                current_h.append(SizedDummy(len(h) - len(current_h[1])))
-                current_h[1] = h[::-1]
+                current_h[2] = DeleteAndExtend(len(current_h[1]) - len(h) + 1, arr=[h[0]])
+                current_h[1] = h[:0:-1]
 
-            new_h_spec.append(current_h)
+            cells.extend(current_h[::2])
 
-        return self.reset_tensor_mesh_specs(
-            new_h_spec,
-            new_bounds.origin + delta_origin,
-            _skip_interior_checks=True
-        )
+        return self.expand_cells(cells=cells)
 
     def expand_cells(
             self,
             n_cells: ArrayLike | int = 0,
             ratio: ArrayLike | float = 1.0,
-            cells: list[ArrayLike | SizedDummy] | None = None,
+            cells: list[ArrayLike | DeleteAndExtend] | None = None,
     ) -> Self:
         """扩张网格边界，通过直接指定新网格的参数来扩张
 
@@ -855,35 +933,36 @@ class ModelledMesh:
                     # 扩张网格
                     base = old_h_axis[0]
                     cells.append(base * np.logspace(1, a_cells[0], num=a_cells[0], base=a_exps[0])[::-1])
+                elif a_cells[0] == 0:
+                    cells.append(np.array([], dtype=bool))
                 else:
                     # 收缩网格
-                    cells.append(SizedDummy(-a_cells[0]))
+                    cells.append(DeleteAndExtend(a_cells[0]))
 
                 if a_cells[1] > 0:
                     # 扩张网格
                     base = old_h_axis[-1]
                     cells.append(base * np.logspace(1, a_cells[1], num=a_cells[1], base=a_exps[1]))
+                elif a_cells[1] == 0:
+                    cells.append(np.array([], dtype=bool))
                 else:
                     # 收缩网格
-                    cells.append(SizedDummy(a_cells[1]))
+                    cells.append(DeleteAndExtend(-a_cells[1]))
 
-        delta_origin = np.zeros_like(self.origin)
         new_h_spec = []
+        delta_origin = np.zeros_like(self.origin)
         for axis in range(ndim):
             ncs, pcs = cells[axis * 2], cells[axis * 2 + 1]
             old_h_axis = old_h[axis]
-            current_h = [old_h_axis]
+            current_h = [ncs, old_h_axis, pcs]
 
-            current_h.insert(0, ncs)
-            if ncs.shape[0] < 0:
-                delta_origin += np.sum(current_h[1][:-ncs.shape[0]])
-                current_h[1] = current_h[1][-ncs.shape[0]:]
-            else:
-                delta_origin -= np.sum(ncs)
+            delta_origin[axis] -= np.sum(ncs)
+            if isinstance(ncs, DeleteAndExtend):
+                delta_origin[axis] += np.sum(ncs.clip(current_h[1], pos=0))
+                current_h[1] = ncs.delete(current_h[1], pos=0)
 
-            current_h.insert(2, pcs)
-            if pcs.shape[0] < 0:
-                current_h[1] = current_h[1][:-pcs.shape[0]]
+            if isinstance(pcs, DeleteAndExtend):
+                current_h[1] = pcs.delete(current_h[1], pos=-1)
 
             new_h_spec.append(current_h)
 
@@ -927,7 +1006,8 @@ class ModelledMesh:
         new_mesh_shape = [len(h) for h in new_h]
 
         # 构造新旧网格的张量有效网格掩码
-        old_mesh_active_ = self._ind_active.reshape(old_mesh_shape, order='F')
+        old_active_mask = self.active_mask
+        old_mesh_active_ = old_active_mask.reshape(old_mesh_shape, order='F')
         old_mesh_active = np.zeros(old_mesh_shape, dtype=bool, order='F')
         new_mesh_active = np.zeros(new_mesh_shape, dtype=bool, order='F')
 
@@ -968,7 +1048,7 @@ class ModelledMesh:
         new_mesh_active[new_ind_mask_slices] = True
         old_mesh_active[old_ind_mask_slices] = old_mesh_active_[old_ind_mask_slices]
 
-        old_ind_mask = old_mesh_active.ravel(order='F')[self._ind_active]
+        old_ind_mask = old_mesh_active.ravel(order='F')[old_active_mask]
         if np.all(old_ind_mask):
             old_ind_mask = slice(None)
 
@@ -986,7 +1066,7 @@ class ModelledMesh:
 
         # 重新绑定为实际的有效网格掩码
         new_mesh_active[new_ind_mask_slices] = old_mesh_active_[old_ind_mask_slices]
-        ret._ind_active = new_mesh_active.ravel(order='F')
+        ret.active_mask = new_mesh_active.ravel(order='F')
 
         for key, model in models.items():
             ret[key] = model
@@ -1128,20 +1208,64 @@ def solve_geometric_terms_count(s_n, q, a):
     return np.log(s_n / a * (q - 1) + 1) / np.log(q)
 
 
-class SizedDummy:
-    def __init__(self, size):
-        self.size = size
+class DeleteAndExtend:
+    def __init__(self, deletion, arr: Sequence = tuple()):
+        """代表在特定方向上移除 `deletion` 个元素后追加 arr
+
+        Parameters
+        ----------
+        deletion
+            需要移除的元素数
+        arr
+            需要追加的元素
+        """
+        self.deletion = deletion
+        self.arr = arr
 
     @property
     def shape(self):
-        return (self.size,)
+        return (-self.deletion + len(self.arr),)
 
     def __iter__(self):
-        yield from []
+        yield from self.arr
 
     def __repr__(self):
-        return f'{SizedDummy.__name__}(size={self.size})'
+        return f'{DeleteAndExtend.__name__}(deletion={self.deletion}, arr={self.arr})'
 
-    @staticmethod
-    def __array__():
-        return np.asarray([], dtype=bool)
+    def __array__(self):
+        return np.asarray(self.arr)
+
+    def clip(self, sequence, pos=0):
+        if self.deletion == 0:
+            return sequence[:0]
+
+        if pos >= 0:
+            return sequence[pos:pos + self.deletion]
+        else:
+            if pos == -1:
+                slicer = slice(pos - self.deletion + 1, None)
+            else:
+                slicer = slice(pos - self.deletion + 1, pos + 1)
+
+            return sequence[slicer]
+
+    def delete(self, sequence, pos=0):
+        if isinstance(sequence, (list, tuple)):
+            def concat(seqs):
+                return sum(seqs, type(sequence)())
+        else:
+            concat = np.r_.__getitem__
+
+        if self.deletion == 0:
+            return sequence
+
+        if pos >= 0:
+            if pos == 0:
+                return sequence[self.deletion:]
+            else:
+                return concat((sequence[:pos], sequence[pos + self.deletion:]))
+        else:
+            if pos == -1:
+                return sequence[:-self.deletion]
+            else:
+                return concat((sequence[:pos - self.deletion + 1], sequence[pos + 1:]))
