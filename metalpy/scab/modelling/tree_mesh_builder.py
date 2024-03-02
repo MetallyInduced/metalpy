@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import enum
+import os
 import warnings
 from typing import TYPE_CHECKING, Sequence, Literal
 
@@ -75,6 +76,9 @@ class TreeMeshBuilder:
         * `'simplify'` 方法通过自底向上的方法构建八叉树，运行效率较低，
           运行耗时一般为 `'refine'` 方法的 200% ~ 600% 或更高
 
+        由于 `discretize` 包的八叉树并未暴露直接构建的接口，
+        因此导出和导出都会出发一次构建过程，所以目前缓存网格意义似乎不大
+
         See Also
         --------
         Scene.create_mesh : 构造基础网格
@@ -91,7 +95,9 @@ class TreeMeshBuilder:
             mesh = self.refine_mesh(
                 base_mesh,
                 ratio=1,
-                diagonal_balance=diagonal_balance
+                diagonal_balance=diagonal_balance,
+                cache=cache,
+                cache_dir=cache_dir
             )
             ret = self.build_model(
                 mesh,
@@ -104,7 +110,9 @@ class TreeMeshBuilder:
                 n_cells=n_cells,
                 bounds=bounds,
                 executor=executor,
-                progress=progress
+                progress=progress,
+                cache=cache,
+                cache_dir=cache_dir
             )
             ret = self.simplify(
                 base_model_mesh,
@@ -178,17 +186,24 @@ class TreeMeshBuilder:
         models = tuple(reversed(models))
         merge_masks = tuple(reversed(merge_masks))
 
-        mesh = TreeMesh(base_mesh.mesh.h, origin=base_mesh.origin)
-
-        def func(cell: TreeCell):
-            merge_mask = merge_masks[cell._level]
-
+        # 构造八叉树
+        indexes, levels = [], []
+        for i, merge_mask in enumerate(merge_masks):
+            if merge_mask.size == 0:
+                # 三轴网格数不同，存在一个必定拆分的顶级层级
+                continue
             base = shape_cells // merge_mask.shape
-            loc = cell._index_loc // base // 2
+            index_loc = np.column_stack(np.where(~merge_mask)) * base * 2 + base // 2
+            indexes.append(index_loc)
+            levels.append(np.full(len(index_loc), i + 1))
 
-            return cell._level + ~merge_mask[tuple(loc)]
-
-        mesh.refine(func, diagonal_balance=diagonal_balance)
+        mesh = TreeMesh(
+            base_mesh.mesh.h,
+            origin=base_mesh.origin,
+            cell_indexes=np.vstack(indexes),
+            cell_levels=np.concatenate(levels),
+            diagonal_balance=diagonal_balance
+        )
 
         new_model = np.empty(len(mesh), dtype=base_model.dtype)
         for i, cell in enumerate(mesh):
@@ -211,7 +226,9 @@ class TreeMeshBuilder:
             base_mesh: ModelledMesh | TensorMesh,
             ratio: int | Sequence[int] = 2,
             *,
-            diagonal_balance=False
+            diagonal_balance=False,
+            cache=None,
+            cache_dir=None
     ) -> TreeMesh:
         """自顶向下地对粗网格进行细分，生成树网格结构
 
@@ -226,6 +243,10 @@ class TreeMeshBuilder:
             网格细分比例，将原始网格中的每一格拆分为若干个子网格，支持通过数组分别指定三个轴的细分比例，例如 `[1, 2, 3]`
         diagonal_balance
             是否需要进行对角线平衡化，使得对角线相邻的网格间细分层级差别不大于1
+        cache
+            控制缓存文件，若为bool值，则指示是否启用缓存；若为str，则指示缓存文件的路径
+        cache_dir
+            控制缓存文件夹，指示放置缓存文件的文件夹，文件名会使用默认规则生成
 
         Returns
         -------
@@ -248,34 +269,47 @@ class TreeMeshBuilder:
         if isinstance(base_mesh, ModelledMesh):
             base_mesh = base_mesh.mesh
 
-        if np.ndim(ratio) < 1:
-            ratio = [int(ratio)] * 3
+        cache_filepath = self._determine_cache_filepath(base_mesh, cache, cache_dir, cache_type='octree')
+
+        if cache_filepath is not None and os.path.exists(cache_filepath):
+            import pickle
+            with open(cache_filepath, 'rb') as f:
+                # TODO: 添加额外的元信息判断来确保缓存有效？
+                mesh = TreeMesh(**pickle.load(f))
         else:
-            ratio = [int(r) for r in ratio]
+            if np.ndim(ratio) < 1:
+                ratio = [int(ratio)] * 3
+            else:
+                ratio = [int(r) for r in ratio]
 
-        specs = list(base_mesh.h)
-        refined_specs = [np.repeat(h / r, r) for h, r in zip(specs, ratio)]
+            specs = list(base_mesh.h)
+            refined_specs = [np.repeat(h / r, r) for h, r in zip(specs, ratio)]
 
-        shape_cells = np.asarray([len(h) for h in refined_specs])
+            shape_cells = np.asarray([len(h) for h in refined_specs])
 
-        # 将网格数扩展为2的幂数个
-        cells_required, expanded_cells = _check_shape_cells_power_of_2(shape_cells)
-        if np.any(expanded_cells > 0):
-            for i, required in enumerate(expanded_cells.end):
-                refined_specs[i] = np.r_[refined_specs[i], np.full(required, refined_specs[i][-1])]
+            # 将网格数扩展为2的幂数个
+            cells_required, expanded_cells = _check_shape_cells_power_of_2(shape_cells)
+            if np.any(expanded_cells > 0):
+                for i, required in enumerate(expanded_cells.end):
+                    refined_specs[i] = np.r_[refined_specs[i], np.full(required, refined_specs[i][-1])]
 
-        mesh = TreeMesh(refined_specs, origin=base_mesh.origin)
+            mesh = TreeMesh(refined_specs, origin=base_mesh.origin)
 
-        models = self.to_multiblock()
-        triangles = []
-        for m in models:
-            if len(m.faces) % 4 != 0 or np.any(m.faces[::4] != 3):
-                # 判断模型是否已经三角化
-                m.triangulate(inplace=True)
-            triangles.append(m.points[m.faces.reshape(-1, 4)[:, 1:]])
+            models = self.to_multiblock()
+            triangles = []
+            for m in models:
+                if len(m.faces) % 4 != 0 or np.any(m.faces[::4] != 3):
+                    # 判断模型是否已经三角化
+                    m.triangulate(inplace=True)
+                triangles.append(m.points[m.faces.reshape(-1, 4)[:, 1:]])
 
-        triangles = np.concatenate(triangles, axis=0)
-        mesh.refine_triangle(triangles, levels=mesh.max_level, diagonal_balance=diagonal_balance)
+            triangles = np.concatenate(triangles, axis=0)
+            mesh.refine_triangle(triangles, levels=mesh.max_level, diagonal_balance=diagonal_balance)
+
+            if cache_filepath is not None:
+                import pickle
+                with open(cache_filepath, 'wb') as f:
+                    pickle.dump(mesh.to_dict(), f)
 
         return mesh
 

@@ -10,9 +10,8 @@ from discretize import TensorMesh
 from discretize.base import BaseMesh
 
 from metalpy.mepa import LinearExecutor
-from metalpy.scab.utils.hash import dhash_discretize_mesh
+from metalpy.scab.utils.hash import dhash
 from metalpy.utils.bounds import Bounds
-from metalpy.utils.dhash import dhash
 from metalpy.utils.file import ensure_dir, make_cache_directory
 from metalpy.utils.model import as_pyvista_array
 from metalpy.utils.numeric import limit_significand
@@ -31,7 +30,6 @@ TScene = TypeVar('TScene', bound='Scene')
 
 
 class Scene(OSMFormat, PTopoFormat, TreeMeshBuilder):
-    default_cache_dir = make_cache_directory('models')
     INACTIVE_BOOL = False
     INACTIVE_INT = 0
     INACTIVE_FLOAT = 0
@@ -200,7 +198,7 @@ class Scene(OSMFormat, PTopoFormat, TreeMeshBuilder):
         if isinstance(mesh, ModelledMesh):
             mesh = mesh.mesh
 
-        cache_filepath = self._determine_cache_filepath(mesh, cache, cache_dir)
+        cache_filepath = self._determine_cache_filepath(mesh, cache, cache_dir, cache_type='models')
 
         if cache_filepath is not None and os.path.exists(cache_filepath):
             import pickle
@@ -622,15 +620,16 @@ class Scene(OSMFormat, PTopoFormat, TreeMeshBuilder):
 
         return models
 
-    def _determine_cache_filepath(self, mesh, cache, cache_dir):
+    def _determine_cache_filepath(self, mesh, cache, cache_dir, cache_type='models'):
         cache_filepath = None
         if isinstance(cache, bool) and cache:
             cache_filename = self._generate_model_filename(mesh)
             if cache_dir is not None:
                 cache_filepath = os.path.join(cache_dir, cache_filename)
             else:
-                ensure_dir(Scene.default_cache_dir)
-                cache_filepath = os.path.join(os.path.abspath(Scene.default_cache_dir), cache_filename)
+                default_cache_dir = make_cache_directory(cache_type)
+                ensure_dir(default_cache_dir)
+                cache_filepath = os.path.join(default_cache_dir, cache_filename)
         elif isinstance(cache, str):
             cache_filepath = cache
         elif cache is None:
@@ -641,7 +640,7 @@ class Scene(OSMFormat, PTopoFormat, TreeMeshBuilder):
         return cache_filepath
 
     def _generate_model_filename(self, mesh: TensorMesh):
-        mesh_hash = dhash_discretize_mesh(mesh).hexdigest(digits=6)
+        mesh_hash = dhash(mesh).hexdigest(digits=6)
         model_hash = dhash(self).hexdigest(digits=6)
 
         origin = mesh.origin.astype(float)
