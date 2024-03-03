@@ -24,10 +24,12 @@ def main():
     pl = pyvista.Plotter(shape=(1, 2))
 
     pl.subplot(0, 0)
+    pl.add_title('Refine')
     pl.add_mesh(scene.to_multiblock(), opacity=0.7)
     pl.add_mesh(refined_mesh.to_polydata(prune=False).slice_orthogonal(), show_edges=True)
 
     pl.subplot(0, 1)
+    pl.add_title('Simplify')
     pl.add_mesh(scene.to_multiblock(), opacity=0.7)
     pl.add_mesh(simplified_mesh.to_polydata(prune=False).slice_orthogonal(), show_edges=True)
 

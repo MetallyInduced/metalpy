@@ -456,6 +456,13 @@ class ModelledMesh:
             f' Got model {item} with size {model.shape[0]}, expected {self.n_active_cells} or {self.n_cells}.'
         self._models[item] = model
 
+    def __delitem__(self, item):
+        del self._models[item]
+        if self.default_key == item:
+            self.default_key = None
+        if len(self) > 0:
+            self.default_key = get_first_key(self)
+
     def __contains__(self, item):
         return item in self._models
 

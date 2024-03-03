@@ -169,14 +169,16 @@ def get_first_key(dictionary):
     return None
 
 
-def ensure_set_key(dictionary, key, value, *, transfer=None):
+def ensure_set_key(dictionary, key, value=undefined, *, transfer=None):
     while key in dictionary:
         if transfer is None:
             def transfer(x):
                 return f'_{x}_'
         key = transfer(key)
 
-    dictionary[key] = value
+    if undefined != value:
+        dictionary[key] = value
+
     return key
 
 

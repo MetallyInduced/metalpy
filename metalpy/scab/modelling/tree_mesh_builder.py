@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 import os
 import warnings
-from typing import TYPE_CHECKING, Sequence, Literal
+from typing import TYPE_CHECKING, Sequence, Literal, Iterable
 
 import numpy as np
 from discretize import TensorMesh
@@ -11,8 +11,10 @@ from numpy.typing import ArrayLike
 from discretize.tree_mesh import TreeMesh, TreeCell
 
 from metalpy.scab.modelling.modelled_mesh import ModelledMesh
+from metalpy.scab.modelling.shapes import Shape3D
 from metalpy.utils.bounds import Bounds
 from metalpy.utils.string import format_string_list
+from metalpy.utils.type import ensure_set_key, get_first_key
 
 if TYPE_CHECKING:
     from typing import TypeVar
@@ -33,6 +35,7 @@ class TreeMeshBuilder:
             self: 'TScene', cell_size=None, n_cells=None, bounds=None,
             executor=None, progress=False,
             method: Literal['refine', 'simplify'] = Octree.refine,
+            extra_shapes: Scene | Iterable[Shape3D] | None = None,
             diagonal_balance=False,
             cache=None, cache_dir=None
     ) -> ModelledMesh:
@@ -54,6 +57,8 @@ class TreeMeshBuilder:
             八叉树网格的构建方法，可选选项为 `'refine'` 或 `'simplify'` 。
             `'refine'` 构建效率更高，但是可能产生冗余的细分节点，
             `'simplify'` 可以构造最小八叉树，但是构建效率较低
+        extra_shapes
+            在构建八叉树时额外需要细化的区域，但不参与model的构建（例如对观测区域进行细化）
         diagonal_balance
             是否需要进行对角线平衡化，使得对角线相邻的网格间细分层级差别不大于1
         cache
@@ -86,13 +91,31 @@ class TreeMeshBuilder:
         TreeMeshBuilder.simplify : 从精细网格进行简化得到八叉树网格
         TreeMeshBuilder.refine_mesh : 从粗网格进行细分得到八叉树网格
         """
+        from metalpy.scab.modelling import Scene, MixMode
+
+        ref_model_key = '__ref_model__'
+        ref_shapes = list(self.shapes)
+        if extra_shapes is not None:
+            if isinstance(extra_shapes, Scene):
+                extra_shapes = extra_shapes.shapes
+            ref_shapes.extend(extra_shapes)
+
+        ref_scene = Scene()  # 构造参考场景，防止重叠Shape的边界混淆
+        interval = (np.iinfo(int).max - 1) // max(len(ref_shapes) - 1, 1)  # 尽可能扩大模型值的间距，减少重合的可能性
+        for i, shape in enumerate(ref_shapes):
+            ref_scene.append(
+                shape,
+                {ref_model_key: i * interval + 1},
+                mix_mode=floor_mean
+            )
+
         if method == TreeMeshBuilder.Octree.refine:
             base_mesh = self.create_mesh(
                 cell_size=cell_size,
                 n_cells=n_cells,
                 bounds=bounds
             )
-            mesh = self.refine_mesh(
+            mesh = ref_scene.refine_mesh(
                 base_mesh,
                 ratio=1,
                 diagonal_balance=diagonal_balance,
@@ -114,10 +137,33 @@ class TreeMeshBuilder:
                 cache=cache,
                 cache_dir=cache_dir
             )
-            ret = self.simplify(
-                base_model_mesh,
-                diagonal_balance=diagonal_balance
-            )
+
+            if len(base_model_mesh) == 1:
+                ret = self.simplify(base_model_mesh, diagonal_balance=diagonal_balance)
+            else:
+                # TODO: 缓存每个Object的构建结果来加速第二次build？
+                ref_model_key = ensure_set_key(base_model_mesh, ref_model_key)
+                ref_model_mesh = ref_scene.build(
+                    cell_size=cell_size,
+                    n_cells=n_cells,
+                    bounds=bounds,
+                    executor=executor,
+                    progress=progress,
+                    cache=cache,
+                    cache_dir=cache_dir
+                )
+                ref_model_mesh[ref_model_key] = ref_model_mesh.get_complete_model(ref_model_key)
+                for key in base_model_mesh:
+                    ref_model_mesh[key] = base_model_mesh.get_complete_model(key)
+
+                ret = self.simplify(
+                    ref_model_mesh,
+                    scalars=ref_model_key,
+                    diagonal_balance=diagonal_balance,
+                    remap_all_models=True
+                )
+
+                del ret[ref_model_key]  # 删除用于构建网格的参考模型
         else:
             raise ValueError(
                 f'Unknown octree builder `{repr(method)}` got,'
@@ -131,7 +177,8 @@ class TreeMeshBuilder:
             base_mesh: ModelledMesh | TensorMesh,
             scalars: str | ArrayLike | None = None,
             *,
-            diagonal_balance=False
+            diagonal_balance=False,
+            remap_all_models=False
     ) -> ModelledMesh:
         """自底向上地对精细网格进行简化，生成树网格结构
 
@@ -146,9 +193,11 @@ class TreeMeshBuilder:
             需要进行合并的model或model名，
             指定向量时，在该model上进行合并判断，
             指定字符串时，从 `base_mesh` 中提取对应model，
-            默认为None，选取 `base_mesh` 的默认model
+            默认为None，选取 `base_mesh` 的默认model或者active_mask构建树网格
         diagonal_balance
             是否需要进行对角线平衡化，使得对角线相邻的网格间细分层级差别不大于1
+        remap_all_models
+            是否将其它所有model都映射到新的树网格上，映射结果可能会存在问题
 
         Returns
         -------
@@ -171,6 +220,15 @@ class TreeMeshBuilder:
                 f' tree mesh on `base_mesh`.'
             )
             base_mesh = ModelledMesh(base_mesh, models=scalars)
+            scalars = None
+
+        if scalars is None:
+            if base_mesh.has_default_model:
+                scalars = base_mesh.default_key
+            elif len(base_mesh) > 0:
+                scalars = get_first_key(base_mesh)
+            else:
+                scalars = None  # 此时用于构建树网格的model为其有效网格掩码
 
         shape_cells = np.asarray(base_mesh.mesh.shape_cells)
 
@@ -205,27 +263,31 @@ class TreeMeshBuilder:
             diagonal_balance=diagonal_balance
         )
 
-        new_model = np.empty(len(mesh), dtype=base_model.dtype)
-        for i, cell in enumerate(mesh):
-            cell: TreeCell
-            model = models[cell._level]
-            base = shape_cells // model.shape
-            loc = cell._index_loc // base // 2
-
-            new_model[i] = model[tuple(loc)]
-
+        new_model = remap_model(mesh, models[-1])
+        models_data, ind_active = {}, None
         if isinstance(scalars, str):
-            models_data = {scalars: new_model}
+            models_data[scalars] = new_model
+        elif scalars is None:
+            ind_active = new_model
         else:
-            models_data = new_model
+            models_data[ensure_set_key(base_mesh, '__ref__')] = new_model
 
-        return ModelledMesh(mesh, models=models_data)
+        if remap_all_models:
+            for key in base_mesh:
+                if key != scalars:
+                    models_data[key] = remap_model(
+                        mesh,
+                        base_mesh.get_complete_model(key).reshape(shape_cells, order='F')
+                    )
+
+        return ModelledMesh(mesh, models=models_data, ind_active=ind_active)
 
     def refine_mesh(
             self: 'TScene',
             base_mesh: ModelledMesh | TensorMesh,
             ratio: int | Sequence[int] = 2,
             *,
+            finalize=True,
             diagonal_balance=False,
             cache=None,
             cache_dir=None
@@ -241,6 +303,9 @@ class TreeMeshBuilder:
             需要进行细化的基础网格
         ratio
             网格细分比例，将原始网格中的每一格拆分为若干个子网格，支持通过数组分别指定三个轴的细分比例，例如 `[1, 2, 3]`
+        finalize
+            指示是否结束细化，结束细化后会构建树网格并不再支持继续细化。
+            注意如果不finalize，则无法进行缓存
         diagonal_balance
             是否需要进行对角线平衡化，使得对角线相邻的网格间细分层级差别不大于1
         cache
@@ -271,7 +336,7 @@ class TreeMeshBuilder:
 
         cache_filepath = self._determine_cache_filepath(base_mesh, cache, cache_dir, cache_type='octree')
 
-        if cache_filepath is not None and os.path.exists(cache_filepath):
+        if finalize and cache_filepath is not None and os.path.exists(cache_filepath):
             import pickle
             with open(cache_filepath, 'rb') as f:
                 # TODO: 添加额外的元信息判断来确保缓存有效？
@@ -304,9 +369,14 @@ class TreeMeshBuilder:
                 triangles.append(m.points[m.faces.reshape(-1, 4)[:, 1:]])
 
             triangles = np.concatenate(triangles, axis=0)
-            mesh.refine_triangle(triangles, levels=mesh.max_level, diagonal_balance=diagonal_balance)
+            mesh.refine_triangle(
+                triangles,
+                levels=mesh.max_level,
+                diagonal_balance=diagonal_balance,
+                finalize=finalize
+            )
 
-            if cache_filepath is not None:
+            if finalize and cache_filepath is not None:
                 import pickle
                 with open(cache_filepath, 'wb') as f:
                     pickle.dump(mesh.to_dict(), f)
@@ -411,3 +481,19 @@ def make_multilevel_mask(model):
         merge_masks.append(np.empty((0, 0, 0)))
 
     return merge_masks, models
+
+
+def remap_model(tree_mesh, reshaped_model):
+    new_model = np.empty(len(tree_mesh), dtype=reshaped_model.dtype)
+    for i, cell in enumerate(tree_mesh):
+        cell: TreeCell
+        model = reshaped_model
+        loc = tuple(i // 2 for i in cell._index_loc)
+
+        new_model[i] = model[loc]
+
+    return new_model
+
+
+def floor_mean(prev_layer, current_layer):
+    return (prev_layer + current_layer) // 2
