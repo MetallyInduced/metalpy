@@ -168,7 +168,7 @@ class ModelledMesh:
     @active_indices.setter
     def active_indices(self, val):
         val = np.asarray(val)
-        assert np.issubdtype(val.dtype, np.integer), \
+        assert val.dtype == bool or np.issubdtype(val.dtype, np.integer), \
             f'`ind_active` must be array of `bool` or `integer`. Got `{val.dtype}`.'
 
         self._ind_active = val
@@ -262,9 +262,15 @@ class ModelledMesh:
     def clear_active_model(self):
         self.default_key = None
 
-    def get_raw_model(self, key):
+    def get_raw_model(self, key=None):
         """直接获取模型数组，不保证返回结果是有效模型或完整模型
         """
+        if key is None:
+            if self.has_default_model:
+                key = self.default_key
+            else:
+                raise RuntimeError('No default model specified.')
+
         return self._models[key]
 
     def keys(self):

@@ -48,15 +48,17 @@ class AerialSurveyLine(AerialSurvey):
         x = get_column(position, 0)
         y = get_column(position, 1)
         a, b, c = self.get_line_spec(robust=robust, check_std=check_std)
-        if b == -1:
-            y = a * x + c
-        else:
-            x = b * y + c
+
+        alpha = -b * x + a * y
+        beta = -a * a - b * b
+
+        x1 = (b * alpha + a * c) / beta
+        y1 = (b * c - a * alpha) / beta
 
         if points is None:
-            return AerialSurveyLine(cstack(x, y), self.data)
+            return AerialSurveyLine(cstack(x1, y1), self.data)
         else:
-            return cstack(x, y)
+            return cstack(x1, y1)
 
     def __len__(self):
         return len(self.position)

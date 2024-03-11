@@ -109,14 +109,8 @@ def configure_dask_client(client, extra_paths=None, excludes=None):
 
     paths = [os.path.abspath(p) for p in extra_paths]
 
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    current_module_location = __name__.split('.')
-
-    while os.path.split(current_dir)[1] in current_module_location:
-        current_dir = os.path.split(current_dir)[0]
-
-    paths.append(current_dir)
-    paths.append(os.path.abspath('./'))
+    working_dir = os.path.abspath('./')
+    paths.append(working_dir)
 
     # 将脚本文件上传到服务器
     modules = list(sys.modules.items())
@@ -131,30 +125,26 @@ def configure_dask_client(client, extra_paths=None, excludes=None):
         if file_path is None:
             continue
 
-        required = False
+        script_dir = os.path.dirname(file_path)
         for path in paths:
-            if path not in os.path.dirname(file_path):
+            if path not in script_dir:
                 continue
             else:
-                required = True
                 break
-
-        if not required:
+        else:
             continue
 
         for exclude in excludes:
-            if hasattr(exclude, '__call__'):
+            if callable(exclude):
                 required = not exclude(name)
             else:
                 required = exclude not in name
 
             if not required:
                 break
-
-        if not required:
+        else:
+            plugin.add(name, file_path)
             continue
-
-        plugin.add(name, file_path)
 
     plugin.compact()
 
