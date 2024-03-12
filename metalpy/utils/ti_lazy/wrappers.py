@@ -14,28 +14,59 @@ FuncT = TypeVar('FuncT', bound=Callable)
 
 
 def lazy_kernel(fn):
-    cache_key = '_kernel_cache'
+    return functools.wraps(fn)(LazyFunctionBuilder(fn))
 
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        kernel = getattr(fn, cache_key, None)
-        if kernel is None:
-            kernel = fn()
-            setattr(fn, cache_key, kernel)
 
-        return kernel(*args, **kwargs)
+class LazyFunctionBuilder:
+    def __init__(self, fn):
+        self.fn = fn
+        self._cache = None
 
-    return wrapper
+    @property
+    def compiled_func(self):
+        if self._cache is None:
+            self._cache = self.fn()
+        return self._cache
+
+    def __call__(self, *args, **kwargs):
+        return self.compiled_func(*args, **kwargs)
 
 
 class LazyTaichiInstance(Generic[FuncT]):
     def __init__(self, fn: FuncT, func=False, kernel=False, is_real_function=None):
         self._original: FuncT = fn
-        self.func: FuncT = lazy_kernel(lambda: ti_make_func(fn, is_real_function=is_real_function)) if func else None
-        self.kernel: FuncT = lazy_kernel(lambda: ti_make_kernel(fn)) if kernel else None
+
+        self.func: FuncT | LazyFunctionBuilder = lazy_kernel(
+            lambda: ti_make_func(fn, is_real_function=is_real_function)
+        ) if func else None
+
+        self.kernel: FuncT | LazyFunctionBuilder = lazy_kernel(
+            lambda: ti_make_kernel(fn)
+        ) if kernel else None
 
     def __call__(self, *args, **kwargs):
         return self._original(*args, **kwargs)
+
+    @property
+    def original(self):
+        return self._original
+
+    @property
+    def has_kernel(self):
+        return self.kernel is not None
+
+    @property
+    def has_func(self):
+        return self.func is not None
+
+    @property
+    def compiled(self):
+        if self.has_kernel:
+            return self.kernel.compiled_func
+        elif self.has_func:
+            return self.func.compiled_func
+        else:
+            return None
 
 
 def ti_lazy_kernel(fn: FuncT) -> FuncT | LazyTaichiInstance[FuncT]:
@@ -53,7 +84,7 @@ def ti_make_func(fn, is_real_function=None):
     """
     from metalpy.utils.taichi import ti_func
 
-    return ti_func(ti_annotate(fn), is_real_function=is_real_function)
+    return ti_func(ti_annotate(fn, compile_references=False), is_real_function=is_real_function)
 
 
 def ti_make_kernel(fn):
@@ -66,14 +97,21 @@ def ti_make_kernel(fn):
     return ti_kernel(ti_annotate(fn))
 
 
-def ti_annotate(fn):
+def ti_annotate(fn, compile_references=True):
     """将python函数的参数标注转换为对应类型，默认 `ti.template` (指示函数参数按引用传递)
 
     将python函数中对 `math` 和 `numpy` 的引用替换为 `ti`
+
+    Parameters
+    ----------
+    fn
+        需要标注的函数
+    compile_references
+        是否需要将环境变量中的函数也进行标注
     """
     import taichi as ti
 
-    fn = copy_func(fn)
+    fn, _fn = copy_func(fn), fn
 
     spec = inspect.getfullargspec(fn)
     for arg in spec.args:
@@ -89,6 +127,8 @@ def ti_annotate(fn):
         var = fn.__globals__[key]
         if var is math or var is numpy or var is ti_dummy:
             fn.__globals__[key] = ti  # 可能会导致一些问题?
+        elif compile_references and isinstance(var, LazyTaichiInstance) and var.has_func:
+            fn.__globals__[key] = var.compiled
 
     _ti_import_math()
 
@@ -109,8 +149,6 @@ def _ti_import_math():
         import taichi as ti
 
         for key in dir(ti.math):
-            if key == 'inf':
-                x = 1
             if key.startswith('__'):
                 continue
             if getattr(math, key, None) is None:

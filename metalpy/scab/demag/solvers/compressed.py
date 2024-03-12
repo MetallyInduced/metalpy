@@ -7,28 +7,22 @@ import taichi as ti
 from taichi.lang.misc import is_extension_supported
 from taichi.lang.util import to_taichi_type
 
-from metalpy.scab.utils.misc import Field
 from metalpy.utils.numeric import limit_significand
 from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func, ti_size_t, ti_size_dtype, \
     ti_pyfunc
 from metalpy.utils.ti_solvers import matrix_free
+from .demag_solver_context import DemagSolverContext
 from .kernel import kernel_matrix_forward
 from .solver import DemagnetizationSolver
 
 
 class CompressedSolver(DemagnetizationSolver):
     Optimal = 'optimal'
+    Strict = 'strict'
 
     def __init__(
             self,
-            receiver_locations: np.ndarray,
-            xn: np.ndarray,
-            yn: np.ndarray,
-            zn: np.ndarray,
-            base_cell_sizes: np.ndarray,
-            source_field: Field,
-            kernel_dtype=None,
-            progress: bool = False,
+            context: DemagSolverContext,
             compressed_size: Union[int, float, None] = None,
             deterministic: Union[bool, str] = True,
             quantized: bool = False,
@@ -38,16 +32,8 @@ class CompressedSolver(DemagnetizationSolver):
 
         Parameters
         ----------
-        receiver_locations
-            观测点
-        xn, yn, zn
-            网格边界
-        base_cell_sizes
-            网格最小单元大小
-        source_field
-            定义默认外部场源，求解时若未指定场源，则使用该值
-        kernel_dtype
-            核矩阵数据类型，默认为None，自动从输入数据推断
+        context
+            退磁求解上下文
         compressed_size
             压缩表尺寸，
             如果为整数，则用于指定尺寸大小，
@@ -68,8 +54,6 @@ class CompressedSolver(DemagnetizationSolver):
             False则禁用对称模式，无论是否符合条件。
             在CPU模式下会对性能造成较大影响，因此默认不启用。
             在GPU模式下性能影响较小，因此默认启用
-        progress
-            是否输出求解进度条，默认为False不输出
 
         Notes
         -----
@@ -105,14 +89,14 @@ class CompressedSolver(DemagnetizationSolver):
         - 例如使用 0.375 或 0.4375 替代 0.4
         - 可以使用 `metalpy.utils.numeric.limit_significand` 来搜索合适的网格尺寸
         """
-        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field, kernel_dtype, progress)
+        super().__init__(context)
 
         self.deterministic = deterministic
 
         # 检查二进制小数的稳定性，例如 `0.4` 无法使用二进制小数精确表示，因此在其上的加减法会引入误差
         # 而CompressedSolver依赖数值的绝对相等来实现去重，对这种误差较为敏感，需要进行检查
         check_binary_floats_stability(
-            receiver_locations,
+            self.receiver_locations,
             self.kernel_dtype,
             np.max(self.n_cells_on_each_axes)
         )
@@ -158,21 +142,20 @@ class CompressedSolver(DemagnetizationSolver):
             self.xn, self.yn, self.zn,
             self.base_cell_sizes, model,
             *self.Tmat6, mat=np.empty(0), kernel_dtype=self.kernel_dt,
-            write_to_mat=False, compressed=True
+            write_to_mat=False, compressed=True,
+            apply_susc_model=True  # TODO: 考虑非均匀磁化率的情况
         )
 
-    def solve(self, magnetization):
+    def solve(self, magnetization, model):
         solver = not self.symmetric and solve_Tx_b_compressed or solve_Tx_b_compressed_symmetric
         return solver(self.Tmat321, self.indices_mat, magnetization, progress=self.progress)
 
     def _create_indices_specs(self, symmetric: Union[bool, Literal['strict']]):
-        h_gridded = self.h_gridded
-
-        is_symmetric = np.allclose(h_gridded, h_gridded[0])
+        is_symmetric = self.context.is_symmetric
         if symmetric is None:
             symmetric = not self.is_cpu and is_symmetric
         elif symmetric and not is_symmetric:
-            if symmetric == 'strict':
+            if symmetric == CompressedSolver.Strict:
                 raise ValueError(
                     '`symmetric` mode is not allowed on a non-symmetric mesh.'
                     ' Try explicitly setting `symmetric=True` to force using symmetric mode.'

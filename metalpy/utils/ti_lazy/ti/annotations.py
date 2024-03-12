@@ -1,5 +1,6 @@
 # 对应 taichi.types.annotations
 from .lang.util import TaichiType
+from .lang.util import ti_template as template
 
 
 class sparse_matrix_builder(TaichiType):

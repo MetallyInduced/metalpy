@@ -3,9 +3,9 @@ import psutil
 import taichi as ti
 from taichi.lang.util import to_taichi_type
 
-from metalpy.scab.utils.misc import Field
 from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func
 from metalpy.utils.ti_solvers import matrix_free
+from .demag_solver_context import DemagSolverContext
 from .integrated import solve_Ax_b
 from .kernel import kernel_matrix_forward
 from .solver import DemagnetizationSolver
@@ -14,34 +14,17 @@ from .solver import DemagnetizationSolver
 class SeperatedSolver(DemagnetizationSolver):
     def __init__(
             self,
-            receiver_locations: np.ndarray,
-            xn: np.ndarray,
-            yn: np.ndarray,
-            zn: np.ndarray,
-            base_cell_sizes: np.ndarray,
-            source_field: Field,
-            kernel_dtype=None,
-            progress: bool = False,
+            context: DemagSolverContext,
             direct_to_host: bool = False
     ):
         """该函数将矩阵分为9个部分，从而实现一些优化
 
         Parameters
         ----------
-        receiver_locations
-            观测点
-        xn, yn, zn
-            网格边界
-        base_cell_sizes
-            网格最小单元大小
-        source_field
-            定义默认外部场源，求解时若未指定场源，则使用该值
-        kernel_dtype
-            核矩阵数据类型，默认为None，自动从输入数据推断
+        context
+            退磁求解上下文
         direct_to_host
             是否通过kernel将结果直接zero-copy地复制到待返回的numpy数组
-        progress
-            是否输出求解进度条，默认为False不输出
 
         Notes
         -----
@@ -55,7 +38,7 @@ class SeperatedSolver(DemagnetizationSolver):
         - 网格规模仍然受到taichi的int32索引限制
         - 相比于 `Integrated` 方法，内存需求并不会降低，并且如果矩阵规模较小，计算效率可能会低于 `Integrated` 方法
         """
-        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field, kernel_dtype, progress)
+        super().__init__(context)
         self.direct_to_host = direct_to_host
 
         self.builder = builder = ti_FieldsBuilder()
@@ -82,10 +65,11 @@ class SeperatedSolver(DemagnetizationSolver):
             self.xn, self.yn, self.zn,
             self.base_cell_sizes, model,
             *self.Tmat6, mat=np.empty(0), kernel_dtype=self.kernel_dt,
-            write_to_mat=False, compressed=False
+            write_to_mat=False, compressed=False,
+            apply_susc_model=True
         )
 
-    def solve(self, magnetization):
+    def solve(self, magnetization, model):
         if self.is_cpu and psutil.virtual_memory().percent < 45:
             # TODO: 进一步考虑模型大小来选择求解方案，模型较大时也应该使用 `solve_Tx_b`
             return solve_Ax_b(merge_Tmat_as_A(self.Tmat33, direct_to_host=self.direct_to_host), magnetization)

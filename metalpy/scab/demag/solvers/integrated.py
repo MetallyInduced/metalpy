@@ -1,9 +1,9 @@
 import numpy as np
 
-from metalpy.scab.utils.misc import Field
 from metalpy.utils.taichi import ti_ndarray
 from metalpy.utils.ti_solvers.solver_progress import ProgressList
 from metalpy.utils.type import notify_package
+from .demag_solver_context import DemagSolverContext
 from .kernel import kernel_matrix_forward
 from .solver import DemagnetizationSolver
 
@@ -11,29 +11,14 @@ from .solver import DemagnetizationSolver
 class IntegratedSolver(DemagnetizationSolver):
     def __init__(
             self,
-            receiver_locations: np.ndarray,
-            xn: np.ndarray,
-            yn: np.ndarray,
-            zn: np.ndarray,
-            base_cell_sizes: np.ndarray,
-            source_field: Field,
-            kernel_dtype=None,
-            progress=False
+            context: DemagSolverContext
     ):
         """该函数直接计算核矩阵
 
         Parameters
         ----------
-        receiver_locations
-            观测点
-        xn, yn, zn
-            网格边界
-        base_cell_sizes
-            网格最小单元大小
-        source_field
-            定义默认外部场源，求解时若未指定场源，则使用该值
-        kernel_dtype
-            核矩阵数据类型，默认为None，自动从输入数据推断
+        context
+            退磁求解上下文
 
         Notes
         -----
@@ -45,7 +30,7 @@ class IntegratedSolver(DemagnetizationSolver):
 
         - 存在taichi的int32索引限制
         """
-        super().__init__(receiver_locations, xn, yn, zn, base_cell_sizes, source_field, kernel_dtype, progress)
+        super().__init__(context)
 
         shape = (3 * self.n_obs, 3 * self.n_cells)
         if self.is_cpu:
@@ -59,10 +44,11 @@ class IntegratedSolver(DemagnetizationSolver):
             self.xn, self.yn, self.zn,
             self.base_cell_sizes, model,
             *[None] * 6, mat=self.A, kernel_dtype=self.kernel_dt,
-            write_to_mat=True, compressed=False
+            write_to_mat=True, compressed=False,
+            apply_susc_model=True
         )
 
-    def solve(self, magnetization):
+    def solve(self, magnetization, model):
         if self.is_cpu:
             Amat = self.A
         else:

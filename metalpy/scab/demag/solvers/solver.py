@@ -6,36 +6,66 @@ from taichi.lang.util import to_taichi_type
 
 from metalpy.scab.utils.misc import Field
 from metalpy.utils.taichi import ti_cfg
+from .demag_solver_context import DemagSolverContext
 
 
 class DemagnetizationSolver(abc.ABC):
     def __init__(
             self,
-            receiver_locations: np.ndarray,
-            xn: np.ndarray,
-            yn: np.ndarray,
-            zn: np.ndarray,
-            base_cell_sizes: np.ndarray,
-            source_field: Field,
-            kernel_dtype=None,
-            progress=False
+            context: DemagSolverContext,
+            use_complete_mesh: bool = False
     ):
-        self.receiver_locations = receiver_locations
-        self.xn = xn
-        self.yn = yn
-        self.zn = zn
-        self.base_cell_sizes = base_cell_sizes
-        self.source_field = source_field
-
+        self.context = context
         self.model = None
-        self._kernel_dtype = kernel_dtype
 
-        self.progress = progress
+        self.use_complete_mesh = use_complete_mesh
+        if not use_complete_mesh:
+            self.context.extract_active()
+
+    @property
+    def mesh(self):
+        return self.context.mesh
+
+    @property
+    def active_cells_mask(self):
+        return self.context.active_cells_mask
+
+    @property
+    def shape_cells(self):
+        return np.asarray(self.context.shape_cells)
+
+    @property
+    def receiver_locations(self):
+        return self.context.receiver_locations
+
+    @property
+    def xn(self):
+        return self.context.xn
+
+    @property
+    def yn(self):
+        return self.context.yn
+
+    @property
+    def zn(self):
+        return self.context.zn
+
+    @property
+    def base_cell_sizes(self):
+        return self.context.base_cell_sizes
+
+    @property
+    def source_field(self):
+        return self.context.source_field
+
+    @property
+    def progress(self):
+        return self.context.progress
 
     @property
     def kernel_dtype(self):
-        if self._kernel_dtype is not None:
-            return self._kernel_dtype
+        if self.context.kernel_dtype is not None:
+            return self.context.kernel_dtype
         else:
             return np.result_type(self.xn, self.receiver_locations)
 
@@ -104,10 +134,22 @@ class DemagnetizationSolver(abc.ABC):
 
         H0 = source_field.unit_vector
         H0 = np.tile(H0[None, :], self.n_cells).ravel()
-        X = np.tile(model, 3).ravel()
+
+        if self.use_complete_mesh:
+            model_ = np.full(self.mesh.n_cells, 0)
+            model_[self.active_cells_mask] = model
+            model = model_
+
+        X = np.tile(model[:, None], 3).ravel()
         magnetization = X * H0
 
-        return self.solve(magnetization)
+        ret = self.solve(magnetization, model=model)
+        ret = ret.reshape(-1, 3)
+
+        if self.use_complete_mesh:
+            ret = ret[self.active_cells_mask]
+
+        return ret
 
     @abc.abstractmethod
     def build_kernel(self, model):
@@ -116,13 +158,15 @@ class DemagnetizationSolver(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def solve(self, magnetization):
+    def solve(self, magnetization, model):
         """求解退磁效应下每个网格的三轴等效磁化率
 
         Parameters
         ----------
         magnetization
             磁化矩阵
+        model
+            磁化率模型
 
         Returns
         -------

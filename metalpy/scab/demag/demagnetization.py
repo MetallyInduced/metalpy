@@ -6,22 +6,25 @@ import numpy as np
 import psutil
 import taichi as ti
 from discretize.base import BaseTensorMesh
-from discretize.utils import mkvc
 
 from metalpy.scab.utils.misc import Field
 from metalpy.utils.string import format_string_list
 from metalpy.utils.taichi import ti_cfg, ti_test_snode_support, ti_size_max
 from .solvers.compressed import CompressedSolver
+from .solvers.demag_solver_context import DemagSolverContext
+from .solvers.indexed import IndexedSolver
 from .solvers.integrated import IntegratedSolver
 from .solvers.seperated import SeperatedSolver
 from .solvers.solver import DemagnetizationSolver
 
 
 class Demagnetization:
+    Indexed = 'Indexed'
     Compressed = 'Compressed'
     Seperated = 'Seperated'
     Integrated = 'Integrated'
     methods = {
+        Indexed,
         Compressed,
         Seperated,
         Integrated,
@@ -109,46 +112,25 @@ class Demagnetization:
         self.symmetric = symmetric
         self.progress = progress
 
-        cell_centers = mesh.cell_centers
-        if active_ind is not None:
-            cell_centers = cell_centers[active_ind]
-
-        self.receiver_locations = cell_centers
-
-        # 计算网格在三个方向的边界位置
-        h_gridded = mesh.h_gridded[active_ind]
-        bsw = cell_centers - h_gridded / 2.0
-        tne = cell_centers + h_gridded / 2.0
-
-        xn1, xn2 = bsw[:, 0], tne[:, 0]
-        yn1, yn2 = bsw[:, 1], tne[:, 1]
-        zn1, zn2 = bsw[:, 2], tne[:, 2]
-
-        self.Xn = np.c_[mkvc(xn1), mkvc(xn2)]
-        self.Yn = np.c_[mkvc(yn1), mkvc(yn2)]
-        self.Zn = np.c_[mkvc(zn1), mkvc(zn2)]
-
-        base_cell_sizes = np.r_[
-            self.mesh.h[0].min(),
-            self.mesh.h[1].min(),
-            self.mesh.h[2].min(),
-        ]
-
         self.is_cpu = ti_cfg().arch == ti.cpu
+
+        context = DemagSolverContext(
+            mesh, active_ind, source_field,
+            kernel_dtype=kernel_dtype, progress=self.progress
+        )
 
         # CPU后端可以直接判断内存是否足够
         # 但CUDA后端不能在没有额外依赖的情况下查询内存，并且内存不足时会抛出异常，无法通过再次ti.init还原
         # 因此留一个错误信息以供参考
         try:
             self.solver = dispatch_solver(
-                self.receiver_locations, self.Xn, self.Yn, self.Zn, base_cell_sizes,
-                source_field=self.source_field,
-                is_cpu=self.is_cpu, method=self.method,
-                compressed_size=self.compressed_size, deterministic=self.deterministic,
+                context,
+                is_cpu=self.is_cpu,
+                method=self.method,
+                compressed_size=self.compressed_size,
+                deterministic=self.deterministic,
                 quantized=self.quantized,
                 symmetric=self.symmetric,
-                progress=self.progress,
-                kernel_dtype=kernel_dtype
             )
         except RuntimeError as e:
             if ti_cfg().arch == ti.cuda and 'cuStreamSynchronize' in e.args[0]:
@@ -180,29 +162,27 @@ class Demagnetization:
         ret
             array(nC, 3)，三轴等效磁化率矩阵
         """
-        return self.solver.dpred(model, source_field=source_field).reshape(-1, 3)
+        return self.solver.dpred(model, source_field=source_field)
 
 
 def dispatch_solver(
-        receiver_locations: np.ndarray,
-        xn: np.ndarray,
-        yn: np.ndarray,
-        zn: np.ndarray,
-        base_cell_sizes: np.ndarray,
-        source_field,
+        context: DemagSolverContext,
         is_cpu=True,
         method=None,
         compressed_size: int | float | None = None,
         deterministic: bool | str = True,
         quantized: bool = True,
-        symmetric: bool | None = None,
-        progress=False,
-        kernel_dtype=None
+        symmetric: bool | None = None
 ) -> DemagnetizationSolver:
-    n_obs = receiver_locations.shape[0]
-    n_cells = xn.shape[0]
+    n_obs = n_cells = context.n_active_cells
     mat_size = n_obs * 3 * n_cells * 3
-    kernel_size = mat_size * np.finfo(np.result_type(receiver_locations, xn)).bits / 8
+
+    kernel_dtype = context.kernel_dtype
+    if kernel_dtype is None:
+        # 没有指定，临时猜测一个
+        kernel_dtype = np.float64
+
+    kernel_size = mat_size * np.finfo(kernel_dtype).bits / 8
 
     max_cells_allowed_0 = int((1 + np.sqrt(1 + 8 * ti_size_max)) / 2)  # CompressedSolver对称模式下支持的最大网格数
     max_cells_allowed_1 = int(np.sqrt(ti_size_max))  # CompressedSolver非对称模式和SeperatedSolver支持的最大网格数
@@ -214,39 +194,19 @@ def dispatch_solver(
         # TODO: 看taichi什么时候能出一个查询剩余显存/内存的接口
         available_memory = None
 
-    common_kwargs = {
-        'receiver_locations': receiver_locations,
-        'xn': xn,
-        'yn': yn,
-        'zn': zn,
-        'base_cell_sizes': base_cell_sizes,
-        'source_field': source_field,
-        'kernel_dtype': kernel_dtype,
-        'progress': progress,
-    }
-    kw_int = {**common_kwargs}
-    kw_sep = {**common_kwargs}
-    kw_com = {
-        'compressed_size': compressed_size,
-        'deterministic': deterministic,
-        'quantized': quantized,
-        'symmetric': symmetric,
-        **common_kwargs
-    }
-
     if n_cells > max_cells_allowed_0:
-        raise AssertionError(
+        assert method in {Demagnetization.Indexed, None}, (
             f'Mesh with {n_cells} cells (> {max_cells_allowed_0})'
-            f' is not supported.'
+            f' requires symmetric mesh with `{IndexedSolver.__name__}` (got `{solver_name(method)}`).'
         )
     elif n_cells > max_cells_allowed_1:
-        assert method in {Demagnetization.Compressed, None}, (
+        assert method in {Demagnetization.Indexed, Demagnetization.Compressed, None}, (
             f'Mesh with {n_cells} cells (> {max_cells_allowed_1})'
             f' requires symmetric `{CompressedSolver.__name__}` (got `{solver_name(method)}`).'
         )
 
         if symmetric is None:
-            symmetric = 'strict'
+            symmetric = CompressedSolver.Strict
 
         assert symmetric, (
             f'Mesh with {n_cells} cells (> {max_cells_allowed_1})'
@@ -259,13 +219,30 @@ def dispatch_solver(
             f' mesh with {n_cells} cells (> {max_cells_allowed_2}).'
         )
 
+    common_kwargs = {
+        'context': context,
+    }
+    kw_int = {**common_kwargs}
+    kw_sep = {**common_kwargs}
+    kw_com = {
+        'compressed_size': compressed_size,
+        'deterministic': deterministic,
+        'quantized': quantized,
+        'symmetric': symmetric,
+        **common_kwargs
+    }
+    kw_ind = {**common_kwargs}
+
     if method is not None:
         candidate = dispatch_solver_by_name(
             method,
             kw_int=kw_int,
             kw_sep=kw_sep,
-            kw_com=kw_com
+            kw_com=kw_com,
+            kw_ind=kw_ind
         )
+    elif n_cells > max_cells_allowed_0:
+        candidate = IndexedSolver(**kw_ind)
     elif not is_cpu or available_memory is not None and kernel_size > available_memory * 0.8:
         candidate = CompressedSolver(**kw_com)
     elif n_cells > max_cells_allowed_1:
@@ -282,10 +259,15 @@ def solver_name(method):
     return dispatch_solver_by_name(method).__name__
 
 
-def dispatch_solver_by_name(method, kw_int=None, kw_sep=None, kw_com=None):
+def dispatch_solver_by_name(method, kw_int=None, kw_sep=None, kw_com=None, kw_ind=None):
     """通过方法名获取求解器，当不指定求解器参数时，返回求解器类
     """
-    if method == Demagnetization.Compressed:
+    if method == Demagnetization.Indexed:
+        if kw_ind is not None:
+            candidate = IndexedSolver(**kw_ind)
+        else:
+            candidate = IndexedSolver
+    elif method == Demagnetization.Compressed:
         if kw_com is not None:
             candidate = CompressedSolver(**kw_com)
         else:

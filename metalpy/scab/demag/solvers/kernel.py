@@ -21,7 +21,8 @@ def kernel_matrix_forward(
         mat: ti.types.ndarray(),
         write_to_mat: ti.template(),
         compressed: ti.template(),
-        kernel_dtype: ti.template()
+        kernel_dtype: ti.template(),
+        apply_susc_model: ti.template(),
 ):
     # calculates A = I - X @ T, where T is the forward kernel, s.t. T @ m_v = B_v
     # m_v and B_v are both channel first (Array of Structure in taichi)
@@ -240,6 +241,12 @@ def kernel_matrix_forward(
         tzy = tyz
 
         neg_sus = -susc_model[icell]
+
+        if ti.static(not apply_susc_model):
+            # 例如对于压缩核矩阵的算法，在非均匀的情况下不能提前乘以磁化率
+            # 而需要求解时现场计算实际的系数矩阵
+            neg_sus = 1
+            inside = ti.cast(0, ti.i8)
 
         if ti.static(compressed):
             Txx[i] = ti.cast(neg_sus * txx + inside, kernel_dtype)

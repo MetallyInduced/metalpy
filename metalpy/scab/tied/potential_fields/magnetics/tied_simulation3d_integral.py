@@ -139,14 +139,19 @@ class TaichiSimulation3DIntegral:
         # 指定dummy变量的长度为3，方便后续reshape成vector模型
         model = not_none_or_default(model, supplier=lambda: np.empty(3, dtype=np.int8))
 
-        if self.model_type == self.MType_Scalar:
-            n_cols = self.n_cells
-        else:
-            n_cols = self.n_cells * 3
-            model = model.reshape(-1, 3)
+        n_cols = self.n_cells
+        model_shape = [n_cols]
+        if self.model_type == self.MType_Vector:
+            n_cols *= 3
+            model_shape.append(3)
 
         if forward_only:
             n_cols = 1
+        else:
+            # 非forward_only模式下，model为dummy变量，不需要验证长度
+            model_shape[0] = -1
+
+        model = model.reshape(model_shape)  # 顺便验证模型长度
 
         n_rows = sum(receiver.n_rows for receiver in self.receivers)
         if is_cpu:

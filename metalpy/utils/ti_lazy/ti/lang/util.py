@@ -12,7 +12,11 @@ def cast_to_taichi_type(dtype):
             return magic()
 
     from taichi.lang.util import to_taichi_type as _to_taichi_type
-    return _to_taichi_type(dtype)
+
+    try:
+        return _to_taichi_type(dtype)
+    except AssertionError:
+        return dtype
 
 
 class TaichiType(ABC):
