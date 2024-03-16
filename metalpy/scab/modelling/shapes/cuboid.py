@@ -12,12 +12,12 @@ from . import Shape3D
 
 class Cuboid(Shape3D):
     def __init__(self,
-                 origin: Iterable = None,
-                 end: Iterable = None,
-                 corner: Iterable = None,
-                 corner2: Iterable = None,
-                 size: Union[Iterable, float] = None,
-                 center: Iterable = None,
+                 origin: Union[Iterable, float, None] = None,
+                 end: Union[Iterable, float, None] = None,
+                 corner: Union[Iterable, float, None] = None,
+                 corner2: Union[Iterable, float, None] = None,
+                 size: Union[Iterable, float, None] = None,
+                 center: Union[Iterable, float, None] = None,
                  bounds: Iterable = None,
                  no_corner_adjust=False):
         """通过立方体的中心、长度、角点中任意两个参数或单独使用边界来定义立方体
@@ -57,6 +57,8 @@ class Cuboid(Shape3D):
 
         if origin is not None:
             origin = np.array(origin)
+            if origin.size == 1:
+                origin = np.ones(3) * origin
 
         if size is not None:
             size = np.array(size)
@@ -76,7 +78,7 @@ class Cuboid(Shape3D):
                 size = 2 * (np.asarray(end) - np.asarray(center))
                 origin = np.asarray(end) - size
             elif size is not None:
-                origin = np.asarray(end) - np.asarray(size)
+                origin = np.asarray(end) - size
         elif size is not None:  # 和center，计算origin
             if center is not None:
                 origin = np.asarray(center) - size / 2

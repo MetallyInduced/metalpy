@@ -55,7 +55,7 @@ class Texture(abc.ABC):
         if self.is_map:
             # 贴图需要额外激活 t_coords
             if name is not None:
-                dataset.point_data.active_t_coords_name = name
+                dataset.point_data.active_texture_coordinates_name = name
             else:
                 warnings.warn('Unnamed texture encountered, failed to bind t_coord.')
 

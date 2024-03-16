@@ -40,6 +40,12 @@ class AerialSurvey:
         if isinstance(data, (tuple, list)):
             data = np.asarray(data)
 
+        assert getattr(position, 'shape', [0, 2])[1] == 2, (
+            f'Position should be a 2D array with shape (n, 2).'
+            f' To automatically detect position columns,'
+            f' consider `{AerialSurvey.__name__}.{AerialSurvey.from_array.__name__}` instead.'
+        )
+
         self.position = position
         self.data = data
 
@@ -418,7 +424,8 @@ class AerialSurvey:
             z=None,
             data_col: str | int = None,
             points_only=False,
-            color=True
+            color=True,
+            scalars: str | int | ArrayLike | None = None
     ):
         """导出航空数据为PyVista模型
 
@@ -433,6 +440,8 @@ class AerialSurvey:
             指示返回值是否只包含点坐标模型，不包含连接线
         color
             指示返回值是否包含顺序信息，默认为True，则PointData内绑定数据下标，渲染时自动着色
+        scalars
+            指示返回值的点数据，如果指定，则 `color` 属性被忽略
 
         Returns
         -------
@@ -461,8 +470,19 @@ class AerialSurvey:
         if not points_only:
             ret.lines = np.r_[n_pts, range(n_pts)]
 
-        if color:
+        if scalars is not None:
+            if isinstance(scalars, (str, int)):
+                array = array_ops.get_column(self.data, scalars)
+            else:
+                array = scalars
+                scalars = 'data'
+
+            ret.point_data[scalars] = array
+            ret.set_active_scalars(scalars)
+        elif color:
+            # 如果绑定了默认数据，则不再进行自动着色
             ret.point_data['index'] = range(n_pts)
+            ret.set_active_scalars('index')
 
         return ret
 

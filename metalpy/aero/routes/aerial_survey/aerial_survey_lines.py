@@ -25,7 +25,15 @@ class AerialSurveyLines:
         lines
             测线信息
         """
-        self.lines = np.fromiter(lines, dtype=object)
+        self.lines = lines
+
+    @property
+    def lines(self):
+        return self._lines
+
+    @lines.setter
+    def lines(self, lines):
+        self._lines = np.fromiter(lines, dtype=object)
 
     @property
     def length(self):
@@ -99,7 +107,7 @@ class AerialSurveyLines:
 
     def __getitem__(self, item) -> AerialSurveyLine | AerialSurveyLines:
         ret = self.lines[item]
-        if np.ndim(ret) == 0:
+        if isinstance(ret, AerialSurveyLine):
             return ret
         else:
             return AerialSurveyLines(ret)
