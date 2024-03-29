@@ -459,7 +459,7 @@ class AerialSurvey:
         else:
             if z is None:
                 z = 0
-            if not is_numeric_array(z):
+            if not is_numeric_array(z) or np.ndim(z) == 0:
                 z = np.full(len(self.position), z)
 
         pos = np.c_[self.position, z]
@@ -502,6 +502,7 @@ POSITION_KEYWORDS = [
     ['Longitude', 'Latitude'],
     ['Long', 'Lat'],
     ['Lon', 'Lat'],
+    ['Lng', 'Lat'],
 ]
 POSITION_KEYWORDS = [
     (proc(xk), proc(yk))
@@ -556,7 +557,7 @@ def _guess_is_lon_lat_position(cols: Sequence[str | int], position):
         if (
                 all(abs(x) <= 180)  # 经度范围
                 and all(abs(y) <= 90)  # 纬度范围
-                and all(np.std(x) < 10)  # 如果单位为m，则主要区域范围不应小于10m，此时应为误用经纬度
+                and np.std(x) < 10  # 如果单位为m，则主要区域范围不应小于10m，此时应为误用经纬度
         ):
             return True
         else:

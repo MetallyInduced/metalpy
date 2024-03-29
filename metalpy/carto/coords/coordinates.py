@@ -229,6 +229,7 @@ class Coordinates(FixedShapeNDArray):
                 else:
                     crs_list = [crs for crs in crs_list if query == crs]
 
+            assert len(crs_list) > 0, f'No CRS found by `{query}`'
             assert len(crs_list) == 1, \
                 f'Multiple CRS-s found by `{query}`: ' + Coordinates.format_crs_list_str(crs_list)
 

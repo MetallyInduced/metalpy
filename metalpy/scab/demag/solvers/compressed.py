@@ -166,6 +166,9 @@ class CompressedSolver(DemagnetizationSolver):
                     ' which may lead to unexpected result.'
                 )
 
+        if symmetric == CompressedSolver.Strict:
+            symmetric = True
+
         if not symmetric:
             axes = ti.ij
             indices_size = [self.n_obs, self.n_cells]

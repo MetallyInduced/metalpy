@@ -4,6 +4,10 @@ from discretize import TensorMesh, TreeMesh
 from metalpy.utils.dhash import dhash, register_dhasher
 
 
+def dhash_discretize_mesh(mesh: TensorMesh):
+    return dhash(mesh)
+
+
 @register_dhasher(TensorMesh)
 def dhash_tensor_mesh(mesh: TensorMesh):
     origin = mesh.origin
