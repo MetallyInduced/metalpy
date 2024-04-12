@@ -4,7 +4,7 @@ import numpy as np
 import taichi as ti
 
 from metalpy.utils.taichi import ti_field, ti_FieldsBuilder, ti_kernel, ti_pyfunc, ti_ndarray_like, copy_from, \
-    ti_size_t
+    ti_size_t, ti_size_dtype
 from metalpy.utils.taichi_kernels import ti_use
 from metalpy.utils.ti_solvers import matrix_free
 from .demag_solver_context import DemagSolverContext
@@ -35,7 +35,7 @@ class IndexedSolver(DemagnetizationSolver):
         - 只支持在规则网格上使用
         - 对计算效率有较大影响
         """
-        super().__init__(context, use_complete_mesh=True)
+        super().__init__(context)
 
         if not context.is_symmetric:
             warnings.warn(
@@ -73,10 +73,17 @@ class IndexedSolver(DemagnetizationSolver):
         )
 
     def solve(self, magnetization, model):
+        if not self.use_complete_mesh and not np.all(self.active_cells_mask):
+            indices_mask = np.full_like(self.active_cells_mask, -1, ti_size_dtype)
+            indices_mask[self.active_cells_mask] = np.arange(np.count_nonzero(self.active_cells_mask))
+        else:
+            indices_mask = None
+
         return solve_Tx_b_indexed(
             self.Tmat321,
             magnetization,
             model,
+            indices_mask,
             shape_cells=self.shape_cells,
             progress=self.progress
         )
@@ -108,17 +115,35 @@ def _init_table(
         Tzz[n] = ti.cast(bz * (k + 0.5), Tzz.dtype)
 
 
-def solve_Tx_b_indexed(Tmat321, m, model, shape_cells, progress: bool = False):
+def solve_Tx_b_indexed(Tmat321, m, model, indices, shape_cells, progress: bool = False):
     index_dt = ti_size_t
+    n_total_cells = np.prod(shape_cells)
 
     with ti_FieldsBuilder() as fields_builder:
         model, _model = ti_ndarray_like(model, field=True, builder=fields_builder), model
+
+        if indices is not None:
+            indices, _indices = ti_ndarray_like(indices, field=True, builder=fields_builder), indices
+            use_active_cells_mapping = True
+        else:
+            use_active_cells_mapping = False
+
         fields_builder.finalize()
 
+        if indices is not None:
+            copy_from(indices, _indices)
         copy_from(model, _model)
 
         table_size = Tmat321[0][0].shape[0]
         nx, ny, nz = shape_cells
+
+        @ti_pyfunc
+        def transform(i):
+            if ti.static(use_active_cells_mapping):
+                # 映射到有效网格索引，如果返回-1则代表非有效网格
+                return indices[i]
+            else:
+                return i
 
         @ti_pyfunc
         def extract(i, i_cell):
@@ -152,19 +177,20 @@ def solve_Tx_b_indexed(Tmat321, m, model, shape_cells, progress: bool = False):
                 for kk in range(dk):
                     for jj in range(dj):
                         for ii in range(di):
-                            r = r0
-                            c = r0 + delta
+                            r = transform(r0)
+                            c = transform(r0 + delta)
 
-                            if ti.static(upper):
-                                r, c = c, r
+                            if r >= 0 and c >= 0:
+                                if ti.static(upper):
+                                    r, c = c, r
 
-                            row, col = r * 3, c * 3
+                                row, col = r * 3, c * 3
 
-                            txx, txy, txz, tyy, tyz, tzz = extract(n, c)
-                            mx, my, mz = x[col + 0], x[col + 1], x[col + 2]
-                            Ax[row + 0] += txx * mx + txy * my + txz * mz
-                            Ax[row + 1] += txy * mx + tyy * my + tyz * mz
-                            Ax[row + 2] += txz * mx + tyz * my + tzz * mz
+                                txx, txy, txz, tyy, tyz, tzz = extract(n, c)
+                                mx, my, mz = x[col + 0], x[col + 1], x[col + 2]
+                                Ax[row + 0] += txx * mx + txy * my + txz * mz
+                                Ax[row + 1] += txy * mx + tyy * my + tyz * mz
+                                Ax[row + 2] += txz * mx + tyz * my + tzz * mz
 
                             r0 += si
                         r0 += sj
@@ -172,12 +198,17 @@ def solve_Tx_b_indexed(Tmat321, m, model, shape_cells, progress: bool = False):
 
         @ti_kernel
         def linear(x: ti.template(), Ax: ti.template()):
-            for _cr in range(x.shape[0] // 3):
-                txx, txy, txz, tyy, tyz, tzz = extract(0, _cr)
+            for _cr in range(n_total_cells):
+                cr = transform(_cr)
+                if cr < 0:
+                    continue
+
+                txx, txy, txz, tyy, tyz, tzz = extract(0, cr)
                 txx += 1
                 tyy += 1
                 tzz += 1
-                cr = _cr * 3
+
+                cr = cr * 3
                 mx, my, mz = x[cr + 0], x[cr + 1], x[cr + 2]
                 Ax[cr + 0] = txx * mx + txy * my + txz * mz
                 Ax[cr + 1] = txy * mx + tyy * my + tyz * mz
@@ -186,7 +217,7 @@ def solve_Tx_b_indexed(Tmat321, m, model, shape_cells, progress: bool = False):
             iterate_relation_indices(x, Ax, upper=True)
             iterate_relation_indices(x, Ax, upper=False)
 
-        return matrix_free.bicgstab(ti.linalg.LinearOperator(linear), m, progress=progress).to_numpy()
+        return matrix_free.cg(ti.linalg.LinearOperator(linear), m, progress=progress).to_numpy()
 
 
 @ti_pyfunc

@@ -171,9 +171,17 @@ class Coordinates(FixedShapeNDArray):
         """
         from pyproj import CRS, Transformer
 
+        if crs is not None:
+            if query is not None:
+                warnings.warn('Both `crs` and `query` are specified. `query` will be ignored.')
+                query = None
+
         if isinstance(query, CRS):
             crs = query
             query = None
+        elif crs in {Coordinates.SearchUTM}:
+            query = crs
+            crs = None
 
         if crs is not None:
             from pyproj.exceptions import CRSError

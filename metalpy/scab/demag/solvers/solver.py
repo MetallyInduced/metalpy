@@ -121,6 +121,8 @@ class DemagnetizationSolver(abc.ABC):
         ret
             三轴等效磁化率矩阵
         """
+        model = np.asarray(model)
+
         if source_field is None:
             source_field = self.source_field
             assert source_field is not None, ('`source_field` must be specified'
@@ -136,7 +138,7 @@ class DemagnetizationSolver(abc.ABC):
         H0 = np.tile(H0[None, :], self.n_cells).ravel()
 
         if self.use_complete_mesh:
-            model_ = np.full(self.mesh.n_cells, 0)
+            model_ = np.full(self.mesh.n_cells, 0, dtype=model.dtype)
             model_[self.active_cells_mask] = model
             model = model_
 

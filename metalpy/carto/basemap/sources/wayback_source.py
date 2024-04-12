@@ -39,6 +39,10 @@ class WaybackSource(SimpleTileMapSource):
     MAX_ZOOM = 23
     MIN_ZOOM = 10
 
+    @staticmethod
+    def get_latest():
+        return WaybackSource.get_sources()[-1]
+
     def __init__(self, title, date, rev: Revision, rnum=None, tile_url=None, metadata_url=None):
         """Wayback (esri) 地图数据源
 

@@ -390,7 +390,7 @@ def _check_shape_cells_power_of_2(shape_cells):
     cells_required = 1 << np.ceil(np.log2(shape_cells)).astype(int)
     for i, (n, required) in enumerate(zip(shape_cells, cells_required)):
         if n != required:
-            warnings.warn(f' Got {n} cells on axis {i}, which is not power of 2.'
+            warnings.warn(f'Got {n} cells on axis {i}, which is not power of 2.'
                           f' Will be expanded to {required} cells on this axis.')
             expanded_cells.set(i, max=required - n)
 
