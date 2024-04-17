@@ -156,3 +156,5 @@ class _ResidualLogger:
         if self.running:
             res = float(re.split(r'\s+', msg.strip(), maxsplit=4)[2])
             self.progress.sync(res)
+        else:
+            self.progress.close()

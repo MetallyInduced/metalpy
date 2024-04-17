@@ -137,6 +137,12 @@ class CompressedSolver(DemagnetizationSolver):
             symmetric=self.symmetric
         )
 
+        if not np.allclose(model, model[0]):
+            warnings.warn(
+                '`CompressedSolver` does not support non-uniform susceptibility model yet.'
+                ' May lead to unexpected result.'
+            )
+
         kernel_matrix_forward(
             self.receiver_locations,
             self.xn, self.yn, self.zn,

@@ -63,13 +63,18 @@ class IndexedSolver(DemagnetizationSolver):
 
         _init_table(*self.Tmat6, self.shape_cells, base_cell_sizes)
 
+        if np.allclose(model, model[0]):
+            apply_susc_model = True
+        else:
+            apply_susc_model = False
+
         kernel_matrix_forward(
             self.receiver_locations,
             self.xn, self.yn, self.zn,
             self.base_cell_sizes, model,
             *self.Tmat6, mat=np.empty(0), kernel_dtype=self.kernel_dt,
             write_to_mat=False, compressed=True,
-            apply_susc_model=False
+            apply_susc_model=apply_susc_model
         )
 
     def solve(self, magnetization, model):
@@ -78,6 +83,9 @@ class IndexedSolver(DemagnetizationSolver):
             indices_mask[self.active_cells_mask] = np.arange(np.count_nonzero(self.active_cells_mask))
         else:
             indices_mask = None
+
+        if np.allclose(model, model[0]):
+            model = None
 
         return solve_Tx_b_indexed(
             self.Tmat321,
@@ -116,11 +124,14 @@ def _init_table(
 
 
 def solve_Tx_b_indexed(Tmat321, m, model, indices, shape_cells, progress: bool = False):
-    index_dt = ti_size_t
-    n_total_cells = np.prod(shape_cells)
+    n_total_cells = n_total_obs = np.prod(shape_cells)
 
     with ti_FieldsBuilder() as fields_builder:
-        model, _model = ti_ndarray_like(model, field=True, builder=fields_builder), model
+        if model is not None:
+            model, _model = ti_ndarray_like(model, field=True, builder=fields_builder), model
+            use_model = True
+        else:
+            use_model = False
 
         if indices is not None:
             indices, _indices = ti_ndarray_like(indices, field=True, builder=fields_builder), indices
@@ -132,10 +143,12 @@ def solve_Tx_b_indexed(Tmat321, m, model, indices, shape_cells, progress: bool =
 
         if indices is not None:
             copy_from(indices, _indices)
-        copy_from(model, _model)
 
-        table_size = Tmat321[0][0].shape[0]
+        if model is not None:
+            copy_from(model, _model)
+
         nx, ny, nz = shape_cells
+        nxny = nx * ny
 
         @ti_pyfunc
         def transform(i):
@@ -146,76 +159,79 @@ def solve_Tx_b_indexed(Tmat321, m, model, indices, shape_cells, progress: bool =
                 return i
 
         @ti_pyfunc
+        def index3d(i):
+            # 完整索引矩阵中的每一行对应一个网格到所有其它网格的关系，该关系由 nz 层2维网格组成，每层由 ny 条1维网格组成
+            # 即包含 nz 个长度为 nxny 的大递增块，块间距为 (2 * nx - 1) * (2 * ny - 1)
+            # 每个大递增块中包含 ny 个长度为 nx 的小递增块，块间距为 (2 * nx - 1)
+            # 例如 nx=2, ny=3, nz=4
+            # 完整索引矩阵的第一行即为
+            # [0,  1,  3,  4,  6,  7,
+            #  15, 16, 18, 19, 21, 22,
+            #  30, 31, 33, 34, 36, 37,
+            #  45, 46, 48, 49, 51, 52]
+            p2, m2 = i // nxny, i % nxny
+            p1, m1 = m2 // nx, m2 % nx
+
+            return p2 * (2 * nx - 1) * (2 * ny - 1) + p1 * (2 * nx - 1) + m1
+
+        @ti_pyfunc
+        def ij2n(i, j):
+            return ti.abs(index3d(j) - index3d(i))
+
+        @ti_pyfunc
         def extract(i, i_cell):
-            neg_sus = -model[i_cell]
+            neg_sus: Tmat321[0][0].dtype = 1
+            if ti.static(use_model):
+                neg_sus = -model[i_cell]
+
             return (
                 neg_sus * Tmat321[0][0][i], neg_sus * Tmat321[0][1][i], neg_sus * Tmat321[0][2][i],
                 neg_sus * Tmat321[1][0][i], neg_sus * Tmat321[1][1][i],
                 neg_sus * Tmat321[2][0][i]
             )
 
-        @ti_pyfunc
-        def iterate_relation_indices(x: ti.template(), Ax: ti.template(), upper: ti.template()):
-            for n in range(1, table_size):
-                i, j, k = index_n2ijk(n, nx, ny, nz)
-                delta = ti.cast(i + nx * j + nx * ny * k, index_dt)
-
-                i0 = 0 if i >= 0 else -i
-                j0 = 0 if j >= 0 else -j
-                k0 = 0 if k >= 0 else -k
-
-                r0 = ti.cast(i0 + nx * j0 + nx * ny * k0, index_dt)
-
-                di = ti.cast(nx - abs(i), index_dt)
-                dj = ti.cast(ny - abs(j), index_dt)
-                dk = ti.cast(nz - abs(k), index_dt)
-
-                si = ti.cast(1, index_dt)
-                sj = ti.cast(nx - di, index_dt)
-                sk = ti.cast(nx * ny - dj * nx, index_dt)
-
-                for kk in range(dk):
-                    for jj in range(dj):
-                        for ii in range(di):
-                            r = transform(r0)
-                            c = transform(r0 + delta)
-
-                            if r >= 0 and c >= 0:
-                                if ti.static(upper):
-                                    r, c = c, r
-
-                                row, col = r * 3, c * 3
-
-                                txx, txy, txz, tyy, tyz, tzz = extract(n, c)
-                                mx, my, mz = x[col + 0], x[col + 1], x[col + 2]
-                                Ax[row + 0] += txx * mx + txy * my + txz * mz
-                                Ax[row + 1] += txy * mx + tyy * my + tyz * mz
-                                Ax[row + 2] += txz * mx + tyz * my + tzz * mz
-
-                            r0 += si
-                        r0 += sj
-                    r0 += sk
-
         @ti_kernel
         def linear(x: ti.template(), Ax: ti.template()):
-            for _cr in range(n_total_cells):
-                cr = transform(_cr)
-                if cr < 0:
+            for r_g in range(n_total_cells):
+                r = transform(r_g)  # 转为有效网格坐标
+                if r < 0:
                     continue
 
-                txx, txy, txz, tyy, tyz, tzz = extract(0, cr)
-                txx += 1
-                tyy += 1
-                tzz += 1
+                txx, txy, txz, tyy, tyz, tzz = extract(0, r)  # 对角线元素对应0号关系
+                if ti.static(use_model):
+                    txx += 1
+                    tyy += 1
+                    tzz += 1
 
-                cr = cr * 3
-                mx, my, mz = x[cr + 0], x[cr + 1], x[cr + 2]
-                Ax[cr + 0] = txx * mx + txy * my + txz * mz
-                Ax[cr + 1] = txy * mx + tyy * my + tyz * mz
-                Ax[cr + 2] = txz * mx + tyz * my + tzz * mz
+                row = r * 3
+                mx, my, mz = x[row + 0], x[row + 1], x[row + 2]
 
-            iterate_relation_indices(x, Ax, upper=True)
-            iterate_relation_indices(x, Ax, upper=False)
+                summed0 = txx * mx + txy * my + txz * mz
+                summed1 = txy * mx + tyy * my + tyz * mz
+                summed2 = txz * mx + tyz * my + tzz * mz
+
+                for c_g in range(n_total_obs):
+                    if c_g == r_g:
+                        # 对角线元素已经计入
+                        continue
+
+                    c = transform(c_g)  # 转为有效网格坐标
+                    if c < 0:
+                        continue
+
+                    n = ij2n(r_g, c_g)  # 通过全局坐标获取关系索引序号
+                    txx, txy, txz, tyy, tyz, tzz = extract(n, c)
+
+                    col = c * 3
+                    mx, my, mz = x[col + 0], x[col + 1], x[col + 2]
+
+                    summed0 += txx * mx + txy * my + txz * mz
+                    summed1 += txy * mx + tyy * my + tyz * mz
+                    summed2 += txz * mx + tyz * my + tzz * mz
+
+                Ax[row + 0] = summed0
+                Ax[row + 1] = summed1
+                Ax[row + 2] = summed2
 
         return matrix_free.cg(ti.linalg.LinearOperator(linear), m, progress=progress).to_numpy()
 
