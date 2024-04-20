@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Union
 
+import numpy as np
+
 from metalpy.mexin import Patch
 from metalpy.scab import Tied
 from metalpy.scab.distributed.policies import NotDistributable
@@ -21,6 +23,7 @@ class Demaged(Patch, NotDistributable):
             symmetric: bool | None = None,
             progress: bool = False,
             kernel_dtype=None,
+            cutoff=np.inf,
             **kwargs
     ):
         """为 `Simulation3DIntegral` 添加退磁效应计算
@@ -58,6 +61,8 @@ class Demaged(Patch, NotDistributable):
             是否输出求解进度条，默认为False不输出
         kernel_dtype
             核矩阵数据类型，默认为None，自动从输入数据推断
+        cutoff
+            截断距离，当网格间距离超出截断距离，则不考虑之间的自退磁效应
         """
         super().__init__()
         self.params = get_params_dict(
@@ -69,6 +74,7 @@ class Demaged(Patch, NotDistributable):
             symmetric=symmetric,
             progress=progress,
             kernel_dtype=kernel_dtype,
+            cutoff=cutoff,
             **kwargs
         )
 

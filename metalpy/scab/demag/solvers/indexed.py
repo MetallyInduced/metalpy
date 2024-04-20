@@ -61,7 +61,12 @@ class IndexedSolver(DemagnetizationSolver):
     def build_kernel(self, model):
         base_cell_sizes = self.base_cell_sizes
 
-        _init_table(*self.Tmat6, self.shape_cells, base_cell_sizes)
+        _init_table(
+            *self.Tmat6,
+            self.shape_cells,
+            base_cell_sizes,
+            self.cutoff
+        )
 
         if np.allclose(model, model[0]):
             apply_susc_model = True
@@ -106,7 +111,8 @@ def _init_table(
         Tyz: ti.template(),
         Tzz: ti.template(),
         shape_cells: ti.types.ndarray(),
-        base_cell_sizes: ti.types.ndarray()
+        base_cell_sizes: ti.types.ndarray(),
+        cutoff: ti.template()
 ):
     table_size = Txx.shape[0]
     nx, ny, nz = shape_cells[0], shape_cells[1], shape_cells[2]
@@ -114,6 +120,17 @@ def _init_table(
 
     for n in range(table_size):
         i, j, k = index_n2ijk(n, nx, ny, nz)
+
+        if ti.static(cutoff != ti.math.inf):
+            dist = ti.sqrt(
+                (bx * i) ** 2
+                + (by * j) ** 2
+                + (bz * k) ** 2
+            )
+
+            if dist > cutoff:
+                Txx[n] = Txy[n] = Txz[n] = Tyy[n] = Tyz[n] = Tzz[n] = ti.math.inf
+                continue
 
         Txx[n] = ti.cast(bx * (i - 0.5), Txx.dtype)
         Txy[n] = ti.cast(bx * (i + 0.5), Txy.dtype)

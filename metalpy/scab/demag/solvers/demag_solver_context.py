@@ -11,6 +11,7 @@ class DemagSolverContext:
             active_cells_mask: np.ndarray,
             source_field: Field,
             kernel_dtype=None,
+            cutoff=np.inf,
             progress: bool = False
     ):
         """该函数将矩阵分为9个部分，从而实现一些优化
@@ -25,6 +26,8 @@ class DemagSolverContext:
             定义默认外部场源，求解时若未指定场源，则使用该值
         kernel_dtype
             核矩阵数据类型，默认为None，自动从输入数据推断
+        cutoff
+            截断距离，当网格间距离超出截断距离，则不考虑之间的自退磁效应
         progress
             是否输出求解进度条，默认为False不输出
         """
@@ -40,6 +43,7 @@ class DemagSolverContext:
         # 算法相关属性
         self.source_field = source_field
         self.kernel_dtype = kernel_dtype
+        self.cutoff = cutoff
         self.progress = progress
 
     def extract_active(self):

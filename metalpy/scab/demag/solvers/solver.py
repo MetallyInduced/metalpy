@@ -76,6 +76,10 @@ class DemagnetizationSolver(abc.ABC):
         return to_taichi_type(self.kernel_dtype)
 
     @property
+    def cutoff(self):
+        return self.context.cutoff
+
+    @property
     def n_cells(self):
         return self.xn.shape[0]
 

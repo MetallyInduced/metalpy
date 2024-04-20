@@ -41,7 +41,8 @@ class Demagnetization:
             quantized: bool | None = None,
             symmetric: bool | None = None,
             progress=False,
-            kernel_dtype=None
+            kernel_dtype=None,
+            cutoff=np.inf
     ):
         """
         通过共轭梯度法求解计算退磁作用下的三轴等效磁化率
@@ -83,6 +84,8 @@ class Demagnetization:
             是否输出求解进度条，默认为False不输出
         kernel_dtype
             核矩阵数据类型，默认为None，自动从输入数据推断
+        cutoff
+            截断距离，当网格间距离超出截断距离，则不考虑之间的自退磁效应
 
         Notes
         -----
@@ -116,7 +119,9 @@ class Demagnetization:
 
         context = DemagSolverContext(
             mesh, active_ind, source_field,
-            kernel_dtype=kernel_dtype, progress=self.progress
+            kernel_dtype=kernel_dtype,
+            cutoff=cutoff,
+            progress=self.progress
         )
 
         # CPU后端可以直接判断内存是否足够

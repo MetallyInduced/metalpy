@@ -40,9 +40,6 @@ def kernel_matrix_forward(
     #     │ Tyx, Tyy, Tyz, │ Tyx, Tyy, Tyz, │ ... │ Tyx, Tyy, Tyz, │  │
     #     │ Tzx, Tzy, Tzz, │ Tzx, Tzy, Tzz, │ ... │ Tzx, Tzy, Tzz, │  │
     #     └────────────────┴────────────────┴─────┴────────────────┘ ─┘
-    tol1 = 1e-10  # Tolerance 1 for numerical stability over nodes and edges
-    tol2 = 1e-4  # Tolerance 2 for numerical stability over nodes and edges
-
     # number of cells in mesh
     nC = xn.shape[0]
     nObs = receiver_locations.shape[0]
@@ -90,21 +87,6 @@ def kernel_matrix_forward(
             dy2 = Tyy[i]
             dz1 = Tyz[i]
             dz2 = Tzz[i]
-
-        if ti.abs(dx1) / min_hx < tol2:
-            dx1 = tol2 * min_hx
-        if ti.abs(dx2) / min_hx < tol2:
-            dx2 = tol2 * min_hx
-
-        if ti.abs(dy1) / min_hy < tol2:
-            dy1 = tol2 * min_hy
-        if ti.abs(dy2) / min_hy < tol2:
-            dy2 = tol2 * min_hy
-
-        if ti.abs(dz1) / min_hz < tol2:
-            dz1 = tol2 * min_hz
-        if ti.abs(dz2) / min_hz < tol2:
-            dz2 = tol2 * min_hz
 
         # comp. squared diff
         dx2dx2 = dx2 ** 2.0
@@ -190,14 +172,14 @@ def kernel_matrix_forward(
         )
 
         txx = (
-            + -2 * ti.atan2(dx1, arg1 + tol1)
-            - -2 * ti.atan2(dx2, arg6 + tol1)
-            + -2 * ti.atan2(dx2, arg11 + tol1)
-            - -2 * ti.atan2(dx1, arg16 + tol1)
-            + -2 * ti.atan2(dx2, arg21 + tol1)
-            - -2 * ti.atan2(dx1, arg26 + tol1)
-            + -2 * ti.atan2(dx1, arg31 + tol1)
-            - -2 * ti.atan2(dx2, arg36 + tol1)
+            + -2 * ti.atan2(dx1, arg1)
+            - -2 * ti.atan2(dx2, arg6)
+            + -2 * ti.atan2(dx2, arg11)
+            - -2 * ti.atan2(dx1, arg16)
+            + -2 * ti.atan2(dx2, arg21)
+            - -2 * ti.atan2(dx1, arg26)
+            + -2 * ti.atan2(dx1, arg31)
+            - -2 * ti.atan2(dx2, arg36)
         ) / -4 / ti.math.pi
 
         txy = (
@@ -215,14 +197,14 @@ def kernel_matrix_forward(
         ) / -4 / ti.math.pi
 
         tyy = (
-            + -2 * ti.atan2(dy2, arg2 + tol1)
-            - -2 * ti.atan2(dy2, arg7 + tol1)
-            + -2 * ti.atan2(dy2, arg12 + tol1)
-            - -2 * ti.atan2(dy2, arg17 + tol1)
-            + -2 * ti.atan2(dy1, arg22 + tol1)
-            - -2 * ti.atan2(dy1, arg27 + tol1)
-            + -2 * ti.atan2(dy1, arg32 + tol1)
-            - -2 * ti.atan2(dy1, arg37 + tol1)
+            + -2 * ti.atan2(dy2, arg2)
+            - -2 * ti.atan2(dy2, arg7)
+            + -2 * ti.atan2(dy2, arg12)
+            - -2 * ti.atan2(dy2, arg17)
+            + -2 * ti.atan2(dy1, arg22)
+            - -2 * ti.atan2(dy1, arg27)
+            + -2 * ti.atan2(dy1, arg32)
+            - -2 * ti.atan2(dy1, arg37)
         ) / -4 / ti.math.pi
 
         tyz = (
@@ -235,6 +217,10 @@ def kernel_matrix_forward(
         # txx + tyy + tzz = 0, 如果观测点在网格外
         # txx + tyy + tzz = -1, 如果观测点在网格内
         tzz = -inside - txx - tyy
+
+        if ti.math.isinf(dx1):
+            # TODO: 考察是否存在优化空间
+            txx = txy = txz = tyy = tyz = tzz = 0
 
         tyx = txy
         tzx = txz
