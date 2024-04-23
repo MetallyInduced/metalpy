@@ -8,7 +8,14 @@ from .taichi import ti_func, ti_pyfunc, ti_kernel
 
 
 @ti_pyfunc
-def ti_use(_):
+def ti_use(
+        _0,
+        _1=0, _2=0, _3=0, _4=0, _5=0, _6=0, _7=0,
+        _8=0, _9=0, _a=0, _b=0, _c=0, _d=0, _e=0,
+        _f=0, _g=0, _h=0, _i=0, _j=0, _k=0, _l=0,
+        _m=0, _n=0, _o=0, _p=0, _q=0, _r=0, _s=0,
+        _t=0, _u=0, _v=0, _w=0, _x=0, _y=0, _z=0
+):
     pass
 
 

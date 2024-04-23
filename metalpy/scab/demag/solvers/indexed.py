@@ -29,11 +29,11 @@ class IndexedSolver(DemagnetizationSolver):
         优势：
 
         - 可以大幅降低内存需求量至O(n)
+        - 计算效率最高
 
         缺陷：
 
         - 只支持在规则网格上使用
-        - 对计算效率有较大影响
         """
         super().__init__(context)
 
@@ -43,7 +43,7 @@ class IndexedSolver(DemagnetizationSolver):
                 f' may result in incorrect results.'
             )
 
-        table_size = index_mat_size(*self.shape_cells)
+        table_size = index_mat_size(*self.local_shape_cells)
 
         self.builder = builder = ti_FieldsBuilder()
 
@@ -59,12 +59,10 @@ class IndexedSolver(DemagnetizationSolver):
         builder.finalize()
 
     def build_kernel(self, model):
-        base_cell_sizes = self.base_cell_sizes
-
         _init_table(
             *self.Tmat6,
-            self.shape_cells,
-            base_cell_sizes,
+            self.local_shape_cells,
+            self.base_cell_sizes,
             self.cutoff
         )
 
@@ -75,8 +73,7 @@ class IndexedSolver(DemagnetizationSolver):
 
         kernel_matrix_forward(
             self.receiver_locations,
-            self.xn, self.yn, self.zn,
-            self.base_cell_sizes, model,
+            self.xn, self.yn, self.zn, model,
             *self.Tmat6, mat=np.empty(0), kernel_dtype=self.kernel_dt,
             write_to_mat=False, compressed=True,
             apply_susc_model=apply_susc_model
@@ -98,6 +95,7 @@ class IndexedSolver(DemagnetizationSolver):
             model,
             indices_mask,
             shape_cells=self.shape_cells,
+            local_shape_cells=self.local_shape_cells,
             progress=self.progress
         )
 
@@ -140,8 +138,14 @@ def _init_table(
         Tzz[n] = ti.cast(bz * (k + 0.5), Tzz.dtype)
 
 
-def solve_Tx_b_indexed(Tmat321, m, model, indices, shape_cells, progress: bool = False):
+def solve_Tx_b_indexed(Tmat321, m, model, indices, shape_cells, local_shape_cells=None, progress: bool = False):
+    if local_shape_cells is None:
+        local_shape_cells = shape_cells
+
+    shape_cells = np.asarray(shape_cells)
     n_total_cells = n_total_obs = np.prod(shape_cells)
+
+    has_cutoff = np.any(local_shape_cells != shape_cells)
 
     with ti_FieldsBuilder() as fields_builder:
         if model is not None:
@@ -166,6 +170,8 @@ def solve_Tx_b_indexed(Tmat321, m, model, indices, shape_cells, progress: bool =
 
         nx, ny, nz = shape_cells
         nxny = nx * ny
+
+        lnx, lny, lnz = local_shape_cells
 
         @ti_pyfunc
         def transform(i):
@@ -193,7 +199,16 @@ def solve_Tx_b_indexed(Tmat321, m, model, indices, shape_cells, progress: bool =
 
         @ti_pyfunc
         def ij2n(i, j):
-            return ti.abs(index3d(j) - index3d(i))
+            n = ti.abs(index3d(j) - index3d(i))
+
+            if ti.static(has_cutoff):
+                x, y, z = index_n2ijk(n, nx, ny, nz)
+                if ti.abs(x) >= lnx or ti.abs(y) >= lny or ti.abs(z) >= lnz:
+                    n = -1
+                else:
+                    n = index_ijk2n(x, y, z, lnx, lny, lnz)
+
+            return n
 
         @ti_pyfunc
         def extract(i, i_cell):
@@ -237,6 +252,9 @@ def solve_Tx_b_indexed(Tmat321, m, model, indices, shape_cells, progress: bool =
                         continue
 
                     n = ij2n(r_g, c_g)  # 通过全局坐标获取关系索引序号
+                    if n < 0:
+                        continue
+
                     txx, txy, txz, tyy, tyz, tzz = extract(n, c)
 
                     col = c * 3
@@ -266,13 +284,10 @@ def index_n2ijk(n, nx, ny, nz):
     nnx = nx * 2 - 1
     nny = ny * 2 - 1
 
-    i: ti.int64 = 0
-    j: ti.int64 = 0
-    k: ti.int64 = 0
-
-    ti_use(i)
-    ti_use(j)
-    ti_use(k)
+    i: ti_size_t = 0
+    j: ti_size_t = 0
+    k: ti_size_t = 0
+    ti_use(i, j, k)
 
     if n > lv1_2:
         res = n - lv0 - lv1 - 1
@@ -300,9 +315,15 @@ def index_ijk2n(i, j, k, nx, ny, nz):
     rj = j + ny
     nnx = nx * 2 - 1
     nny = ny * 2 - 1
+
+    n: ti_size_t = 0
+    ti_use(n)
+
     if k > 0:
-        return lv0 + lv1 + nnx * nny * (k - 1) + nnx * (rj - 1) + ri
+        n = lv0 + lv1 + nnx * nny * (k - 1) + nnx * (rj - 1) + ri
     elif j > 0:
-        return lv0 + nnx * (j - 1) + ri
+        n = lv0 + nnx * (j - 1) + ri
     else:
-        return i
+        n = i
+
+    return n

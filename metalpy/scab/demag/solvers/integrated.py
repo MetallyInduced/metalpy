@@ -41,8 +41,7 @@ class IntegratedSolver(DemagnetizationSolver):
     def build_kernel(self, model):
         kernel_matrix_forward(
             self.receiver_locations,
-            self.xn, self.yn, self.zn,
-            self.base_cell_sizes, model,
+            self.xn, self.yn, self.zn, model,
             *[None] * 6, mat=self.A, kernel_dtype=self.kernel_dt,
             write_to_mat=True, compressed=False,
             apply_susc_model=True

@@ -32,7 +32,15 @@ class DemagnetizationSolver(abc.ABC):
 
     @property
     def shape_cells(self):
+        """三个方向上网格数目
+        """
         return np.asarray(self.context.shape_cells)
+
+    @property
+    def local_shape_cells(self):
+        """截断距离影响范围内包含的三个方向上网格数目（曼哈顿距离下）
+        """
+        return np.asarray(self.context.local_shape_cells)
 
     @property
     def receiver_locations(self):
@@ -53,6 +61,14 @@ class DemagnetizationSolver(abc.ABC):
     @property
     def base_cell_sizes(self):
         return self.context.base_cell_sizes
+
+    @property
+    def min_cell_sizes(self):
+        return self.context.min_cell_sizes
+
+    @property
+    def max_cell_sizes(self):
+        return self.context.max_cell_sizes
 
     @property
     def source_field(self):

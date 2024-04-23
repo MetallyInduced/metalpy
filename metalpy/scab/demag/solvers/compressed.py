@@ -65,6 +65,7 @@ class CompressedSolver(DemagnetizationSolver):
 
         - 网格规模仍然受到taichi的int32索引限制
         - 对计算效率有较大影响
+        - 由于索引矩阵的存在，实际上仍然为O(n^2)的空间复杂度，只是常数项较小
 
         `deterministic` 指定是否采用确定性模式并行哈希，可选的取值为：
 
@@ -134,7 +135,8 @@ class CompressedSolver(DemagnetizationSolver):
             self.xn, self.yn, self.zn,
             self.indices_mat,
             deterministic=self.deterministic,
-            symmetric=self.symmetric
+            symmetric=self.symmetric,
+            cutoff=self.cutoff
         )
 
         if not np.allclose(model, model[0]):
@@ -145,8 +147,7 @@ class CompressedSolver(DemagnetizationSolver):
 
         kernel_matrix_forward(
             self.receiver_locations,
-            self.xn, self.yn, self.zn,
-            self.base_cell_sizes, model,
+            self.xn, self.yn, self.zn, model,
             *self.Tmat6, mat=np.empty(0), kernel_dtype=self.kernel_dt,
             write_to_mat=False, compressed=True,
             apply_susc_model=True  # TODO: 考虑非均匀磁化率的情况
@@ -303,7 +304,8 @@ def compress_kernel(
         zn: np.ndarray,
         indices_mat,
         deterministic,
-        symmetric
+        symmetric,
+        cutoff
 ):
     if deterministic not in [True, False]:
         assert deterministic == CompressedSolver.Optimal
@@ -316,7 +318,8 @@ def compress_kernel(
             Tmat6, receiver_locations,
             xn, yn, zn,
             indices_mat,
-            symmetric
+            symmetric,
+            cutoff
         )
     else:
         used, overflow = compress_kernel_by_hash(
@@ -324,7 +327,8 @@ def compress_kernel(
             xn, yn, zn,
             indices_mat,
             deterministic,
-            symmetric
+            symmetric,
+            cutoff
         )
 
     if overflow:
@@ -355,7 +359,8 @@ def compress_kernel_optimal(
         yn: np.ndarray,
         zn: np.ndarray,
         indices_mat,
-        symmetric: bool
+        symmetric: bool,
+        cutoff: float
 ):
     n_param = len(mats)
     table_size = mats[0].shape[0]
@@ -387,7 +392,8 @@ def compress_kernel_by_hash(
         zn: np.ndarray,
         indices_mat,
         deterministic: bool,
-        symmetric: bool
+        symmetric: bool,
+        cutoff: float
 ):
     table_size = mats[0].shape[0]
 
@@ -421,7 +427,8 @@ def compress_kernel_by_hash(
         overflow,
         prime,
         invalid_value_for_dx1,
-        symmetric=symmetric
+        symmetric=symmetric,
+        cutoff=cutoff
     )
 
     overflow = overflow.to_numpy()[0]
@@ -448,7 +455,8 @@ def hash_unique(
         overflow: ti.template(),
         prime: ti.template(),
         invalid_value_for_dx1: ti.template(),
-        symmetric: ti.template()
+        symmetric: ti.template(),
+        cutoff: ti.template()
 ):
     for I in ti.grouped(Txx):
         Txx[I] = ti.math.inf
@@ -458,6 +466,17 @@ def hash_unique(
     table_size = Txx.shape[0]
     overflow[0] = ti.i8(0)
     qb = total_bits // 4  # quarter bits
+
+    # 初始化保留元素区
+    # 设置位置 0 为 0 元素，在启用截断距离时，超出截断距离的网格间影响统一压缩为0
+    faraway = 0  # 极远距离点
+    reserved: ti_size_t = 0  # 保留元素个数
+    if ti.static(cutoff != ti.math.inf):
+        # 虽然似乎没有必要，但还是显式声明一下
+        reserved += 1
+        # kernel_matrix_forward 检测 Txx 为 inf 会视为无穷距离
+        Txx[faraway] = Txy[faraway] = Txz[faraway] = Tyy[faraway] = Tyz[faraway] = Tzz[faraway] = ti.math.inf
+    table_size -= reserved
 
     total = nObs * nC
     if ti.static(symmetric):
@@ -478,103 +497,115 @@ def hash_unique(
         dx2 = xn[icell, 1] - receiver_locations[iobs, 0]
         dx1 = xn[icell, 0] - receiver_locations[iobs, 0]
 
-        if ti.static(not symmetric):
-            # 由于互换对称性，核矩阵会存在一定的对称性
-            # 极端情况是规则网格，此时核矩阵为对称矩阵，启用对称模式即不再需要该trick
+        a = table_size
 
-            # 因此通过确保网格关系的唯一性，可以最高将压缩率提高到原来的50%
-            # 唯一性条件具体以dx条件为例：
-            #   情况1. dx1和dx2同号，保证均为正
-            #   情况2. dx1和dx2异号，保证dx1绝对值小于dx2 （注：该情况对于规则网格无意义）
-            # 检查过程如下：
-            # 1. 检查dx条件，不满足则执行互换
-            # 2. 如果dx相反（dx1和dx2互为相反数，此时dx1和dx2互换前后数值不变），则检查dy条件，不满足则执行互换
-            # 3. 如果dx和dy均相反，则检查dz条件，不满足则执行互换
-            # 提升比需要在CPU模式下验证（对于GPU，由于冲突的存在，无法达到理想提升比）
-            e1, e2 = dx1 + dx2 == 0, dy1 + dy2 == 0
-            swap_x = dx1 < 0 and -dx1 > dx2  # 检查dx条件
-            swap_y = e1 and dy1 < 0 and -dy1 > dy2  # dx相反，检查dy条件
-            swap_z = e1 and e2 and dz1 < 0 and -dz1 > dz2  # dx和dy相反，检查dz条件
+        if ti.static(cutoff != ti.math.inf):
+            dist = ti.sqrt(
+                (dx1 + dx2) ** 2
+                + (dy1 + dy2) ** 2
+                + (dz1 + dz2) ** 2
+            ) / 2
 
-            if swap_x or swap_y or swap_z:
-                dx1, dx2 = -dx2, -dx1
-                dy1, dy2 = -dy2, -dy1
-                dz1, dz2 = -dz2, -dz1
+            if dist > cutoff:
+                a = faraway
 
-        p0 = ti.bit_cast(dx1, hash_type)
-        p1 = ti.bit_cast(dx2, hash_type)
-        p2 = ti.bit_cast(dy1, hash_type)
-        p3 = ti.bit_cast(dy2, hash_type)
-        p4 = ti.bit_cast(dz1, hash_type)
-        p5 = ti.bit_cast(dz2, hash_type)
+        if a == table_size:
+            if ti.static(not symmetric):
+                # 由于互换对称性，核矩阵会存在一定的对称性
+                # 极端情况是规则网格，此时核矩阵为对称矩阵，启用对称模式即不再需要该trick
 
-        # 哈希函数设计原则：
-        # 由于p[i]是直接由d[xyz][12]从二进制角度转换过来
-        # 因此其中指数部分（高位）应在大部分情况下相同，导致哈希空间稀疏，
-        # 所以需要采用循环位移来使其充分混淆
-        a0: ti_size_t = (
-            cshift(p1, qb * 0)
-            ^ cshift(p4, qb * 1)
-            ^ cshift(p2, qb * 2)
-            ^ cshift(p5, qb * 3)
-            ^ cshift(p3, qb * 0)
-            ^ cshift(p0, qb * 1)
-        ) % table_size
+                # 因此通过确保网格关系的唯一性，可以最高将压缩率提高到原来的50%
+                # 唯一性条件具体以dx条件为例：
+                #   情况1. dx1和dx2同号，保证均为正
+                #   情况2. dx1和dx2异号，保证dx1绝对值小于dx2 （注：该情况对于规则网格无意义）
+                # 检查过程如下：
+                # 1. 检查dx条件，不满足则执行互换
+                # 2. 如果dx相反（dx1和dx2互为相反数，此时dx1和dx2互换前后数值不变），则检查dy条件，不满足则执行互换
+                # 3. 如果dx和dy均相反，则检查dz条件，不满足则执行互换
+                # 提升比需要在CPU模式下验证（对于GPU，由于冲突的存在，无法达到理想提升比）
+                e1, e2 = dx1 + dx2 == 0, dy1 + dy2 == 0
+                swap_x = dx1 < 0 and -dx1 > dx2  # 检查dx条件
+                swap_y = e1 and dy1 < 0 and -dy1 > dy2  # dx相反，检查dy条件
+                swap_z = e1 and e2 and dz1 < 0 and -dz1 > dz2  # dx和dy相反，检查dz条件
 
-        # 预设了网格数大于并行线程数，因此同时查询的键几乎不会重复
-        # 访问冲突的概率只取决于哈希函数的碰撞率
-        a = a0
-        while True:
-            if ti.static(invalid_value_for_dx1 > 0):
-                # 严格模式，严格防止数据竞争
-                # 1. 有可能导致相同参数占用多个哈希条目，导致额外内存开销
-                # 2. 依赖原子操作，产生额外计算开销
-                # TODO: 替换为ti.atomic_cas
-                #   https://github.com/taichi-dev/taichi/issues/1805
-                if ti.math.isinf(ti.atomic_min(Txx[a], invalid_value_for_dx1)):
+                if swap_x or swap_y or swap_z:
+                    dx1, dx2 = -dx2, -dx1
+                    dy1, dy2 = -dy2, -dy1
+                    dz1, dz2 = -dz2, -dz1
+
+            p0 = ti.bit_cast(dx1, hash_type)
+            p1 = ti.bit_cast(dx2, hash_type)
+            p2 = ti.bit_cast(dy1, hash_type)
+            p3 = ti.bit_cast(dy2, hash_type)
+            p4 = ti.bit_cast(dz1, hash_type)
+            p5 = ti.bit_cast(dz2, hash_type)
+
+            # 哈希函数设计原则：
+            # 由于p[i]是直接由d[xyz][12]从二进制角度转换过来
+            # 因此其中指数部分（高位）应在大部分情况下相同，导致哈希空间稀疏，
+            # 所以需要采用循环位移来使其充分混淆
+            a0: ti_size_t = (
+                cshift(p1, qb * 0)
+                ^ cshift(p4, qb * 1)
+                ^ cshift(p2, qb * 2)
+                ^ cshift(p5, qb * 3)
+                ^ cshift(p3, qb * 0)
+                ^ cshift(p0, qb * 1)
+            ) % table_size + reserved
+
+            # 预设了网格数大于并行线程数，因此同时查询的键几乎不会重复
+            # 访问冲突的概率只取决于哈希函数的碰撞率
+            a = a0
+            while True:
+                if ti.static(invalid_value_for_dx1 > 0):
+                    # 严格模式，严格防止数据竞争
+                    # 1. 有可能导致相同参数占用多个哈希条目，导致额外内存开销
+                    # 2. 依赖原子操作，产生额外计算开销
+                    # TODO: 替换为ti.atomic_cas
+                    #   https://github.com/taichi-dev/taichi/issues/1805
+                    if ti.math.isinf(ti.atomic_min(Txx[a], invalid_value_for_dx1)):
+                        break
+                else:
+                    # 非严格模式，有可能因并发修改哈希表条目，导致少量网格参数覆盖
+                    if ti.math.isinf(Txx[a]):
+                        break
+
+                if (
+                    Txx[a] == dx1
+                    and Txy[a] == dx2
+                    and Txz[a] == dy1
+                    and Tyy[a] == dy2
+                    and Tyz[a] == dz1
+                    and Tzz[a] == dz2
+                ):
                     break
-            else:
-                # 非严格模式，有可能因并发修改哈希表条目，导致少量网格参数覆盖
-                if ti.math.isinf(Txx[a]):
+
+                # 采用与nC/nObs互质的距离来做跳跃rehash：
+                # 降低二次冲突概率，同时保证能遍历全表
+                a += prime
+                if a >= table_size + reserved:
+                    a -= table_size
+
+                if a == a0:
+                    # 无法解决冲突，认为哈希表已经溢出
+                    overflow[0] = ti.i8(1)
                     break
 
-            if (
-                Txx[a] == dx1
-                and Txy[a] == dx2
-                and Txz[a] == dy1
-                and Tyy[a] == dy2
-                and Tyz[a] == dz1
-                and Tzz[a] == dz2
-            ):
-                break
-
-            # 采用与nC/nObs互质的距离来做跳跃rehash：
-            # 降低二次冲突概率，同时保证能遍历全表
-            a += prime
-            if a >= table_size:
-                a -= table_size
-
-            if a == a0:
-                # 无法解决冲突，认为哈希表已经溢出
-                overflow[0] = ti.i8(1)
-                break
-
-        # 容量超了的话，其实已经不需要管下面数据错误的问题了
-        # if overflow[0] > 0:
-        #     # print('寄！')
-        #     continue
+            # 容量超了的话，其实已经不需要管下面数据覆盖的问题了
+            # if overflow[0] > 0:
+            #     # print('寄！')
+            #     continue
+            Txx[a] = ti.cast(dx1, Txx.dtype)
+            Txy[a] = ti.cast(dx2, Txy.dtype)
+            Txz[a] = ti.cast(dy1, Txz.dtype)
+            Tyy[a] = ti.cast(dy2, Tyy.dtype)
+            Tyz[a] = ti.cast(dz1, Tyz.dtype)
+            Tzz[a] = ti.cast(dz2, Tzz.dtype)
 
         if ti.static(not symmetric):
             indices_mat[iobs, icell] = a
         else:
             indices_mat[i] = a
-
-        Txx[a] = ti.cast(dx1, Txx.dtype)
-        Txy[a] = ti.cast(dx2, Txy.dtype)
-        Txz[a] = ti.cast(dy1, Txz.dtype)
-        Tyy[a] = ti.cast(dy2, Tyy.dtype)
-        Tyz[a] = ti.cast(dz1, Tyz.dtype)
-        Tzz[a] = ti.cast(dz2, Tzz.dtype)
 
 
 @ti_func
