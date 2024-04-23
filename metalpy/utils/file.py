@@ -163,9 +163,11 @@ def make_cache_directory_path(name, *args):
 
 
 class FileCache:
-    def __init__(self, func, ttl: 'timedelta' = None):
+    def __init__(self, func, ttl: 'timedelta' = None, serializer=None, file=None):
         self.func = func
         self.ttl = ttl
+        self.serializer = serializer
+        self.file = file
 
     def __call__(self, *args, **kwargs):
         return self.prepare()(*args, **kwargs)
@@ -190,6 +192,14 @@ class FileCachedCall:
     def ttl(self):
         return self.cache.ttl
 
+    @property
+    def serializer(self):
+        return self.cache.serializer
+
+    @property
+    def file(self):
+        return self.cache.file
+
     @cache
     def get_func_namespace(self):
         return objpath(ObjectPath.of(self.func).nested_path)
@@ -197,17 +207,33 @@ class FileCachedCall:
     def __call__(self, *args, **kwargs):
         from metalpy.utils.dhash import dhash
         name = self.get_func_namespace()
-        hashkey = dhash(self.func, *args, kwargs)
+
+        if self.file is None:
+            hashkey = dhash(self.func, *args, kwargs)
+        else:
+            hashkey = None
 
         val = undefined
         if not self.update:
-            val = get_cache(hashkey, ttl=self.ttl, name=name)
+            val = get_cache(
+                hashkey,
+                ttl=self.ttl,
+                name=name,
+                serializer=self.serializer,
+                file=self.file
+            )
 
         if val is not undefined:
             return val
         else:
             val = self.func(*args, **kwargs)
-            put_cache(hashkey, val, name=name)
+            put_cache(
+                hashkey,
+                val,
+                name=name,
+                serializer=self.serializer,
+                file=self.file
+            )
             return val
 
 
@@ -224,34 +250,81 @@ def get_cache_path(key, name: str | None = None):
     return make_cache_directory_path('cached') / get_cache_key(key, name=name)
 
 
-def put_cache(key, content, name: str | None = None):
-    import cloudpickle
+def put_cache(
+        key,
+        content,
+        name: str | None = None,
+        serializer=None,
+        file=None
+):
+    if serializer is None:
+        import cloudpickle
+        serializer = cloudpickle
 
-    file = get_cache_path(key, name=name)
+    if file is None:
+        file = get_cache_path(key, name=name)
+    else:
+        file = Path(file)
+
     ensure_filepath(file)
-    with file.open('wb') as f:
-        cloudpickle.dump((key, content), f)
+
+    def write(mode):
+        with file.open(mode) as f:
+            if key is not None:
+                serializer.dump((key, content), f)
+            else:
+                serializer.dump(content, f)
+
+    try:
+        write('wb')
+    except TypeError:
+        write('w')
 
 
-def get_cache(key, default=undefined, ttl: 'timedelta' = None, name: str | None = None):
+def get_cache(
+        key,
+        default=undefined,
+        ttl: 'timedelta' = None,
+        name: str | None = None,
+        serializer=None,
+        file=None
+):
     from datetime import datetime
-    import cloudpickle
 
-    file = get_cache_path(key, name=name)
+    if serializer is None:
+        import cloudpickle
+        serializer = cloudpickle
+
+    if file is None:
+        file = get_cache_path(key, name=name)
+    else:
+        file = Path(file)
 
     if file.exists():
         if ttl is not None:
             if datetime.now() - datetime.fromtimestamp(os.path.getmtime(file)) > ttl:
-                return undefined
+                return default
 
-        with file.open('rb') as f:
-            try:
-                cache_key, content = cloudpickle.load(f)
-                if cache_key == key:
-                    return content
-            except Exception:
-                warnings.warn(traceback.format_exc() +
-                              '\nException occurred when loading cache. Ignoring cached file.')
+        def read(mode):
+            with file.open(mode) as f:
+                try:
+                    if key is not None:
+                        cache_key, content = serializer.load(f)
+                        if cache_key == key:
+                            return content
+                    else:
+                        content = serializer.load(f)
+                        return content
+                except Exception:
+                    warnings.warn(traceback.format_exc() +
+                                  '\nException occurred when loading cache. Ignoring cached file.')
+
+            return default
+
+        try:
+            return read('rb')
+        except TypeError:
+            return read('r')
 
     return default
 
@@ -261,13 +334,28 @@ def clear_cache(key, name: str | None = None):
     file.unlink(missing_ok=True)
 
 
-def file_cached(func=None, ttl: 'timedelta' = None):
+def file_cached(func=None, ttl: 'timedelta' = None, serializer=None, file=None):
     import functools
     if func is None:
-        return functools.partial(file_cached, ttl=ttl)
+        return functools.partial(file_cached, ttl=ttl, serializer=serializer, file=file)
     else:
-        return functools.wraps(func)(FileCache(func, ttl=ttl))
+        return functools.wraps(func)(FileCache(func, ttl=ttl, serializer=serializer, file=file))
+
+
+def json_cached(func=None, ttl: 'timedelta' = None, file=None):
+    import json
+    return file_cached(func, ttl=ttl, serializer=json, file=file)
 
 
 def openable(path):
     return isinstance(path, PathLikeType)
+
+
+class DirectSerializer:
+    @staticmethod
+    def dump(content, file):
+        file.write(content)
+
+    @staticmethod
+    def load(file):
+        return file.read()
