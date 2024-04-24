@@ -247,3 +247,35 @@ def copy_func(f: T, globals=None, module=None) -> T:
 def get_all_subclasses(cls):
     return set(cls.__subclasses__()).union(
         [s for c in cls.__subclasses__() for s in get_all_subclasses(c)])
+
+
+class CachedProperty(object):
+    """用于缓存计算开销较大的属性，仅在首次访问时计算并缓存结果
+
+    不添加线程锁，线程不安全，但是可以被序列化
+
+    TODO: 考察是否有办法检测被序列化，并在序列化时不序列化缓存的属性？
+
+    References
+    ----------
+    Based on:
+        https://github.com/bottlepy/bottle/commit/fa7733e075da0d790d809aa3d2f53071897e6f76 (@pydanny)
+    """
+    def __init__(self, func):
+        self.__doc__ = getattr(func, "__doc__")
+        self.func = func
+
+        functools.wraps(func)(self)
+
+    def __get__(self, obj, objtype=None):
+        if obj is None:
+            return self
+
+        value = obj.__dict__[self.func.__name__] = self.func(obj)
+        return value
+
+    def set(self, obj, val):
+        obj.__dict__[self.func.__name__] = val
+
+    def invalidate(self, obj):
+        del obj.__dict__[self.func.__name__]

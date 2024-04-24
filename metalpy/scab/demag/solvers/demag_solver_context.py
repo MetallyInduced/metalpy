@@ -2,6 +2,7 @@ import numpy as np
 from discretize.base import BaseTensorMesh
 
 from metalpy.scab.utils.misc import Field
+from metalpy.utils.type import CachedProperty
 
 
 class DemagSolverContext:
@@ -34,12 +35,6 @@ class DemagSolverContext:
         self.mesh = mesh
         self.active_cells_mask = active_cells_mask
 
-        # 网格相关属性
-        self.cell_centers = mesh.cell_centers
-        self.h_gridded = mesh.h_gridded
-        self.bsw = self.cell_centers - self.h_gridded / 2.0
-        self.tne = self.cell_centers + self.h_gridded / 2.0
-
         # 算法相关属性
         self.source_field = source_field
         self.kernel_dtype = kernel_dtype
@@ -47,10 +42,41 @@ class DemagSolverContext:
         self.progress = progress
 
     def extract_active(self):
-        self.cell_centers = self.cell_centers[self.active_cells_mask]
-        self.h_gridded = self.h_gridded[self.active_cells_mask]
-        self.bsw = self.bsw[self.active_cells_mask]
-        self.tne = self.tne[self.active_cells_mask]
+        extracted = [
+            DemagSolverContext.cell_centers,
+            DemagSolverContext.h_gridded,
+        ]
+
+        for prop in extracted:
+            prop.set(self, prop.__get__(self)[self.active_cells_mask])
+
+        for key in vars(DemagSolverContext):
+            prop = getattr(DemagSolverContext, key)
+
+            if prop in extracted:
+                continue
+
+            if isinstance(prop, CachedProperty):
+                try:
+                    prop.invalidate(key)
+                except AttributeError:
+                    pass
+
+    @CachedProperty
+    def cell_centers(self):
+        return self.mesh.cell_centers
+
+    @CachedProperty
+    def h_gridded(self):
+        return self.mesh.h_gridded
+
+    @CachedProperty
+    def bsw(self):
+        return self.cell_centers - self.h_gridded / 2.0
+
+    @CachedProperty
+    def tne(self):
+        return self.cell_centers + self.h_gridded / 2.0
 
     @property
     def is_symmetric(self):
@@ -80,15 +106,15 @@ class DemagSolverContext:
         """
         return self.cell_centers
 
-    @property
+    @CachedProperty
     def xn(self):
         return np.c_[self.bsw[:, 0], self.tne[:, 0]]
 
-    @property
+    @CachedProperty
     def yn(self):
         return np.c_[self.bsw[:, 1], self.tne[:, 1]]
 
-    @property
+    @CachedProperty
     def zn(self):
         return np.c_[self.bsw[:, 2], self.tne[:, 2]]
 
