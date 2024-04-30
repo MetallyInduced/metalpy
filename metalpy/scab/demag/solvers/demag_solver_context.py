@@ -41,9 +41,15 @@ class DemagSolverContext:
         self.cutoff = cutoff
         self.progress = progress
 
+        self._is_active_mesh = False
+
     def extract_active(self):
         """提取有效网格对应的 *cell_centers* 和 *h_gridded* 并设置对应成员
         """
+        if self.is_active_mesh or self.active_cells_mask is None:
+            # 已是 有效网格 或者 未指定有效网格掩码
+            return
+
         extracted = [
             DemagSolverContext.cell_centers,
             DemagSolverContext.h_gridded,
@@ -63,6 +69,12 @@ class DemagSolverContext:
                     prop.invalidate(key)
                 except AttributeError:
                     pass
+
+        self._is_active_mesh = True
+
+    @property
+    def is_active_mesh(self):
+        return self._is_active_mesh
 
     @CachedProperty
     def cell_centers(self):
@@ -88,11 +100,21 @@ class DemagSolverContext:
         """
         return self.cell_centers + self.h_gridded / 2.0
 
-    @property
+    @CachedProperty
     def is_symmetric(self):
         """判断是否为对称网格，即所有网格尺寸相同
         """
         return np.allclose(self.h_gridded, self.h_gridded[0])
+
+    @CachedProperty
+    def is_active_cells_symmetric(self):
+        """判断有效网格是否为对称网格，即所有网格尺寸相同
+        """
+        h_gridded = self.h_gridded
+        if not self.is_active_mesh:
+            h_gridded = h_gridded[self.active_cells_mask]
+
+        return np.allclose(h_gridded, h_gridded[0])
 
     @property
     def shape_cells(self):

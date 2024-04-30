@@ -200,7 +200,7 @@ def dispatch_solver(
         available_memory = None
 
     if n_cells > max_cells_allowed_0:
-        assert method in {Demagnetization.Indexed, None}, (
+        assert method in {Demagnetization.Indexed, None} and context.is_active_cells_symmetric, (
             f'Mesh with {n_cells} cells (> {max_cells_allowed_0})'
             f' requires symmetric mesh with `{IndexedSolver.__name__}` (got `{solver_name(method)}`).'
         )
@@ -210,13 +210,21 @@ def dispatch_solver(
             f' requires symmetric `{CompressedSolver.__name__}` (got `{solver_name(method)}`).'
         )
 
-        if symmetric is None:
-            symmetric = CompressedSolver.Strict
+        if method == Demagnetization.Compressed:
+            if symmetric is None:
+                symmetric = CompressedSolver.Strict
 
-        assert symmetric, (
+            # 压缩求解器下必须在规则网格下启用对称模式
+            assert symmetric, (
+                f'Mesh with {n_cells} cells (> {max_cells_allowed_1})'
+                f' requires `symmetric` mesh.'
+                f' Try setting `symmetric=True`.'
+            )
+
+        # 必须要规则网格才能支持65535个网格
+        assert context.is_active_cells_symmetric, (
             f'Mesh with {n_cells} cells (> {max_cells_allowed_1})'
             f' requires `symmetric` mesh.'
-            f' Try setting `symmetric=True`.'
         )
     elif n_cells > max_cells_allowed_2:
         assert method != Demagnetization.Integrated, (
@@ -248,10 +256,16 @@ def dispatch_solver(
         )
     elif n_cells > max_cells_allowed_0:
         candidate = IndexedSolver(**kw_ind)
-    elif not is_cpu or available_memory is not None and kernel_size > available_memory * 0.8:
-        candidate = CompressedSolver(**kw_com)
-    elif n_cells > max_cells_allowed_1:
-        candidate = CompressedSolver(**kw_com)
+    elif (
+            n_cells > max_cells_allowed_1  # 超出尺寸允许范围
+            or not is_cpu  # 显卡默认需要进行压缩
+            or available_memory is not None and kernel_size > available_memory * 0.8  # 超出设备内存限制
+    ):
+        if context.is_active_cells_symmetric:
+            # 规则网格优先采用关系索引求解器
+            candidate = IndexedSolver(**kw_ind)
+        else:
+            candidate = CompressedSolver(**kw_com)
     elif n_cells > max_cells_allowed_2:
         candidate = SeperatedSolver(direct_to_host=ti_test_snode_support(), **kw_sep)
     else:
