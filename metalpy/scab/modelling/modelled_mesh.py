@@ -7,7 +7,9 @@ import numpy as np
 from discretize import TensorMesh
 from numpy.typing import ArrayLike
 
+from metalpy.scab.modelling.formats.modelled_mesh import MeshZFormat
 from metalpy.scab.modelling.object import Object
+from metalpy.scab.modelling.shapes import Shape3D
 from metalpy.utils.bounds import Bounds
 from metalpy.utils.numpy import ensure_as_numpy_array_collection
 from metalpy.utils.type import is_numeric_array, get_first_key, ensure_set_key, Self
@@ -16,7 +18,7 @@ if TYPE_CHECKING:
     import pyvista as pv
 
 
-class ModelledMesh:
+class ModelledMesh(MeshZFormat):
     """
     用于封装包含模型的网格。
     mesh是基础网格，active_cells是有效网格的选择器。
@@ -205,7 +207,7 @@ class ModelledMesh:
         return self.mesh.n_cells
 
     @property
-    def default_key(self):
+    def default_key(self) -> str:
         return self._default_key
 
     @default_key.setter
@@ -472,7 +474,12 @@ class ModelledMesh:
     def __contains__(self, item):
         return item in self._models
 
-    def plot(self, *, scalars=True, prune: Literal[True, False] = True, **kwargs):
+    def plot(self,
+             *,
+             scalars: str | Iterable[str] | ArrayLike | bool = True,
+             prune: Literal[True, False] = True,
+             **kwargs
+             ):
         if scalars is True:
             active_scalars = self.default_key
             if active_scalars is not None:
@@ -598,15 +605,17 @@ class ModelledMesh:
         return ret
 
     def extract(self,
-                indices: ArrayLike,
+                indices_or_shape: ArrayLike | str | Shape3D,
                 scalars: str | Iterable[str] | bool = True,
                 shallow=False) -> Self:
         """通过网格mask提取子网格
 
         Parameters
         ----------
-        indices
-            有效网格坐标系下的mask（bool数组或下标数组）。
+        indices_or_shape
+            需要提取的子网格掩码（bool数组、下标数组或数据名字符串）。
+            如果传入完整网格坐标系的mask，则只提取其和当前有效网格的交集，保证结果为当前有效网格的子集。
+            如果传入Shape3D实例，则提取与该Shape3D相交的子网格。
         scalars
             需要保留到新ModelledMesh实例的一个或多个模型的键名。
             若为True，则保留所有模型，若为False，则只提取网格不提取模型。
@@ -617,18 +626,21 @@ class ModelledMesh:
         -------
         ret
             包含新的有效网格掩码的模型网格
-
-        Notes
-        -----
-        如果传入完整网格坐标系的mask，则只提取其和当前有效网格的交集，保证结果为当前有效网格的子集、
         """
-        if self.is_active_mask(indices):
-            indices = self.check_active_mask(indices)
-            new_active_cells = self.map_to_complete(indices)
+        from metalpy.scab.modelling import Scene
+
+        if isinstance(indices_or_shape, str):
+            indices = Scene.compute_active(self.get_active_model(indices_or_shape))
+        elif isinstance(indices_or_shape, Shape3D):
+            indices = indices_or_shape.place(self.active_cell_centers)
         else:
-            new_active_cells = self.check_complete_mask(indices)
-            new_active_cells[self.active_indices] &= True
-            indices = self.map_to_active(new_active_cells)
+            indices = indices_or_shape
+            if not self.is_active_mask(indices):
+                new_active_cells = self.check_complete_mask(indices) & self.active_indices
+                indices = self.map_to_active(new_active_cells)
+
+        indices = self.check_active_mask(indices)
+        new_active_cells = self.map_to_complete(indices)
 
         scalars = self._check_scalars(scalars)
         models = {}
@@ -1133,7 +1145,7 @@ def compute_exponential_cell_specs(width, base_cell_size, ratio, n_cells, precis
             # 注意此处第一项并非 base_cell_size，因此需要补充首项，并增加项数
             ratio = solve_geometric_ratio(width + base_cell_size, n_cells + 1, base_cell_size)
             theoretical_width = ratio * (ratio ** n_cells - 1) / (ratio - 1) * base_cell_size
-            assert np.allclose(theoretical_width, width), 'Oooops! Failed to find increment exponent.'
+            assert np.allclose(theoretical_width, width), 'Oops! Failed to find increment exponent.'
     else:
         if ratio == 1:
             # 要求等距网格

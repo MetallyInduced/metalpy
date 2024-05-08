@@ -15,8 +15,7 @@ from metalpy.utils.bounds import Bounds
 from metalpy.utils.file import ensure_dir, make_cache_directory
 from metalpy.utils.model import as_pyvista_array
 from metalpy.utils.numeric import limit_significand
-from .formats.osm import OSMFormat
-from .formats.ptopo import PTopoFormat
+from .formats.scene import OSMFormat, PTopoFormat
 from .layer import Layer
 from .mix_modes import MixMode, Mixer
 from .modelled_mesh import ModelledMesh
