@@ -6,6 +6,7 @@ from taichi.lang.util import to_taichi_type
 
 from metalpy.scab.utils.misc import Field
 from metalpy.utils.taichi import ti_cfg
+from metalpy.utils.type import CachedProperty
 from .demag_solver_context import DemagSolverContext
 
 
@@ -16,10 +17,11 @@ class DemagnetizationSolver(abc.ABC):
             use_complete_mesh: bool = False
     ):
         self.context = context
-        self.model = None
+        self._model = None
 
-        self.use_complete_mesh = use_complete_mesh
-        if not use_complete_mesh:
+        self._use_complete_mesh = use_complete_mesh
+
+        if not self.use_complete_mesh:
             self.context.extract_active()
 
     @property
@@ -27,8 +29,35 @@ class DemagnetizationSolver(abc.ABC):
         return self.context.mesh
 
     @property
+    def model(self):
+        return self._model
+
+    @model.setter
+    def model(self, model):
+        self._model = model
+        DemagnetizationSolver.is_uniform.invalidate(self)
+
+    @property
+    def has_active_cells_mask(self):
+        return self.context.has_active_cells_mask
+
+    @property
     def active_cells_mask(self):
         return self.context.active_cells_mask
+
+    @property
+    def use_complete_mesh(self):
+        if self._use_complete_mesh:
+            # solver指定使用完整网格
+            return True
+        elif not self.has_active_cells_mask:
+            # 未指定有效网格，视为使用完整网格
+            return True
+        elif np.all(self.active_cells_mask):
+            # 如果传入的mask中指定所有网格均为有效网格，则亦是使用完整网格
+            return True
+        else:
+            return False
 
     @property
     def shape_cells(self):
@@ -97,7 +126,15 @@ class DemagnetizationSolver(abc.ABC):
 
     @property
     def n_cells(self):
-        return self.xn.shape[0]
+        return self.context.n_cells
+
+    @property
+    def n_active_cells(self):
+        return self.context.n_active_cells
+
+    @property
+    def n_total_cells(self):
+        return self.context.n_total_cells
 
     @property
     def n_obs(self):
@@ -151,14 +188,14 @@ class DemagnetizationSolver(abc.ABC):
 
         source_field = Field(source_field)
         if self.model is None or np.any(self.model != model):
-            self.build_kernel(model)
             self.model = np.copy(model)
+            self.build_kernel(model)
 
         H0 = source_field.unit_vector
         H0 = np.tile(H0[None, :], self.n_cells).ravel()
 
         if self.use_complete_mesh:
-            model_ = np.full(self.mesh.n_cells, 0, dtype=model.dtype)
+            model_ = np.full(self.n_cells, 0, dtype=model.dtype)
             model_[self.active_cells_mask] = model
             model = model_
 
@@ -172,6 +209,19 @@ class DemagnetizationSolver(abc.ABC):
             ret = ret[self.active_cells_mask]
 
         return ret
+
+    @CachedProperty
+    def is_uniform(self):
+        """判断网格磁化率模型是否均匀，即所有网格磁化率相同
+        """
+        return np.allclose(self.model, self.model[0])
+
+    @property
+    def is_kernel_built_with_model(self):
+        """如果为均匀网格，则核矩阵 A=I-KT 通常可以直接构建；
+        否则需要在求解时构造 Ax = (I-KT)x = x - K(Tx)。
+        """
+        return self.is_uniform
 
     @abc.abstractmethod
     def build_kernel(self, model):

@@ -1,28 +1,113 @@
+import numpy as np
 import taichi as ti
 
 from metalpy.utils.taichi import ti_kernel
 from metalpy.utils.taichi_kernels import ti_use
 
 
-@ti_kernel
 def kernel_matrix_forward(
+        receiver_locations,
+        xn, yn, zn,
+        susc_model,
+        mat,
+        kernel_dtype,
+        apply_susc_model
+):
+    empty = np.empty(0)
+    return _kernel_matrix_forward(
+        receiver_locations, xn, yn, zn, susc_model,
+        *[None] * 6,
+        empty, empty, empty, empty, empty, empty,
+        mat=mat,
+        write_to_mat=True,
+        compressed=False,
+        kernel_dtype=kernel_dtype,
+        apply_susc_model=apply_susc_model,
+        external=False
+    )
+
+
+def kernel_matrix_forward_separated(
+        receiver_locations,
+        xn, yn, zn,
+        susc_model,
+        Txx, Txy, Txz, Tyy, Tyz, Tzz,
+        kernel_dtype,
+        apply_susc_model,
+        compressed=False,
+):
+    empty = np.empty(0)
+    # ti.Field只能用 ti.template() 参数接收
+    # numpy或torch的外部数组只能用 ti.types.ndarray() 接收
+    # 因此需要区分传入的Txx等数组类型，分别传入
+    if isinstance(Txx, ti.Field):
+        external = False
+        fields = [Txx, Txy, Txz, Tyy, Tyz, Tzz]
+        ext_arrays = [empty] * 6
+    else:
+        external = True
+        fields = [0] * 6
+        ext_arrays = [Txx, Txy, Txz, Tyy, Tyz, Tzz]
+
+    return _kernel_matrix_forward(
+        receiver_locations, xn, yn, zn, susc_model,
+        *fields,
+        *ext_arrays,
+        mat=np.empty(0),
+        write_to_mat=False,
+        compressed=compressed,
+        kernel_dtype=kernel_dtype,
+        apply_susc_model=apply_susc_model,
+        external=external
+    )
+
+
+@ti_kernel
+def _kernel_matrix_forward(
         receiver_locations: ti.types.ndarray(),
         xn: ti.types.ndarray(),
         yn: ti.types.ndarray(),
         zn: ti.types.ndarray(),
         susc_model: ti.types.ndarray(),
-        Txx: ti.template(),
-        Txy: ti.template(),
-        Txz: ti.template(),
-        Tyy: ti.template(),
-        Tyz: ti.template(),
-        Tzz: ti.template(),
+        Txx: ti.template(), Txy: ti.template(), Txz: ti.template(),
+        Tyy: ti.template(), Tyz: ti.template(), Tzz: ti.template(),
+        Txx_: ti.types.ndarray(), Txy_: ti.types.ndarray(), Txz_: ti.types.ndarray(),
+        Tyy_: ti.types.ndarray(), Tyz_: ti.types.ndarray(), Tzz_: ti.types.ndarray(),
         mat: ti.types.ndarray(),
         write_to_mat: ti.template(),
         compressed: ti.template(),
         kernel_dtype: ti.template(),
         apply_susc_model: ti.template(),
+        external: ti.template()
 ):
+    """构建退磁核矩阵
+
+    Parameters
+    ----------
+    receiver_locations
+        观测点坐标
+    xn, yn, zn
+        三个方向上网格的边界
+    susc_model
+    Txx, Txy, Txz, Tyy, Tyz, Tzz
+        元素间核矩阵 `G` 的六个独立元素数组
+    Txx_, Txy_, Txz_, Tyy_, Tyz_, Tzz_
+        元素间核矩阵 `G` 的六个独立元素数组，但是为 `ndarray` 类型以适配 `numpy` 或 `torch` 数组
+    mat
+        完整核矩阵，只在 `write_to_mat` 为 `True` 时有效
+    write_to_mat
+        指定是否直接将完整核矩阵写入到 `mat` 中，为 `False` 时 `mat` 参数被忽略，此时核矩阵被写入到 `Txx` 系列矩阵中
+    compressed
+        指定是否为压缩模式，为 `True` 时所有操作在 `Txx` 或 `Txx_` 系列矩阵上进行，且所有相关矩阵维度为 1，
+        为 `False` 时，如果 `write_to_mat` 也为 `False` 则此时 `Txx` 系列矩阵的维度为 `nObs x nC`
+    kernel_dtype
+        核矩阵元素类型
+    apply_susc_model
+        指定是否将结果乘以磁化率，同时检测对角线元素并减去单位矩阵，此时核矩阵可以直接用于求解，
+        否则需要在求解过程中重新构建系数矩阵 `I - X @ T`
+    external
+        指定是否写入到外部数组，如果为 `True` ，则在 `Txx` 系列数组上进行计算，否则在 `Txx_` 系列数组上操作·
+    """
     # calculates A = I - X @ T, where T is the forward kernel, s.t. T @ m_v = B_v
     # m_v and B_v are both channel first (Array of Structure in taichi)
     # m_v = [Mx1, My1, Mz1, ... Mxn, Myn, Mzn]
@@ -46,7 +131,10 @@ def kernel_matrix_forward(
     dummy = xn[0, 0]
     total = nObs * nC
     if ti.static(compressed):
-        total = Txx.shape[0]
+        if ti.static(not external):
+            total = Txx.shape[0]
+        else:
+            total = Txx_.shape[0]
 
     for i in range(total):
         iobs, icell = 0, 0
@@ -64,12 +152,20 @@ def kernel_matrix_forward(
             dz1 = zn[icell, 0] - receiver_locations[iobs, 2]
             dz2 = zn[icell, 1] - receiver_locations[iobs, 2]
         else:
-            dx1 = Txx[i]
-            dx2 = Txy[i]
-            dy1 = Txz[i]
-            dy2 = Tyy[i]
-            dz1 = Tyz[i]
-            dz2 = Tzz[i]
+            if ti.static(not external):
+                dx1 = Txx[i]
+                dx2 = Txy[i]
+                dy1 = Txz[i]
+                dy2 = Tyy[i]
+                dz1 = Tyz[i]
+                dz2 = Tzz[i]
+            else:
+                dx1 = Txx_[i]
+                dx2 = Txy_[i]
+                dy1 = Txz_[i]
+                dy2 = Tyy_[i]
+                dz1 = Tyz_[i]
+                dz2 = Tzz_[i]
 
         txx = txy = txz = tyy = tyz = tzz = dx1 * 0.0
         inside: ti.i8 = 0
@@ -218,12 +314,20 @@ def kernel_matrix_forward(
             inside = ti.cast(0, ti.i8)
 
         if ti.static(compressed):
-            Txx[i] = ti.cast(neg_sus * txx + inside, kernel_dtype)
-            Txy[i] = ti.cast(neg_sus * txy, kernel_dtype)
-            Txz[i] = ti.cast(neg_sus * txz, kernel_dtype)
-            Tyy[i] = ti.cast(neg_sus * tyy + inside, kernel_dtype)
-            Tyz[i] = ti.cast(neg_sus * tyz, kernel_dtype)
-            Tzz[i] = ti.cast(neg_sus * tzz + inside, kernel_dtype)
+            if ti.static(not external):
+                Txx[i] = ti.cast(neg_sus * txx + inside, kernel_dtype)
+                Txy[i] = ti.cast(neg_sus * txy, kernel_dtype)
+                Txz[i] = ti.cast(neg_sus * txz, kernel_dtype)
+                Tyy[i] = ti.cast(neg_sus * tyy + inside, kernel_dtype)
+                Tyz[i] = ti.cast(neg_sus * tyz, kernel_dtype)
+                Tzz[i] = ti.cast(neg_sus * tzz + inside, kernel_dtype)
+            else:
+                Txx_[i] = ti.cast(neg_sus * txx + inside, kernel_dtype)
+                Txy_[i] = ti.cast(neg_sus * txy, kernel_dtype)
+                Txz_[i] = ti.cast(neg_sus * txz, kernel_dtype)
+                Tyy_[i] = ti.cast(neg_sus * tyy + inside, kernel_dtype)
+                Tyz_[i] = ti.cast(neg_sus * tyz, kernel_dtype)
+                Tzz_[i] = ti.cast(neg_sus * tzz + inside, kernel_dtype)
         else:
             if ti.static(write_to_mat):
                 mat[iobs * 3 + 0, icell * 3 + 0] = ti.cast(neg_sus * txx + inside, kernel_dtype)

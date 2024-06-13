@@ -33,7 +33,7 @@ class DemagSolverContext:
             是否输出求解进度条，默认为False不输出
         """
         self.mesh = mesh
-        self.active_cells_mask = active_cells_mask
+        self._active_cells_mask = active_cells_mask
 
         # 算法相关属性
         self.source_field = source_field
@@ -46,7 +46,7 @@ class DemagSolverContext:
     def extract_active(self):
         """提取有效网格对应的 *cell_centers* 和 *h_gridded* 并设置对应成员
         """
-        if self.is_active_mesh or self.active_cells_mask is None:
+        if self.is_active_mesh or not self.has_active_cells_mask:
             # 已是 有效网格 或者 未指定有效网格掩码
             return
 
@@ -75,6 +75,17 @@ class DemagSolverContext:
     @property
     def is_active_mesh(self):
         return self._is_active_mesh
+
+    @property
+    def has_active_cells_mask(self):
+        return self._active_cells_mask is not None
+
+    @property
+    def active_cells_mask(self):
+        if self.has_active_cells_mask:
+            return self._active_cells_mask
+        else:
+            return np.ones(self.n_cells, dtype=bool)
 
     @CachedProperty
     def cell_centers(self):
@@ -137,7 +148,9 @@ class DemagSolverContext:
 
     @property
     def n_cells(self):
-        """网格数
+        """当前网格的网格数，
+        如果提取了有效网格，则其为有效网格数 `n_active_cells` ，
+        否则为总网格数 `n_total_cells`
         """
         return self.h_gridded.shape[0]
 
@@ -145,7 +158,16 @@ class DemagSolverContext:
     def n_active_cells(self):
         """有效网格数
         """
-        return np.count_nonzero(self.active_cells_mask)
+        if self.has_active_cells_mask:
+            return np.count_nonzero(self.active_cells_mask)
+        else:
+            return self.n_cells
+
+    @property
+    def n_total_cells(self):
+        """总网格数
+        """
+        return self.mesh.n_cells
 
     @property
     def n_obs(self):

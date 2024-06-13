@@ -7,7 +7,7 @@ from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func
 from metalpy.utils.ti_solvers import matrix_free
 from .demag_solver_context import DemagSolverContext
 from .integrated import solve_Ax_b
-from .kernel import kernel_matrix_forward
+from .kernel import kernel_matrix_forward_separated
 from .solver import DemagnetizationSolver
 
 
@@ -60,11 +60,11 @@ class SeperatedSolver(DemagnetizationSolver):
         builder.finalize()
 
     def build_kernel(self, model):
-        kernel_matrix_forward(
+        kernel_matrix_forward_separated(
             self.receiver_locations,
             self.xn, self.yn, self.zn, model,
-            *self.Tmat6, mat=np.empty(0), kernel_dtype=self.kernel_dt,
-            write_to_mat=False, compressed=False,
+            *self.Tmat6,
+            kernel_dtype=self.kernel_dt,
             apply_susc_model=True
         )
 
@@ -74,6 +74,10 @@ class SeperatedSolver(DemagnetizationSolver):
             return solve_Ax_b(merge_Tmat_as_A(self.Tmat33, direct_to_host=self.direct_to_host), magnetization)
         else:
             return solve_Tx_b(self.Tmat321, magnetization, progress=self.progress)
+
+    @property
+    def is_kernel_built_with_model(self):
+        return True
 
 
 def solve_Tx_b(Tmat321, m, progress: bool = False):

@@ -12,6 +12,7 @@ from metalpy.utils.string import format_string_list
 from metalpy.utils.taichi import ti_cfg, ti_test_snode_support, ti_size_max
 from .solvers.compressed import CompressedSolver
 from .solvers.demag_solver_context import DemagSolverContext
+from .solvers.bce import BCESolver
 from .solvers.indexed import IndexedSolver
 from .solvers.integrated import IntegratedSolver
 from .solvers.seperated import SeperatedSolver
@@ -19,11 +20,13 @@ from .solvers.solver import DemagnetizationSolver
 
 
 class Demagnetization:
+    BCE = 'BCE'
     Indexed = 'Indexed'
     Compressed = 'Compressed'
     Seperated = 'Seperated'
     Integrated = 'Integrated'
     methods = {
+        BCE,
         Indexed,
         Compressed,
         Seperated,
@@ -58,6 +61,8 @@ class Demagnetization:
         method
             采用的数值求解算法，参考 `Demagnetization.methods` 。默认为None，自动选择。
             可选选项：
+                - Demagnetization.BCE
+                - Demagnetization.Indexed
                 - Demagnetization.Compressed
                 - Demagnetization.Seperated
                 - Demagnetization.Integrated
@@ -89,18 +94,26 @@ class Demagnetization:
 
         Notes
         -----
-        compressed_size参考 `metalpy.scab.demag.solvers.compressed.CompressedSolver` 定义
+        `compressed_size` , `deterministic` , `quantized` , `symmetric` 参数
+        参考 :class:`metalpy.scab.demag.solvers.compressed.CompressedSolver` 定义
 
-        三个方法具体为：
+        五个方法具体为：
 
-        - `Integrated` 采用朴素算法，直接求解完整核矩阵
+        - `BCE` 采用BCE（Block Circulant Extension）算法，通过快速傅里叶变换加速核矩阵乘法，求解速度最快，是大规模规则网格下的最优求解器
+        - `Compressed` 通过哈希表压缩核矩阵，大幅降低内存需求量，适用于任意网格，压缩率与网格规则度有关，规则网格上压缩率最高
+        - `Indexed` 通过关系索引压缩核矩阵，结合截断距离使用实现线性空间复杂度，但求解速度较低，且只适用于大规模规则网格
         - `Seperated` 将核矩阵拆分为9份来一定程度上绕过taichi对矩阵大小的限制
-        - `Compressed` 通过哈希表将核矩阵压缩，以计算效率为代价换取大幅降低内存需求量
+        - `Integrated` 采用朴素算法，直接求解完整核矩阵
 
-        网格规模较小时 `Integrated` 计算效率最高，
-        随着网格规模增加 `Integrated` 和 `Seperated` 计算耗时持平，
-        但随着网格规模继续增加， `Integrated` 和 `Seperated` 的内存需求量相对于网格数平方级膨胀，
-        如果超出内存限制，则需要采用 `Compressed` 来时间换空间。
+        如果采用规则网格， `BCE` 是最优选择；
+
+        网格规模较小时 `Integrated` 计算效率最高；
+
+        随着网格规模增加 `Integrated` 和 `Seperated` 计算耗时持平；
+
+        但随着网格规模继续增加， `Integrated` 和 `Seperated` 的内存需求量相对于网格数平方级膨胀；
+
+        如果超出内存限制，则需要采用 `Indexed` 或 `Compressed` 来时间换空间。
         """
         super().__init__()
         assert method is None or method in Demagnetization.methods, \
@@ -199,15 +212,27 @@ def dispatch_solver(
         # TODO: 看taichi什么时候能出一个查询剩余显存/内存的接口
         available_memory = None
 
+    support_any_cells = {Demagnetization.BCE, Demagnetization.Indexed, None}
+
     if n_cells > max_cells_allowed_0:
-        assert method in {Demagnetization.Indexed, None} and context.is_active_cells_symmetric, (
+        available_solvers = support_any_cells
+        choices = format_string_list(available_solvers - {None}, multiline=True, quote=solver_tag)
+
+        assert method in available_solvers and context.is_active_cells_symmetric, (
             f'Mesh with {n_cells} cells (> {max_cells_allowed_0})'
-            f' requires symmetric mesh with `{IndexedSolver.__name__}` (got `{solver_name(method)}`).'
+            f' requires symmetric mesh with following solvers:'
+            f' {choices}'
+            f'\n(got `{solver_tag(method)}`).'
         )
     elif n_cells > max_cells_allowed_1:
-        assert method in {Demagnetization.Indexed, Demagnetization.Compressed, None}, (
+        available_solvers = support_any_cells | {Demagnetization.Compressed}
+        choices = format_string_list(available_solvers - {None}, multiline=True, quote=solver_tag)
+
+        assert method in available_solvers, (
             f'Mesh with {n_cells} cells (> {max_cells_allowed_1})'
-            f' requires symmetric `{CompressedSolver.__name__}` (got `{solver_name(method)}`).'
+            f' requires following solvers:'
+            f' {choices}'
+            f'\n(got `{solver_tag(method)}`).'
         )
 
         if method == Demagnetization.Compressed:
@@ -217,10 +242,11 @@ def dispatch_solver(
             # 压缩求解器下必须在规则网格下启用对称模式
             assert symmetric, (
                 f'Mesh with {n_cells} cells (> {max_cells_allowed_1})'
-                f' requires `symmetric` mesh.'
+                f' requires `symmetric` mesh for {solver_tag(Demagnetization.Compressed)}.'
                 f' Try setting `symmetric=True`.'
             )
 
+        # TODO: 压缩求解器实现无索引矩阵模式后可以放宽该限制
         # 必须要规则网格才能支持65535个网格
         assert context.is_active_cells_symmetric, (
             f'Mesh with {n_cells} cells (> {max_cells_allowed_1})'
@@ -245,6 +271,7 @@ def dispatch_solver(
         **common_kwargs
     }
     kw_ind = {**common_kwargs}
+    kw_bce = {**common_kwargs}
 
     if method is not None:
         candidate = dispatch_solver_by_name(
@@ -252,17 +279,25 @@ def dispatch_solver(
             kw_int=kw_int,
             kw_sep=kw_sep,
             kw_com=kw_com,
-            kw_ind=kw_ind
+            kw_ind=kw_ind,
+            kw_bce=kw_bce,
         )
     elif n_cells > max_cells_allowed_0:
-        candidate = IndexedSolver(**kw_ind)
+        if context.is_symmetric:
+            # 规则网格优先采用BCE求解器
+            candidate = BCESolver(**kw_bce)
+        else:
+            candidate = IndexedSolver(**kw_ind)
     elif (
             n_cells > max_cells_allowed_1  # 超出尺寸允许范围
             or not is_cpu  # 显卡默认需要进行压缩
             or available_memory is not None and kernel_size > available_memory * 0.8  # 超出设备内存限制
     ):
-        if context.is_active_cells_symmetric:
-            # 规则网格优先采用关系索引求解器
+        if context.is_symmetric:
+            # 规则网格优先采用BCE求解器
+            candidate = BCESolver(**kw_bce)
+        elif context.is_active_cells_symmetric:
+            # 局部规则网格优先采用BCE求解器
             candidate = IndexedSolver(**kw_ind)
         else:
             candidate = CompressedSolver(**kw_com)
@@ -278,10 +313,19 @@ def solver_name(method):
     return dispatch_solver_by_name(method).__name__
 
 
-def dispatch_solver_by_name(method, kw_int=None, kw_sep=None, kw_com=None, kw_ind=None):
+def solver_tag(method):
+    return Demagnetization.__name__ + '.' + method
+
+
+def dispatch_solver_by_name(method, kw_int=None, kw_sep=None, kw_com=None, kw_ind=None, kw_bce=None):
     """通过方法名获取求解器，当不指定求解器参数时，返回求解器类
     """
-    if method == Demagnetization.Indexed:
+    if method == Demagnetization.BCE:
+        if kw_bce is not None:
+            candidate = BCESolver(**kw_bce)
+        else:
+            candidate = BCESolver
+    elif method == Demagnetization.Indexed:
         if kw_ind is not None:
             candidate = IndexedSolver(**kw_ind)
         else:

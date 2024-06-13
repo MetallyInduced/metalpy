@@ -12,7 +12,7 @@ from metalpy.utils.taichi import ti_kernel, ti_field, ti_FieldsBuilder, ti_func,
     ti_pyfunc
 from metalpy.utils.ti_solvers import matrix_free
 from .demag_solver_context import DemagSolverContext
-from .kernel import kernel_matrix_forward
+from .kernel import kernel_matrix_forward_separated
 from .solver import DemagnetizationSolver
 
 
@@ -89,6 +89,8 @@ class CompressedSolver(DemagnetizationSolver):
         - 网格尺寸建议采用 `IEEE754` 可以精确表示的值，防止因计算误差干扰压缩效果
         - 例如使用 0.375 或 0.4375 替代 0.4
         - 可以使用 `metalpy.utils.numeric.limit_significand` 来搜索合适的网格尺寸
+
+        TODO: 实现无索引矩阵模式以支持更大规模的网格（当前索引矩阵为主要空间开销，实际空间复杂度仍为 O(n^2)）
         """
         super().__init__(context)
 
@@ -145,11 +147,12 @@ class CompressedSolver(DemagnetizationSolver):
                 ' May lead to unexpected result.'
             )
 
-        kernel_matrix_forward(
+        kernel_matrix_forward_separated(
             self.receiver_locations,
             self.xn, self.yn, self.zn, model,
-            *self.Tmat6, mat=np.empty(0), kernel_dtype=self.kernel_dt,
-            write_to_mat=False, compressed=True,
+            *self.Tmat6,
+            kernel_dtype=self.kernel_dt,
+            compressed=True,
             apply_susc_model=True  # TODO: 考虑非均匀磁化率的情况
         )
 

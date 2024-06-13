@@ -8,7 +8,7 @@ from metalpy.utils.taichi import ti_field, ti_FieldsBuilder, ti_kernel, ti_pyfun
 from metalpy.utils.taichi_kernels import ti_use
 from metalpy.utils.ti_solvers import matrix_free
 from .demag_solver_context import DemagSolverContext
-from .kernel import kernel_matrix_forward
+from .kernel import kernel_matrix_forward_separated
 from .solver import DemagnetizationSolver
 
 
@@ -71,18 +71,19 @@ class IndexedSolver(DemagnetizationSolver):
         else:
             apply_susc_model = False
 
-        kernel_matrix_forward(
+        kernel_matrix_forward_separated(
             self.receiver_locations,
             self.xn, self.yn, self.zn, model,
-            *self.Tmat6, mat=np.empty(0), kernel_dtype=self.kernel_dt,
-            write_to_mat=False, compressed=True,
+            *self.Tmat6,
+            kernel_dtype=self.kernel_dt,
+            compressed=True,
             apply_susc_model=apply_susc_model
         )
 
     def solve(self, magnetization, model):
-        if not self.use_complete_mesh and not np.all(self.active_cells_mask):
+        if not self.use_complete_mesh:
             indices_mask = np.full_like(self.active_cells_mask, -1, ti_size_dtype)
-            indices_mask[self.active_cells_mask] = np.arange(np.count_nonzero(self.active_cells_mask))
+            indices_mask[self.active_cells_mask] = np.arange(self.n_active_cells)
         else:
             indices_mask = None
 
@@ -160,7 +161,10 @@ def solve_Tx_b_indexed(Tmat321, m, model, indices, shape_cells, local_shape_cell
         else:
             use_active_cells_mapping = False
 
-        fields_builder.finalize()
+        with warnings.catch_warnings():
+            # 忽略taichi的 "Finalizing an empty FieldsBuilder!"
+            warnings.simplefilter('ignore', category=UserWarning)
+            fields_builder.finalize()
 
         if indices is not None:
             copy_from(indices, _indices)

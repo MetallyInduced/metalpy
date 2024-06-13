@@ -42,8 +42,8 @@ class IntegratedSolver(DemagnetizationSolver):
         kernel_matrix_forward(
             self.receiver_locations,
             self.xn, self.yn, self.zn, model,
-            *[None] * 6, mat=self.A, kernel_dtype=self.kernel_dt,
-            write_to_mat=True, compressed=False,
+            mat=self.A,
+            kernel_dtype=self.kernel_dt,
             apply_susc_model=True
         )
 
@@ -53,6 +53,10 @@ class IntegratedSolver(DemagnetizationSolver):
         else:
             Amat = self.A.to_numpy()
         return solve_Ax_b(Amat, magnetization, progress=self.progress)
+
+    @property
+    def is_kernel_built_with_model(self):
+        return True
 
 
 def solve_Ax_b(A, m, progress: bool = False):

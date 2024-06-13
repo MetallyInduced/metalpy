@@ -210,21 +210,42 @@ def is_numeric_array(obj):
     return True
 
 
-def make_package_notification(pkg_name, reason, install=None):
+def make_package_notification(pkg_name, reason, install=None, extra=None):
+    sentences = [f'{reason}']
+
     if install is None:
         install = f'pip install {pkg_name}'
 
-    return (
-        f'{reason}'
-        f'\nConsider install `{pkg_name}` with following command:'
-        f'\n'
-        f'\n  >>> {install}'
-        f'\n'
-    )
+    if install is not False:
+        sentences.extend([
+            f'Consider install `{pkg_name}` with following command:',
+            f'',
+            f'  >>> {install}',
+            f''
+        ])
+
+    if extra is not None:
+        sentences.append(extra)
+
+    return '\n'.join(sentences)
 
 
-def notify_package(pkg_name, reason, install=None):
-    warnings.warn(make_package_notification(pkg_name, reason, install))
+def notify_package(pkg_name, reason, install=None, extra=None):
+    warnings.warn(make_package_notification(
+        pkg_name,
+        reason,
+        install=install,
+        extra=extra
+    ))
+
+
+def requires_package(pkg_name, reason, install=None, extra=None):
+    raise ModuleNotFoundError(make_package_notification(
+        pkg_name,
+        reason,
+        install=install,
+        extra=extra
+    ))
 
 
 def copy_func(f: T, globals=None, module=None) -> T:
@@ -278,4 +299,4 @@ class CachedProperty(object):
         obj.__dict__[self.func.__name__] = val
 
     def invalidate(self, obj):
-        del obj.__dict__[self.func.__name__]
+        obj.__dict__.pop(self.func.__name__, None)
