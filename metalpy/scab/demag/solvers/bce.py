@@ -1,10 +1,9 @@
 import warnings
-from typing import Iterable
 
 import numpy as np
 import taichi as ti
 
-from metalpy.utils.taichi import ti_kernel, ti_size_dtype
+from metalpy.utils.taichi import ti_kernel
 from metalpy.utils.ti_solvers.solver_progress import SolverProgress
 from metalpy.utils.type import requires_package
 from .demag_solver_context import DemagSolverContext
@@ -60,25 +59,20 @@ class BCESolver(DemagnetizationSolver):
 
         assert context.is_symmetric, f'{BCESolver.__name__} requires symmetric mesh.'
 
-        self._using_torch = False
-        if not self.is_cpu:
-            self._use_torch()
-
         self.base_shape = np.ascontiguousarray(self.shape_cells[::-1])  # 原始网格尺寸倒序
         self.bccb_shape = self.base_shape * 2 - 1  # 完整BCCB参数矩阵尺寸
         self.f_bccb_shape = self.bccb_shape.copy()  # 离散傅里叶变换得到的BCCB特征值矩阵尺寸
         self.f_bccb_shape[-1] = (self.bccb_shape[-1] + 1) // 2  # 由于是实矩阵，因此最后维度一定对称，rfftn可以省略负半轴频率
 
-        # 用于嵌入块循环矩阵并进行傅里叶变换的临时空间
-        self._tmp = self._array(self.bccb_shape)
-        # 用于存储傅里叶变换结果的临时空间
-        self._tmp_complex = self._array(self.f_bccb_shape, dtype=self.complex_kernel_dtype)
+        self._use_torch(not self.is_cpu)
+
+        ops = self.ops
 
         # 默认填充为 inf ，方便 kernel_matrix_forward 识别填充元素并设置为0
         self.Tensor321 = [
-            [self._array(self.f_bccb_shape, fill=np.inf) for _ in range(3)],  # Txx, Txy, Txz
-            [self._array(self.f_bccb_shape, fill=np.inf) for _ in range(2)],  # ---- Tyy, Tyz
-            [self._array(self.f_bccb_shape, fill=np.inf) for _ in range(1)],  # --------- Tzz
+            [ops.array(self.f_bccb_shape, fill=np.inf) for _ in range(3)],  # Txx, Txy, Txz
+            [ops.array(self.f_bccb_shape, fill=np.inf) for _ in range(2)],  # ---- Tyy, Tyz
+            [ops.array(self.f_bccb_shape, fill=np.inf) for _ in range(1)],  # --------- Tzz
         ]
 
     @property
@@ -87,7 +81,7 @@ class BCESolver(DemagnetizationSolver):
 
     @property
     def Tmat6(self):
-        return [self._flatten(t) for t in self.Tensor6]
+        return [self.ops.flatten(t) for t in self.Tensor6]
 
     @property
     def Tensor33(self):
@@ -101,20 +95,32 @@ class BCESolver(DemagnetizationSolver):
     def using_torch(self):
         return self._using_torch
 
-    def _use_torch(self):
-        try:
-            import torch
-            self._using_torch = True
-        except ImportError:
-            requires_package(
-                pkg_name='PyTorch',
-                reason=f"`{BCESolver.__name__}` requires `PyTorch>=2.0` to function properly with Taichi's `CUDA` arch.",
-                install=False,
-                extra=f"Check `https://pytorch.org/get-started/locally/`"
-                      f" for more detailed guide on installing CUDA version of torch,"
-                      f" or try using `{BCESolver.__name__}` under Taichi's `CPU` arch."
-            )
-            self._using_torch = False
+    @property
+    def ops(self):
+        return self._ops
+
+    def _use_torch(self, using_torch):
+        self._using_torch = False
+
+        if using_torch:
+            try:
+                from .bce_ops.torch_ops import TorchOps as Ops
+                self._using_torch = True
+            except ImportError:
+                requires_package(
+                    pkg_name='PyTorch',
+                    reason=f"`{BCESolver.__name__}` requires `PyTorch>=2.0` to function properly with Taichi's `CUDA` arch.",
+                    install=False,
+                    extra=f"Check `https://pytorch.org/get-started/locally/`"
+                          f" for more detailed guide on installing CUDA version of torch,"
+                          f" or try using `{BCESolver.__name__}` under Taichi's `CPU` arch."
+                )
+
+                from .bce_ops.numpy_ops import NumpyOps as Ops
+        else:
+            from .bce_ops.numpy_ops import NumpyOps as Ops
+
+        self._ops = Ops(self.kernel_dtype, self.device, self.bccb_shape, self.f_bccb_shape)
 
     def build_kernel(self, model):
         _init_table(
@@ -133,51 +139,54 @@ class BCESolver(DemagnetizationSolver):
             apply_susc_model=self.is_kernel_built_with_model
         )
 
+        ops = self.ops
         for i, t in enumerate(self.Tensor6):
             # 对称情况下默认使用第一行填充，
             # 其内容为 [t_0, t_{-1}, ..., t_{-n+1}, t_{-n+1}, ..., t_{-1}]
             # 反对称时其内容应为 [t_0, t_1, ..., t_{n-1}, t_{-n+1}, ..., t_{-1}]
             # 在退磁核矩阵中， t_k = -t_{-k}，因此对应维度上的前半部分元素需要取反
             # BCESolver.BlockSkewSymmetric[i] 指定了在每个维度上是否为反对称
-            padded = self._tmp
+            padded = ops.tmp
             _extend_kernel_into_bccb_3d(
                 t, padded, self.base_shape,
                 *BCESolver.BlockSkewSymmetric[i]
             )
 
-            self._rfftn(padded, out=t, real=True)
+            ops.rfftn(padded, out=t, real=True)
 
     def solve(self, magnetization, model):
+        ops = self.ops
+        is_kernel_built_with_model = self.is_kernel_built_with_model
+        use_complete_mesh = self.use_complete_mesh
+
         n_dim = 3
         tol = 1e-6  # TODO: 添加参数支持用户控制求解容差
         maxiter = 5000
-        is_kernel_built_with_model = self.is_kernel_built_with_model
-        use_complete_mesh = self.use_complete_mesh
 
         if use_complete_mesh:
             mask = slice(None)
         else:
-            mask = self._from_array(self.active_cells_mask)
+            mask = ops.from_array(self.active_cells_mask)
 
-        model = self._from_array(model).reshape(-1, 1)
+        model = ops.from_array(model).reshape(-1, 1)
 
-        b = self._from_array(magnetization)
+        b = ops.from_array(magnetization)
         b_2d = b.reshape(-1, n_dim)
 
-        x = self._array_like(b)
+        x = ops.array_like(b)
 
         # Y_x, Y_y, Y_z，用于存储频率域临时结果
         f_y = [
-            self._array(self.f_bccb_shape, dtype=self.complex_kernel_dtype)
+            ops.array(self.f_bccb_shape, dtype=ops.complex_kernel_dtype)
             for _ in range(3)
         ]
 
-        Ap = self._array_like(b, dtype=self.kernel_dtype)
+        Ap = ops.array_like(b, dtype=self.kernel_dtype)
 
-        r = self._copy(b)
+        r = ops.copy(b)
         r_2d = r.reshape(-1, n_dim)
 
-        p_t = self._array(np.r_[self.base_shape, n_dim], dtype=self.kernel_dtype)
+        p_t = ops.array(np.r_[self.base_shape, n_dim], dtype=self.kernel_dtype)
         p_2d_all = p_t.reshape(-1, n_dim)
 
         p_2d_all[mask] = b_2d
@@ -187,11 +196,11 @@ class BCESolver(DemagnetizationSolver):
 
         def update_x():
             # x = x + alpha * p
-            self._iadd(x, p, alpha=alpha)
+            ops.iadd(x, p, alpha=alpha)
 
         def update_r():
             # r = r - alpha * Ap
-            self._iadd(r, Ap, alpha=-alpha)
+            ops.iadd(r, Ap, alpha=-alpha)
 
         def update_p():
             # p = r + beta * p
@@ -246,7 +255,7 @@ class BCESolver(DemagnetizationSolver):
 
         for i in range(maxiter):
             p_2d = extract_p_2d()
-            p = self._flatten(p_2d)
+            p = ops.flatten(p_2d)
 
             adjust_p()
 
@@ -284,145 +293,24 @@ class BCESolver(DemagnetizationSolver):
         return x
 
     @property
-    def complex_kernel_dtype(self):
-        return cast_float_to_complex(self.kernel_dtype)
-
-    @property
     def device(self):
         return cast_taichi_arch_to_torch(self.arch)
 
-    def _from_array(self, arr):
-        if not self.using_torch:
-            return np.asarray(arr)
-        else:
-            import torch
-            return torch.from_numpy(arr).to(self.device)
-
-    def _array(self, shape, dtype=None, fill=0.):
-        if dtype is None:
-            dtype = self.kernel_dtype
-
-        if isinstance(shape, Iterable):
-            shape = tuple(shape)
-        else:
-            shape = (shape,)
-
-        if not self.using_torch:
-            return np.full(shape, fill, dtype=dtype)
-        else:
-            # 当前torch和taichi均支持的架构只有 `cuda` 或 `cpu`
-            import torch
-            return torch.full(
-                shape,
-                fill,
-                dtype=cast_numpy_dtype_to_torch(dtype),
-                device=self.device
-            )
-
-    def _array_like(self, arr, dtype=None):
-        if dtype is None:
-            dtype = arr.dtype
-        return self._array(arr.shape, dtype=dtype)
-
-    def _copy(self, arr):
-        try:
-            return arr.copy()
-        except AttributeError:
-            return arr.clone()
-
-    def _arange(self, size):
-        if not self.using_torch:
-            return np.arange(size, dtype=ti_size_dtype)
-        else:
-            import torch
-            return torch.arange(size, dtype=cast_numpy_dtype_to_torch(ti_size_dtype), device=self.device)
-
-    def _where(self, arr):
-        if not self.using_torch:
-            return np.where(arr)
-        else:
-            import torch
-            return torch.where(arr)
-
-    def _flatten(self, arr):
-        try:
-            return arr.ravel()
-        except AttributeError:
-            return arr.flatten()
-
-    def _rfftn(self, arr, out=None, s=None, real=False, imag=False):
-        if s is not None:
-            s = tuple(s)
-
-        if not self.using_torch:
-            from scipy.fft import rfftn
-            # TODO: 改用in-place fft实现？
-            ret = rfftn(arr, s=s, overwrite_x=True)
-        else:
-            from torch.fft import rfftn
-            rfftn(arr, s=s, out=self._tmp_complex)
-            ret = self._tmp_complex
-
-        if real:
-            ret = ret.real
-
-        if imag:
-            ret = ret.imag
-
-        if out is not None:
-            out[:] = ret
-            return out
-        else:
-            return ret
-
-    def _irfftn(self, arr, out=None, s=None):
-        if s is not None:
-            s = tuple(s)
-
-        if not self.using_torch:
-            from scipy.fft import irfftn
-            ret = irfftn(arr, s=s, overwrite_x=True)
-        else:
-            from torch.fft import irfftn
-            irfftn(arr, s=s, out=self._tmp)
-            ret = self._tmp
-
-        if out is not None:
-            out[:] = ret
-            return out
-        else:
-            return ret
-
-    def _iadd(self, a, b, alpha=1):
-        if not self.using_torch:
-            a[:] += alpha * b
-        else:
-            import torch
-            torch.add(a, b, alpha=alpha, out=a)
-
-    def _reciprocal(self, a):
-        if not self.using_torch:
-            a[:] = 1 / a
-        else:
-            import torch
-            torch.reciprocal(a, out=a)
-
-        return a
-
     def _matvec(self, x, y, tmp, mask):
+        ops = self.ops
         n_dim = 3
 
         for t in tmp:
             t[:] = 0
 
         for i in range(n_dim):
-            f_v = self._rfftn(x[..., i], s=self.bccb_shape)
+            f_v = ops.rfftn(x[..., i], s=self.bccb_shape)
             for j in range(n_dim):
                 tmp[j] += f_v * self.Tensor33[j][i]
 
         indexer = tuple(slice(0, size) for size in self.base_shape)
         for i in range(n_dim):
-            y[i::n_dim] = self._flatten(self._irfftn(tmp[i], s=self.bccb_shape)[indexer])[mask]
+            y[i::n_dim] = ops.flatten(ops.irfftn(tmp[i], s=self.bccb_shape)[indexer])[mask]
 
     def _reduce(self, p, q=None):
         if q is None:
