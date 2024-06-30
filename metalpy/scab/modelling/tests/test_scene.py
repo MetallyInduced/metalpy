@@ -17,14 +17,23 @@ def test_build():
 
     bounds = np.round(scene.bounds)
     ret = [
-        scene.build(cell_size=0.2, bounds=bounds),
-        scene.build(cell_size=[0.2, 0.2, 0.2], bounds=bounds),
-        scene.build(n_cells=13500, bounds=bounds),
-        scene.build(n_cells=[30, 30, 15], bounds=bounds)
+        (scene.build(cell_size=0.2, bounds=bounds), 'cell sizes on all axes (reference)'),
+        (scene.build(cell_size=[0.2, 0.2, 0.2], bounds=bounds), 'cell sizes on each axis'),
+        (scene.build(n_cells=13500, bounds=bounds), 'n total cells'),
+        (scene.build(n_cells=[30, 30, 15], bounds=bounds), 'n cells on each axis')
     ]
-    ref_mesh = ret[0]
+    ref_mesh = ret[0][0]
 
-    for model_mesh in ret[1:]:
-        assert_equal(model_mesh.n_cells, ref_mesh.n_cells)
-        assert_equal(model_mesh.mesh.cell_centers, ref_mesh.mesh.cell_centers)
-        assert_equal(model_mesh.get_active_model(), model_mesh.get_active_model())
+    for model_mesh, mesh_type in ret[1:]:
+        assert_equal(
+            model_mesh.n_cells, ref_mesh.n_cells,
+            f'Mismatched total mesh cells (mesh built with {mesh_type})'
+        )
+        assert_equal(
+            model_mesh.mesh.cell_centers, ref_mesh.mesh.cell_centers,
+            f'Mismatched mesh cell centers (mesh built with {mesh_type})'
+        )
+        assert_equal(
+            model_mesh.get_active_model(), model_mesh.get_active_model(),
+            f'Mismatched mesh model (mesh built with {mesh_type})'
+        )

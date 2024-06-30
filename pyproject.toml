@@ -52,7 +52,7 @@ aero = [
 scab = [
     "metalpy[mepa, mexin, utils]",
     # scientific
-    "SimPEG >= 0.20",
+    "SimPEG >= 0.20, < 0.22",
     "discretize",
     "numpy",
     "pandas",
@@ -74,12 +74,11 @@ scab = [
 complete = [
     "metalpy[mepa, mexin, scab, carto, utils]",
 ]
+build = ['tomli', 'build']
 dev = [
-    "metalpy[complete, tests, docs]",
+    "metalpy[complete, tests, docs, build]",
     "nox",
     "versioningit",
-    "tomli",
-    "build",
 ]
 
 [tool.setuptools.packages.find]

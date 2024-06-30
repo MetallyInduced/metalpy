@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import os.path
+import warnings
 from typing import Any, Union, Iterable, cast, Mapping, TypeVar
 
 import numpy as np
@@ -284,9 +285,9 @@ class Scene(OSMFormat, PTopoFormat, TreeMeshBuilder):
             n_cells = np.ceil(sizes / cell_size).astype(int)
         else:
             if not isinstance(n_cells, Iterable):
-                avg_grids = (n_cells / np.prod(sizes)) ** (1 / 3)
-                n_cells = (avg_grids * sizes).astype(int)
-                cell_size = [1 / avg_grids] * 3
+                avg_cell_width = (np.prod(sizes) / n_cells) ** (1 / 3)
+                n_cells = np.ceil(sizes / avg_cell_width).astype(int)
+                cell_size = [avg_cell_width] * 3
             else:
                 n_cells = np.asarray(n_cells)
                 cell_size = sizes / n_cells

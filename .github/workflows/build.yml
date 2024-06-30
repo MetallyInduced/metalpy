@@ -1,0 +1,48 @@
+name: Build wheel
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'main'
+      - 'dev'
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+          - os: ubuntu-20.04
+
+    env:
+      python_versions: "3.9"
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0  # TODO: fetch到最近的一个tag？
+        fetch-tags: true
+
+    - name: Setup Nox
+      uses: wntrblm/nox@2024.04.15
+      with:
+        python-versions: ${{ env.python_versions }}
+
+    - name: Build Wheel
+      env:
+        NOXFORCEPYTHON: ${{ env.python_versions }}
+      run: nox --noxfile ./buildtools/build.py --sessions build_wheel
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: artifacts-${{ runner.os }}
+        path: ./dist/*
+
+    - name: Test
+      env:
+        NOXFORCEPYTHON: ${{ env.python_versions }}
+      run: nox --noxfile ./buildtools/build.py --sessions test -- ${{ github.ref }}

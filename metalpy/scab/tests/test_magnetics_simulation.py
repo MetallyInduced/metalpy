@@ -60,9 +60,14 @@ def create_simpeg_simulation():
     receiver_list = magnetics.receivers.Point(receiver_points, components=components)
     receiver_list = [receiver_list]
 
-    inducing_field = magnetics.sources.SourceField(
-        receiver_list=receiver_list, parameters=source_field
-    )
+    try:
+        from SimPEG.potential_fields.magnetics.sources import UniformBackgroundField
+        inducing_field = UniformBackgroundField(receiver_list, *source_field)
+    except ImportError:
+        # 适配旧版本SimPEG TODO：更新SimPEG最低版本后移除
+        from SimPEG.potential_fields.magnetics.sources import SourceField
+        inducing_field = SourceField(receiver_list, parameters=source_field)
+
     survey = magnetics.survey.Survey(inducing_field)
     model_map = maps.IdentityMap(nP=nC)
     simulation = magnetics.simulation.Simulation3DIntegral(

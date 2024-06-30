@@ -7,8 +7,8 @@ def get_version():
 
     if __version__ == '__UNSPECIFIED__':
         try:
-            from versioningit import get_version, NotVersioningitError
-            error = NotVersioningitError
+            from versioningit import get_version, NotVersioningitError, NotSdistError, NotVCSError
+            error = NotVersioningitError, NotSdistError, NotVCSError
 
             return get_version(Path(__file__).parent.parent)
         except error:
@@ -23,8 +23,8 @@ def get_version_tuple():
 
     if __version_tuple__ == '__UNSPECIFIED__':
         try:
-            from versioningit import Versioningit, NotVersioningitError
-            error = NotVersioningitError
+            from versioningit import Versioningit, NotVersioningitError, NotVCSError, NotSdistError
+            error = NotVersioningitError, NotVCSError, NotSdistError
 
             version_tuple_str = Versioningit\
                 .from_project_dir(Path(__file__).parent.parent)\
