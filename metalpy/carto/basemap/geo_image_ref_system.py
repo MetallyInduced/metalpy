@@ -59,10 +59,10 @@ class GeoImageRefSystem:
             image_size = np.asarray(image_size)
             offset = np.asarray(offset)
 
-        image_size = image_size.astype(int)
-        offset = offset.astype(int)
+        nx, ny = image_size.astype(np.intp)
+        offset = offset.astype(np.intp)
 
-        return GeoImage(Image.new('RGBA', tuple(image_size)), offset, self)
+        return GeoImage(Image.new('RGBA', (nx, ny)), offset, self)
 
     def map_image(self, image: Image.Image, offset=(0, 0), geo_offset=None):
         from metalpy.carto.basemap.geo_image import GeoImage

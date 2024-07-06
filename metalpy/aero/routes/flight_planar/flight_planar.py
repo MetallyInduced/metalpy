@@ -318,7 +318,8 @@ class FlightPlanar:
 
             fig.canvas.draw()
             size = fig.canvas.get_width_height() * np.asarray(fig.get_dpi()) / 100
-            pics.append(Image.frombuffer("RGB", tuple(size.astype(int)), fig.canvas.tostring_rgb()))
+            nx, ny = size.astype(np.intp)
+            pics.append(Image.frombuffer("RGB", (nx, ny), fig.canvas.tostring_rgb()))
             ax.cla()
             cmap_colors[i] = inactive_color
             alphas[i] = inactive_alpha
@@ -373,7 +374,7 @@ class FlightPlanar:
             pr = ax.scatter(*rows.T, c=colors)
             fig.canvas.draw()
             size = fig.canvas.get_width_height() * np.asarray(fig.get_dpi()) / 100
-            pics.append(Image.frombuffer("RGB", tuple(size.astype(int)), fig.canvas.tostring_rgb()))
+            pics.append(Image.frombuffer("RGB", tuple(size.astype(np.intp)), fig.canvas.tostring_rgb()))
 
             pr.remove()
 
@@ -438,7 +439,7 @@ def plot_arrows(ax, path, n_arrows=None, width=10, cmap=None, **kwargs):
     n_pts = path.shape[0]
     if n_arrows is None:
         n_arrows = min(max(n_pts - 3, 1), 5)
-    arrow_locs = np.linspace(n_pts * 0.02, n_pts * 0.98, n_arrows).astype(int)
+    arrow_locs = np.linspace(n_pts * 0.02, n_pts * 0.98, n_arrows).astype(np.intp)
 
     if cmap is None:
         from matplotlib.colors import ListedColormap

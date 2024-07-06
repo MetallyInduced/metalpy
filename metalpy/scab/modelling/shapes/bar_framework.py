@@ -94,7 +94,7 @@ class BarFramework(Composition):
             # 约定条柱不会超出outline定义的边界
             # 因此从边界条柱的中心开始算，实际的有效空间大小有缩小
             sizes = outline.local_bounds.extent - self.spec
-            self.n_rooms = np.ceil(sizes / room_spec).astype(int)
+            self.n_rooms = np.ceil(sizes / room_spec).astype(np.intp)
         else:
             self.n_rooms = np.copy(n_rooms)
 

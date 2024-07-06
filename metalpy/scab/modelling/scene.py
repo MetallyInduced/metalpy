@@ -282,11 +282,11 @@ class Scene(OSMFormat, PTopoFormat, TreeMeshBuilder):
             if np.ndim(cell_size) == 0:  # array 状态下的int不会被视为 scalar，不能使用np.isscalar
                 cell_size = [cell_size] * 3
             cell_size = np.asarray(cell_size)
-            n_cells = np.ceil(sizes / cell_size).astype(int)
+            n_cells = np.ceil(sizes / cell_size).astype(np.intp)
         else:
             if not isinstance(n_cells, Iterable):
                 avg_cell_width = (np.prod(sizes) / n_cells) ** (1 / 3)
-                n_cells = np.ceil(sizes / avg_cell_width).astype(int)
+                n_cells = np.ceil(sizes / avg_cell_width).astype(np.intp)
                 cell_size = [avg_cell_width] * 3
             else:
                 n_cells = np.asarray(n_cells)

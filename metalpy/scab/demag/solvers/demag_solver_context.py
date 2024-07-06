@@ -141,7 +141,7 @@ class DemagSolverContext:
         if np.isinf(self.cutoff):
             local_shape_cells = self.shape_cells
         else:
-            local_shape_cells = np.ceil(self.cutoff / self.base_cell_sizes).astype(int) + 1
+            local_shape_cells = np.ceil(self.cutoff / self.base_cell_sizes).astype(np.intp) + 1
             local_shape_cells = np.row_stack([local_shape_cells, self.shape_cells]).min(axis=0)
 
         return local_shape_cells

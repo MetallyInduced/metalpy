@@ -164,7 +164,7 @@ class WaybackSource(SimpleTileMapSource):
         if isinstance(region_samples, int):
             assert region_samples > 1, 'Fixed region samples must be larger than 0.'
             if region_samples < len(tiles):
-                sample_indices = np.linspace(0, len(tiles) - 1, region_samples).astype(int)
+                sample_indices = np.linspace(0, len(tiles) - 1, region_samples).astype(np.intp)
                 tiles = [tiles[i] for i in sample_indices]
 
         for col, row in tiles:

@@ -53,8 +53,8 @@ scab = [
     "metalpy[mepa, mexin, utils]",
     # scientific
     "SimPEG >= 0.20, < 0.22",
-    "discretize",
-    "numpy",
+    "discretize >= 0.8.3",
+    "numpy < 2",
     "pandas",
     "scipy",
     "scikit-learn",

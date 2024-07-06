@@ -331,7 +331,7 @@ def _get_seq(dx, nx, xmin, xmax, lx, xs):
         if nx is None:
             if dx is None:
                 break
-            nx = np.ceil(lx / dx).astype(int) + 1
+            nx = np.ceil(lx / dx).astype(np.intp) + 1
 
         xs = np.linspace(xmin, xmax, nx)
         return xs

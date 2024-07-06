@@ -25,7 +25,7 @@ def dhash_tensor_mesh(mesh: TreeMesh, n_samples=10):
 
     n_tree_cells = len(levels)
     n_samples = min(n_samples, n_tree_cells)
-    sample_indices = np.linspace(0, n_tree_cells - 1, n_samples).astype(int)
+    sample_indices = np.linspace(0, n_tree_cells - 1, n_samples).astype(np.intp)
 
     return dhash(
         *origin,

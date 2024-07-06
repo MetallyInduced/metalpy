@@ -154,7 +154,7 @@ def disassemble_n(edges, intersection, pts, splits):
     polys = [[[intersection], pts[sj + 1:], pts[:si + 1]]]
 
     flag, multiplier = 1, 1 if len(edges) % 2 else -1
-    flags = np.logspace(0, n_edges - 1, n_edges, base=multiplier, dtype=int)
+    flags = np.logspace(0, n_edges - 1, n_edges, base=multiplier, dtype=np.intp)
 
     for (i, j), flag in zip(intersecting_edges[1:], flags[1:]):
         if flag == 1:

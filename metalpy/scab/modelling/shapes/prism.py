@@ -161,12 +161,12 @@ class Prism(Shape3D):
                 edges.append(Edge(self.pts[i], self.pts[(i + 1) % n_edges]))
 
             mesh = mesh_cell_centers[:, 0:2]
-            n_intersects = np.zeros(n_possible_grids, dtype=int)
+            n_intersects = np.zeros(n_possible_grids, dtype=np.intp)
 
             idx = 0
             for edge in edges:
                 intercepts = edge.intersects(mesh)
-                n_intersects = n_intersects + intercepts
+                n_intersects[:] += intercepts
 
                 idx += 1
                 if progress and idx % Prism.EdgesPerProgress == 0:
@@ -359,9 +359,9 @@ class Prism(Shape3D):
         indices = np.arange(0, n_vertices, 1).reshape([-1, 2]).T
 
         faces = self.triangulated_cells
-        top_face = np.c_[np.repeat(3, faces.shape[0]), faces * 2].ravel()  # 上顶面
-        bottom_face = np.c_[np.repeat(3, faces.shape[0]), faces * 2 + 1].ravel()  # 下底面
-        edge_counts = np.ones(n_pts, dtype=np.integer) * 4
+        top_face = np.c_[np.full(faces.shape[0], 3), faces * 2].ravel()  # 上顶面
+        bottom_face = np.c_[np.full(faces.shape[0], 3), faces * 2 + 1].ravel()  # 下底面
+        edge_counts = np.full(n_pts, 4)
         side_faces = np.c_[
             edge_counts,
             indices[0], indices[1],
@@ -401,7 +401,7 @@ class Prism(Shape3D):
 
     @property
     def n_tasks(self):
-        return np.ceil(len(self.pts) / Prism.EdgesPerProgress).astype(int)
+        return np.ceil(len(self.pts) / Prism.EdgesPerProgress).astype(np.intp)
 
 
 @ti_lazy_kernel

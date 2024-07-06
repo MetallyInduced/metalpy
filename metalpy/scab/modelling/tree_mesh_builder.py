@@ -386,8 +386,8 @@ class TreeMeshBuilder:
 
 def _check_shape_cells_power_of_2(shape_cells):
     # 检查各个方向上网格数是否为2的幂
-    expanded_cells = np.zeros(2 * len(shape_cells), dtype=int).view(Bounds)
-    cells_required = 1 << np.ceil(np.log2(shape_cells)).astype(int)
+    expanded_cells = np.zeros(2 * len(shape_cells), dtype=np.intp).view(Bounds)
+    cells_required = 1 << np.ceil(np.log2(shape_cells)).astype(np.intp)
     for i, (n, required) in enumerate(zip(shape_cells, cells_required)):
         if n != required:
             warnings.warn(f'Got {n} cells on axis {i}, which is not power of 2.'

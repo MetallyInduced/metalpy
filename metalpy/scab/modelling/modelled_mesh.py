@@ -950,7 +950,7 @@ class ModelledMesh(MeshZFormat):
             cells = []
             for axis in range(ndim):
                 a_exps = ratio.get(axis)
-                a_cells = n_cells.get(axis).astype(int)
+                a_cells = n_cells.get(axis).astype(np.intp)
 
                 old_h_axis = old_h[axis]
 
