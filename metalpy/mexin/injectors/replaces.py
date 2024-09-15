@@ -1,8 +1,8 @@
 from typing import Union
 
 from .recoverable_injector import RecoverableInjector
-from .utils import wrap_method_with_target
 from .replacement import create_replacement, get_ancestor, get_nest
+from .utils import wrap_method_with_target, check_self_parameter
 
 
 class Replaces(RecoverableInjector):
@@ -57,6 +57,10 @@ class Replaces(RecoverableInjector):
 
         if not self.force_unbound:
             wrapper, is_method = wrap_method_with_target(self.nest, wrapper)
+
+            if is_method:
+                check_self_parameter(func)
+
         wrapper = create_replacement(wrapper, orig, self)
         cmd = f'self.nest.{self.name} = wrapper'
         exec(cmd)

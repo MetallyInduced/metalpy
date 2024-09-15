@@ -17,6 +17,17 @@ def wrap_method_with_target(target, func):
     return wrapper, is_target_method
 
 
+def check_self_parameter(func):
+    sig = inspect.signature(func)
+    params = list(sig.parameters.values())
+    if len(params) == 0 or params[0].name not in ('self', 'this', '_'):
+        warnings.warn(f"Wrapping method '{func.__name__}' which does not have 'self/this/_' as the first parameter"
+                      f" and unexpected behavior is likely to happen."
+                      f" It is usually resulted by misusing decorators like @replaces,"
+                      f" but can also happen in some corner cases."
+                      f" Please report if you think it's intended.")
+
+
 def update_params(func, args, kwargs, new_kwargs):
     """使用new_kwargs更新func的args和kwargs
 
